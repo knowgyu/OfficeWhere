@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# PyInstaller
+*.spec.bak
+dist/
+build/
+
+# SQLite
+*.db
+*.db-journal
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+logs/
+
+# Local tooling
+.claude/
+.omc/
+.codex
+
+# Excel temp files
+~$*.xlsx
+~$*.xls
+~$*.docx
+~$*.pptx
+
+# App data
+~/.excel-db/
