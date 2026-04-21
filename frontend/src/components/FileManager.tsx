@@ -1,20 +1,21 @@
-import { useState, useEffect, useRef } from 'react'
-import { api, FileInfo, SchemaResponse } from '../api/client'
+import { useEffect, useState } from 'react'
+
+import { api, FileInfo, FileInspectResponse, SchemaResponse } from '../api/client'
 
 export default function FileManager() {
   const [files, setFiles] = useState<FileInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // 파일 등록 폼
   const [filePath, setFilePath] = useState('')
   const [keyColumn, setKeyColumn] = useState('')
   const [availableColumns, setAvailableColumns] = useState<string[]>([])
   const [suggestedKey, setSuggestedKey] = useState('')
+  const [inspectedFile, setInspectedFile] = useState<FileInspectResponse | null>(null)
+  const [inspecting, setInspecting] = useState(false)
+  const [picking, setPicking] = useState(false)
   const [registering, setRegistering] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // 미리보기 모달
   const [previewFile, setPreviewFile] = useState<FileInfo | null>(null)
   const [schema, setSchema] = useState<SchemaResponse | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
@@ -35,22 +36,59 @@ export default function FileManager() {
     fetchFiles()
   }, [])
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      // 브라우저 환경에서는 전체 경로 접근 불가 - 파일명만 표시하고 경로는 수동 입력 유도
-      setFilePath(file.name)
-      setAvailableColumns([])
-      setKeyColumn('')
-      setSuggestedKey('')
+  const resetInspection = () => {
+    setInspectedFile(null)
+    setAvailableColumns([])
+    setSuggestedKey('')
+    setKeyColumn('')
+  }
+
+  const applyInspection = (info: FileInspectResponse) => {
+    setInspectedFile(info)
+    setFilePath(info.path)
+    setAvailableColumns(info.columns)
+    setSuggestedKey(info.suggested_key_column ?? '')
+    setKeyColumn(info.suggested_key_column ?? info.columns[0] ?? '')
+  }
+
+  const handleInspectPath = async () => {
+    if (!filePath.trim()) {
+      setError('파일 경로를 입력해 주세요.')
+      return
+    }
+
+    setInspecting(true)
+    setError('')
+    try {
+      const res = await api.files.inspect({ path: filePath.trim() })
+      applyInspection(res.data)
+    } catch (e: unknown) {
+      const msg =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        '파일 검사에 실패했습니다.'
+      setError(msg)
+      resetInspection()
+    } finally {
+      setInspecting(false)
     }
   }
 
-  const handlePathBlur = async () => {
-    if (!filePath.trim()) return
-    // 경로로 컬럼 미리 조회 시도 (임시 등록 없이)
-    // 실제로는 백엔드에 schema 조회 API가 파일 ID 기반이라
-    // 여기서는 등록 후 schema를 가져오는 방식으로 처리
+  const handlePickFile = async () => {
+    setPicking(true)
+    setError('')
+    try {
+      const res = await api.files.pick()
+      if (!res.data.cancelled && res.data.file) {
+        applyInspection(res.data.file)
+      }
+    } catch (e: unknown) {
+      const msg =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        '파일 선택창을 열지 못했습니다.'
+      setError(msg)
+    } finally {
+      setPicking(false)
+    }
   }
 
   const handleRegister = async () => {
@@ -62,15 +100,13 @@ export default function FileManager() {
       setError('key 컬럼을 입력해 주세요.')
       return
     }
+
     setRegistering(true)
     setError('')
     try {
       await api.files.register({ path: filePath.trim(), key_column: keyColumn.trim() })
       setFilePath('')
-      setKeyColumn('')
-      setAvailableColumns([])
-      setSuggestedKey('')
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      resetInspection()
       await fetchFiles()
     } catch (e: unknown) {
       const msg =
@@ -113,7 +149,7 @@ export default function FileManager() {
       setSuggestedKey(res.data.suggested_key_column)
       setKeyColumn(res.data.suggested_key_column)
     } catch {
-      // 무시
+      setError('추천 key 컬럼을 불러오지 못했습니다.')
     }
   }
 
@@ -121,33 +157,38 @@ export default function FileManager() {
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-gray-800">파일 관리</h2>
 
-      {/* 파일 등록 폼 */}
       <div className="bg-white border border-gray-200 rounded-lg p-5">
         <h3 className="text-sm font-medium text-gray-700 mb-4">파일 등록</h3>
         <div className="space-y-3">
-          {/* 파일 경로 입력 */}
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="파일 경로 입력 (예: C:\Users\...\data.xlsx)"
+              placeholder="파일 경로 입력 또는 파일 찾기 사용"
               value={filePath}
-              onChange={(e) => setFilePath(e.target.value)}
-              onBlur={handlePathBlur}
+              onChange={(e) => {
+                setFilePath(e.target.value)
+                if (inspectedFile && e.target.value !== inspectedFile.path) {
+                  resetInspection()
+                }
+              }}
               className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            <label className="px-3 py-2 bg-gray-100 border border-gray-300 rounded text-sm cursor-pointer hover:bg-gray-200 whitespace-nowrap">
-              파일 선택
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.docx,.pptx"
-                className="hidden"
-                onChange={handleFileSelect}
-              />
-            </label>
+            <button
+              onClick={handleInspectPath}
+              disabled={inspecting}
+              className="px-3 py-2 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
+            >
+              {inspecting ? '검사 중...' : '경로 검사'}
+            </button>
+            <button
+              onClick={handlePickFile}
+              disabled={picking}
+              className="px-3 py-2 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
+            >
+              {picking ? '여는 중...' : '파일 찾기'}
+            </button>
           </div>
 
-          {/* key 컬럼 입력 */}
           <div className="flex gap-2">
             {availableColumns.length > 0 ? (
               <select
@@ -181,12 +222,64 @@ export default function FileManager() {
           </div>
 
           <p className="text-xs text-gray-400">
-            지원 형식: .xlsx, .xls, .docx, .pptx
+            지원 형식: .xlsx, .xls, .docx, .pptx. 파일 경로는 직접 입력하거나 백엔드가 여는 파일 선택창으로 가져옵니다.
           </p>
+
+          {inspectedFile && (
+            <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 space-y-3">
+              <div className="text-sm text-blue-900">
+                <p className="font-medium">{inspectedFile.name}</p>
+                <p className="text-xs text-blue-700 mt-1">{inspectedFile.path}</p>
+              </div>
+              <p className="text-xs text-blue-800">
+                형식: {inspectedFile.file_type} · 컬럼 {inspectedFile.columns.length}개
+                {suggestedKey && ` · 추천 key: ${suggestedKey}`}
+              </p>
+              <div className="overflow-x-auto border border-blue-100 rounded bg-white">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-blue-50">
+                    <tr>
+                      {inspectedFile.columns.map((col) => (
+                        <th
+                          key={col}
+                          className={`px-3 py-2 text-left font-medium whitespace-nowrap ${
+                            col === keyColumn ? 'text-blue-700' : 'text-gray-600'
+                          }`}
+                        >
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-blue-50">
+                    {inspectedFile.sample.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={inspectedFile.columns.length}
+                          className="px-3 py-4 text-center text-gray-400"
+                        >
+                          표시할 샘플 행이 없습니다.
+                        </td>
+                      </tr>
+                    ) : (
+                      inspectedFile.sample.map((row, ri) => (
+                        <tr key={ri}>
+                          {row.map((cell, ci) => (
+                            <td key={ci} className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 에러 메시지 */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded">
           {error}
@@ -196,14 +289,10 @@ export default function FileManager() {
         </div>
       )}
 
-      {/* 파일 목록 */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-sm font-medium text-gray-700">등록된 파일 ({files.length})</h3>
-          <button
-            onClick={fetchFiles}
-            className="text-xs text-gray-500 hover:text-gray-700"
-          >
+          <button onClick={fetchFiles} className="text-xs text-gray-500 hover:text-gray-700">
             새로고침
           </button>
         </div>
@@ -227,28 +316,28 @@ export default function FileManager() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {files.map((f) => (
+              {files.map((file) => (
                 <tr
-                  key={f.id}
+                  key={file.id}
                   className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => handlePreview(f)}
+                  onClick={() => handlePreview(file)}
                 >
                   <td className="px-4 py-2.5 text-blue-600 hover:underline font-medium">
-                    {f.name}
+                    {file.name}
                   </td>
                   <td className="px-4 py-2.5 text-gray-500">
-                    <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">{f.file_type}</span>
+                    <span className="px-2 py-0.5 bg-gray-100 rounded text-xs">{file.file_type}</span>
                   </td>
-                  <td className="px-4 py-2.5 text-gray-700">{f.key_column}</td>
-                  <td className="px-4 py-2.5 text-gray-500">{f.column_count}</td>
+                  <td className="px-4 py-2.5 text-gray-700">{file.key_column}</td>
+                  <td className="px-4 py-2.5 text-gray-500">{file.column_count}</td>
                   <td className="px-4 py-2.5 text-gray-400 text-xs">
-                    {f.created_at ? f.created_at.replace('T', ' ').slice(0, 19) : '-'}
+                    {file.created_at ? file.created_at.replace('T', ' ').slice(0, 19) : '-'}
                   </td>
                   <td className="px-4 py-2.5">
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleDelete(f.id, f.name)
+                        handleDelete(file.id, file.name)
                       }}
                       className="text-red-500 hover:text-red-700 text-xs px-2 py-1 border border-red-200 rounded hover:bg-red-50"
                     >
@@ -262,7 +351,6 @@ export default function FileManager() {
         )}
       </div>
 
-      {/* 미리보기 모달 */}
       {previewFile && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
@@ -291,13 +379,11 @@ export default function FileManager() {
                     <table className="min-w-full text-xs">
                       <thead className="bg-gray-50">
                         <tr>
-                          {schema.columns.map((col, i) => (
+                          {schema.columns.map((col) => (
                             <th
-                              key={i}
+                              key={col}
                               className={`px-3 py-2 text-left font-medium whitespace-nowrap ${
-                                col === previewFile.key_column
-                                  ? 'text-blue-600 bg-blue-50'
-                                  : 'text-gray-600'
+                                col === previewFile.key_column ? 'text-blue-600 bg-blue-50' : 'text-gray-600'
                               }`}
                             >
                               {col}

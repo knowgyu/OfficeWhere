@@ -1,14 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-# excel-db PyInstaller spec 파일
+# office-data-joiner PyInstaller spec 파일
 # --onedir 방식 사용 (onefile은 바이러스 오진 이슈 있음)
 
 import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
 # frontend/dist 경로
 frontend_dist = str(Path('frontend') / 'dist')
+backend_modules = collect_submodules('backend')
 
 a = Analysis(
     ['launcher.py'],
@@ -17,7 +19,7 @@ a = Analysis(
     datas=[
         (frontend_dist, 'frontend/dist'),
     ],
-    hiddenimports=[
+    hiddenimports=backend_modules + [
         'uvicorn.logging',
         'uvicorn.loops',
         'uvicorn.loops.auto',
@@ -35,7 +37,6 @@ a = Analysis(
         'pandas._libs.tslibs.timedeltas',
         'pandas._libs.tslibs.np_datetime',
         'pandas._libs.tslibs.nattype',
-        'pandas._libs.skiplist',
         'openpyxl',
         'openpyxl.cell._writer',
         'rapidfuzz',
@@ -46,7 +47,6 @@ a = Analysis(
         'fastapi',
         'starlette',
         'pydantic',
-        'email_validator',
         'anyio',
         'anyio._backends._asyncio',
         'anyio._backends._trio',
@@ -68,7 +68,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='excel-db',
+    name='office-data-joiner',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -88,5 +88,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='excel-db',
+    name='office-data-joiner',
 )

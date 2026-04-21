@@ -53,4 +53,4 @@ logs/
 ~$*.pptx
 
 # App data
-~/.excel-db/
+~/.office-data-joiner/

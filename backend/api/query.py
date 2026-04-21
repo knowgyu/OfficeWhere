@@ -11,10 +11,23 @@ from ..core.joiner import join_files
 router = APIRouter(prefix="/api/query", tags=["query"])
 
 
+def order_join_files(files, base_file_id: int | None):
+    if base_file_id is None:
+        return list(files)
+    return sorted(files, key=lambda item: 0 if item.file_id == base_file_id else 1)
+
+
 def _build_file_specs(req: JoinRequest):
     """JoinRequest에서 file_specs 리스트 생성"""
+    selected_ids = [fs.file_id for fs in req.files]
+    if req.join_type == "left":
+        if req.base_file_id is None:
+            raise HTTPException(status_code=400, detail="LEFT JOIN 기준 파일을 선택해 주세요.")
+        if req.base_file_id not in selected_ids:
+            raise HTTPException(status_code=400, detail="LEFT JOIN 기준 파일이 선택 목록에 없습니다.")
+
     file_specs = []
-    for fs in req.files:
+    for fs in order_join_files(req.files, req.base_file_id):
         file_row = get_file_by_id(fs.file_id)
         if not file_row:
             raise HTTPException(

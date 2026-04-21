@@ -1,5 +1,5 @@
 """
-excel-db launcher
+office-data-joiner launcher
 .exe 진입점: uvicorn 서버를 별도 스레드에서 시작하고 브라우저를 자동으로 엽니다.
 """
 import sys
@@ -38,11 +38,11 @@ def run_server():
 def main():
     # 이미 실행 중인지 확인
     if is_port_in_use(PORT):
-        print(f"[excel-db] 이미 실행 중입니다. 브라우저를 엽니다: {URL}")
+        print(f"[office-data-joiner] 이미 실행 중입니다. 브라우저를 엽니다: {URL}")
         webbrowser.open(URL)
         return
 
-    print(f"[excel-db] 서버를 시작합니다... (포트: {PORT})")
+    print(f"[office-data-joiner] 서버를 시작합니다... (포트: {PORT})")
 
     # 서버를 별도 데몬 스레드에서 실행
     server_thread = threading.Thread(target=run_server, daemon=True)
@@ -54,19 +54,19 @@ def main():
         if is_port_in_use(PORT):
             break
     else:
-        print("[excel-db] 서버 시작에 실패했습니다.")
+        print("[office-data-joiner] 서버 시작에 실패했습니다.")
         sys.exit(1)
 
     # 추가 대기 후 브라우저 오픈
     time.sleep(1.0)
-    print(f"[excel-db] 브라우저를 엽니다: {URL}")
+    print(f"[office-data-joiner] 브라우저를 엽니다: {URL}")
     webbrowser.open(URL)
 
     # 메인 스레드는 서버 스레드가 종료될 때까지 대기
     try:
         server_thread.join()
     except KeyboardInterrupt:
-        print("\n[excel-db] 서버를 종료합니다.")
+        print("\n[office-data-joiner] 서버를 종료합니다.")
 
 
 if __name__ == "__main__":

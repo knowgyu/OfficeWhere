@@ -1,4 +1,4 @@
-# excel-db 프로젝트 계획서
+# Office Data Joiner 프로젝트 계획서
 
 ## 프로젝트 개요
 
@@ -86,7 +86,7 @@
 | 데이터 처리 | pandas, openpyxl, xlrd |
 | 문서 파싱 | python-docx, python-pptx |
 | 유사도 매칭 | rapidfuzz |
-| 데이터 저장 | SQLite (`~/.excel-db/data.db`) |
+| 데이터 저장 | SQLite (`~/.office-data-joiner/data.db`) |
 | 프론트엔드 | React 18, TypeScript, Vite, Tailwind CSS |
 | 패키징 | PyInstaller (--onedir, Windows .exe) |
 | 포트 | 8765 (충돌 최소화) |
@@ -121,7 +121,7 @@
 
 ### Phase 3: 패키징 및 배포
 - [ ] `launcher.py` — 서버 시작 + 브라우저 자동 오픈
-- [ ] `excel_db.spec` — PyInstaller spec (frontend/dist 포함)
+- [ ] `office_data_joiner.spec` — PyInstaller spec (frontend/dist 포함)
 - [ ] `setup.bat` / `setup.sh` — venv + pip install
 - [ ] `build.bat` / `build.sh` — 프론트엔드 빌드 + PyInstaller
 - [ ] `.gitignore` 작성

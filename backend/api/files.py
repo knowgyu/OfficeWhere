@@ -7,13 +7,55 @@ from ..models.schemas import (
     FileRegisterRequest,
     FileRegisterResponse,
     FileInfo,
+    FileInspectRequest,
+    FileInspectResponse,
+    FilePickResponse,
     SchemaResponse,
 )
 from ..database import register_file, get_all_files, get_file_by_id, delete_file
-from ..core.parser import parse_file, get_file_schema, get_file_type, SUPPORTED_EXTENSIONS
+from ..core.file_access import inspect_file_path, pick_local_file
+from ..core.parser import get_file_schema, SUPPORTED_EXTENSIONS
 from ..core.normalizer import suggest_key_column
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+
+@router.post("/inspect", response_model=FileInspectResponse)
+def inspect_file(req: FileInspectRequest):
+    """경로 기준으로 파일 스키마와 추천 key 컬럼을 조회"""
+    try:
+        info = inspect_file_path(req.path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"파일 검사 실패: {e}")
+
+    return FileInspectResponse(**info)
+
+
+@router.post("/pick", response_model=FilePickResponse)
+def pick_file():
+    """호스트 OS 파일 선택창을 열고 선택된 파일을 검사"""
+    try:
+        path = pick_local_file()
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if not path:
+        return FilePickResponse(cancelled=True, file=None)
+
+    try:
+        info = inspect_file_path(path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"파일 검사 실패: {e}")
+
+    return FilePickResponse(cancelled=False, file=FileInspectResponse(**info))
 
 
 @router.post("", response_model=FileRegisterResponse)
@@ -31,13 +73,16 @@ def register(req: FileRegisterRequest):
         )
 
     try:
-        schema = get_file_schema(path)
+        inspected = inspect_file_path(path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {e}")
 
-    columns = schema["columns"]
+    columns = inspected["columns"]
     if req.key_column not in columns:
-        # key 컬럼 자동 추천
         suggested = suggest_key_column(columns)
         raise HTTPException(
             status_code=400,
@@ -48,17 +93,15 @@ def register(req: FileRegisterRequest):
             ),
         )
 
-    name = Path(path).name
-    file_type = get_file_type(path)
     file_id = register_file(
         path=path,
-        name=name,
-        file_type=file_type,
+        name=inspected["name"],
+        file_type=inspected["file_type"],
         key_column=req.key_column,
         column_count=len(columns),
     )
 
-    return FileRegisterResponse(id=file_id, name=name, columns=columns)
+    return FileRegisterResponse(id=file_id, name=inspected["name"], columns=columns)
 
 
 @router.get("", response_model=List[FileInfo])

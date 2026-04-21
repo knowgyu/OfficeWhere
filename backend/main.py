@@ -10,7 +10,7 @@ from .api.files import router as files_router
 from .api.query import router as query_router
 from .api.check import router as check_router
 
-app = FastAPI(title="excel-db", version="0.1.0")
+app = FastAPI(title="office-data-joiner", version="0.1.0")
 
 # CORS 설정 (개발 시 localhost:5173 허용)
 app.add_middleware(

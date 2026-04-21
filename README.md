@@ -1,4 +1,4 @@
-# excel-db
+# Office Data Joiner
 
 Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도구입니다.  
 여러 파일에 공통 key 컬럼(예: "과제명")이 있을 때 JOIN, 정합성 검사를 수행합니다.
@@ -53,7 +53,7 @@ python -m uvicorn backend.main:app --port 8765 --reload
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -76,7 +76,7 @@ chmod +x build.sh
 ./build.sh
 ```
 
-빌드 결과물: `dist/excel-db/excel-db.exe` (Windows) 또는 `dist/excel-db/excel-db` (macOS/Linux)
+빌드 결과물: `dist/office-data-joiner/office-data-joiner.exe` (Windows) 또는 `dist/office-data-joiner/office-data-joiner` (macOS/Linux)
 
 > **참고**: 빌드 전 `setup.bat` / `setup.sh`로 가상환경을 먼저 구성해야 합니다.  
 > 프론트엔드 빌드(`frontend/dist`)도 자동으로 포함됩니다.
@@ -87,7 +87,8 @@ chmod +x build.sh
 
 ### 파일 관리
 
-- **파일 등록**: 파일 경로와 key 컬럼명을 입력하여 등록합니다.
+- **파일 등록**: 파일 경로를 직접 입력하거나, 백엔드가 여는 **OS 파일 선택창**으로 실제 파일 경로를 가져와 등록합니다.
+  - 등록 전 컬럼 목록, 샘플 데이터, 추천 key 컬럼을 먼저 확인할 수 있습니다.
   - key 컬럼 자동 추천: 컬럼명에 `과제`, `id`, `번호`, `name` 등 포함 시 우선 추천
 - **파일 목록**: 등록된 파일의 이름, 형식, key 컬럼, 컬럼 수 확인
 - **미리보기**: 파일 행 클릭 시 컬럼 목록 + 샘플 데이터(최대 5행) 모달 표시
@@ -97,7 +98,7 @@ chmod +x build.sh
 
 - 파일 체크박스로 JOIN 대상 선택
 - 각 파일에서 가져올 컬럼 선택 (key 컬럼은 자동 포함)
-- JOIN 방식 선택: `OUTER` (전체) / `LEFT` (첫 번째 파일 기준) / `INNER` (교집합)
+- JOIN 방식 선택: `OUTER` (전체) / `LEFT` (사용자가 선택한 기준 파일) / `INNER` (교집합)
 - **미리보기**: 결과 테이블 표시 (정렬, 검색, 페이지네이션 지원)
 - **Excel 다운로드**: 결과를 `.xlsx`로 저장
 
@@ -105,10 +106,21 @@ chmod +x build.sh
 
 - 2개 이상 파일 선택 후 "검사 실행"
 - key 정규화 후 동일 key에 대해 유사 컬럼명 그룹별 값 비교
+- duplicate key 규칙:
+  - 같은 파일에서 동일 normalized key가 여러 행으로 존재해도, 같은 column group의 값 집합이 동일하면 허용합니다.
+  - 같은 파일 안에서 값 집합이 갈라지면 `conflict`로 처리합니다.
 - 결과:
   - **conflict** (빨강): 값이 서로 다름
-  - **warning** (노랑): 값이 유사하지만 완전히 동일하지 않음
+  - **warning** (노랑): 값이 비어 있거나, 유사하지만 완전히 동일하지 않음
 - 원본 key 변형 값도 함께 표시
+
+### 검증
+
+```bash
+source venv/bin/activate
+pytest
+cd frontend && npm run build
+```
 
 ---
 
@@ -119,7 +131,7 @@ chmod +x build.sh
 | 백엔드 | Python 3.10+, FastAPI, uvicorn |
 | 데이터 처리 | pandas, openpyxl, xlrd, python-docx, python-pptx |
 | 유사도 매칭 | rapidfuzz (threshold: 85) |
-| 데이터베이스 | SQLite (`~/.excel-db/data.db`) |
+| 데이터베이스 | SQLite (`~/.office-data-joiner/data.db`) |
 | 프론트엔드 | React 18, TypeScript, Vite, Tailwind CSS |
 | HTTP 클라이언트 | axios |
 | 패키징 | PyInstaller (--onedir) |

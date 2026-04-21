@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 > nul
-echo [excel-db] 프론트엔드 빌드 중...
+echo [office-data-joiner] 프론트엔드 빌드 중...
 
 where node >nul 2>&1
 if %errorlevel% neq 0 (
@@ -10,9 +10,9 @@ if %errorlevel% neq 0 (
 )
 
 cd frontend
-call npm install
+call npm ci
 if %errorlevel% neq 0 (
-    echo [오류] npm install 실패
+    echo [오류] npm ci 실패
     pause
     exit /b 1
 )
@@ -25,7 +25,7 @@ if %errorlevel% neq 0 (
 )
 cd ..
 
-echo [excel-db] PyInstaller 패키징 중...
+echo [office-data-joiner] PyInstaller 패키징 중...
 
 call venv\Scripts\activate
 if %errorlevel% neq 0 (
@@ -34,7 +34,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-pyinstaller excel_db.spec --clean
+python -m PyInstaller office_data_joiner.spec --clean
 if %errorlevel% neq 0 (
     echo [오류] PyInstaller 패키징 실패
     pause
@@ -42,6 +42,6 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [완료] dist\excel-db\ 폴더에 실행파일이 생성되었습니다.
-echo 실행: dist\excel-db\excel-db.exe
+echo [완료] dist\office-data-joiner\ 폴더에 실행파일이 생성되었습니다.
+echo 실행: dist\office-data-joiner\office-data-joiner.exe
 pause

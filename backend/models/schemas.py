@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 from typing import Optional, List, Any
-from datetime import datetime
 
 
 class FileRegisterRequest(BaseModel):
@@ -29,6 +28,24 @@ class SchemaResponse(BaseModel):
     sample: List[List[Any]]
 
 
+class FileInspectRequest(BaseModel):
+    path: str
+
+
+class FileInspectResponse(BaseModel):
+    path: str
+    name: str
+    file_type: str
+    columns: List[str]
+    sample: List[List[Any]]
+    suggested_key_column: Optional[str] = None
+
+
+class FilePickResponse(BaseModel):
+    cancelled: bool
+    file: Optional[FileInspectResponse] = None
+
+
 class JoinFileSpec(BaseModel):
     file_id: int
     columns: List[str]
@@ -37,6 +54,7 @@ class JoinFileSpec(BaseModel):
 class JoinRequest(BaseModel):
     files: List[JoinFileSpec]
     join_type: str = "outer"  # left | outer | inner
+    base_file_id: Optional[int] = None
 
 
 class JoinResponse(BaseModel):
@@ -52,8 +70,9 @@ class CheckRequest(BaseModel):
 class ConflictEntry(BaseModel):
     file_id: int
     file_name: str
-    column: str
-    value: Any
+    columns: List[str]
+    values: List[Any]
+    row_count: int
 
 
 class CheckIssue(BaseModel):

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 
-DB_DIR = Path.home() / ".excel-db"
+DB_DIR = Path.home() / ".office-data-joiner"
 DB_PATH = DB_DIR / "data.db"
 
 

@@ -18,7 +18,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <h1 className="text-xl font-bold text-gray-800">excel-db</h1>
+        <h1 className="text-xl font-bold text-gray-800">Office Data Joiner</h1>
         <p className="text-sm text-gray-500 mt-0.5">
           Excel / Word / PPT 파일을 DB처럼 관리하는 도구
         </p>

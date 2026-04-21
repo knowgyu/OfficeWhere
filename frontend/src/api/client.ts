@@ -17,6 +17,24 @@ export interface SchemaResponse {
   sample: string[][]
 }
 
+export interface FileInspectRequest {
+  path: string
+}
+
+export interface FileInspectResponse {
+  path: string
+  name: string
+  file_type: string
+  columns: string[]
+  sample: string[][]
+  suggested_key_column?: string
+}
+
+export interface FilePickResponse {
+  cancelled: boolean
+  file: FileInspectResponse | null
+}
+
 export interface FileRegisterRequest {
   path: string
   key_column: string
@@ -36,6 +54,7 @@ export interface JoinFileSpec {
 export interface JoinRequest {
   files: JoinFileSpec[]
   join_type: 'left' | 'outer' | 'inner'
+  base_file_id?: number
 }
 
 export interface JoinResponse {
@@ -51,8 +70,9 @@ export interface CheckRequest {
 export interface ConflictEntry {
   file_id: number
   file_name: string
-  column: string
-  value: string
+  columns: string[]
+  values: string[]
+  row_count: number
 }
 
 export interface CheckIssue {
@@ -72,6 +92,9 @@ export interface CheckResponse {
 export const api = {
   files: {
     list: () => axios.get<FileInfo[]>(`${BASE}/api/files`),
+    inspect: (data: FileInspectRequest) =>
+      axios.post<FileInspectResponse>(`${BASE}/api/files/inspect`, data),
+    pick: () => axios.post<FilePickResponse>(`${BASE}/api/files/pick`),
     register: (data: FileRegisterRequest) =>
       axios.post<FileRegisterResponse>(`${BASE}/api/files`, data),
     delete: (id: number) => axios.delete(`${BASE}/api/files/${id}`),

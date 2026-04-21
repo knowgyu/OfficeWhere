@@ -1,7 +1,52 @@
-from typing import List, Dict, Any
+from itertools import combinations
+from typing import Any, Dict, List
+
 import pandas as pd
+
+from .normalizer import are_keys_similar, group_similar_columns, normalize_key
 from .parser import parse_file
-from .normalizer import normalize_key, are_keys_similar, are_columns_similar, group_similar_columns
+
+
+def _extract_distinct_values(rows: pd.DataFrame, columns: List[str]) -> List[str]:
+    values: List[str] = []
+    for col in columns:
+        for raw_value in rows[col].tolist():
+            if pd.isna(raw_value):
+                continue
+            text = str(raw_value).strip()
+            if text:
+                values.append(text)
+    return sorted(set(values))
+
+
+def _classify_issue(conflicts: List[Dict[str, Any]]) -> str | None:
+    non_empty = [item for item in conflicts if item["values"]]
+    if not non_empty:
+        return None
+
+    normalized_sets = [
+        tuple(normalize_key(value) for value in conflict["values"])
+        for conflict in conflicts
+    ]
+    non_empty_sets = [value_set for value_set in normalized_sets if value_set]
+    unique_non_empty_sets = set(non_empty_sets)
+
+    # Duplicate key rows inside a single file are allowed only when
+    # they resolve to the same distinct value set for the compared column group.
+    if any(len(value_set) > 1 for value_set in normalized_sets):
+        return "conflict"
+
+    if len(unique_non_empty_sets) == 1:
+        if len(non_empty) == len(conflicts):
+            return None
+        return "warning"
+
+    singleton_values = [item["values"][0] for item in non_empty if len(item["values"]) == 1]
+    if len(singleton_values) == len(non_empty):
+        if all(are_keys_similar(a, b) for a, b in combinations(singleton_values, 2)):
+            return "warning"
+
+    return "conflict"
 
 
 def run_consistency_check(
@@ -10,21 +55,14 @@ def run_consistency_check(
     """
     정합성 검사 수행.
 
-    file_infos 형식:
-    [
-        {
-            "id": 1,
-            "path": "/path/to/file.xlsx",
-            "name": "A.xlsx",
-            "key_column": "과제명"
-        },
-        ...
-    ]
+    duplicate key 규칙:
+    - 같은 파일 안에서 동일 normalized key가 여러 행으로 나타날 수 있다.
+    - 같은 column group 안의 값 집합이 동일하면 허용한다.
+    - 값 집합이 여러 개로 갈리면 해당 파일 내부에서도 conflict로 본다.
     """
     if len(file_infos) < 2:
         raise ValueError("정합성 검사는 최소 2개 파일이 필요합니다.")
 
-    # 각 파일 파싱
     file_dfs: List[Dict[str, Any]] = []
     for info in file_infos:
         df = parse_file(info["path"])
@@ -40,23 +78,14 @@ def run_consistency_check(
             "df": df,
         })
 
-    # 모든 key 수집 (파일별)
-    all_keys_by_file: List[List[str]] = []
+    all_raw_keys: List[str] = []
     for fd in file_dfs:
-        keys = fd["df"][fd["key_column"]].astype(str).tolist()
-        all_keys_by_file.append(keys)
-
-    # 전체 unique key 정규화 및 그룹화
-    all_raw_keys = []
-    for keys in all_keys_by_file:
-        all_raw_keys.extend(keys)
+        all_raw_keys.extend(fd["df"][fd["key_column"]].astype(str).tolist())
     all_raw_keys = list(set(all_raw_keys))
 
-    # key 클러스터링: 정규화된 key 기준으로 그룹화
-    key_clusters: Dict[str, List[str]] = {}  # normalized_key -> [raw variants]
+    key_clusters: Dict[str, List[str]] = {}
     for raw_key in all_raw_keys:
         norm = normalize_key(raw_key)
-        # 기존 클러스터 중 유사한 것 찾기
         matched_cluster = None
         for existing_norm in list(key_clusters.keys()):
             if are_keys_similar(norm, existing_norm):
@@ -69,23 +98,15 @@ def run_consistency_check(
             key_clusters[norm] = [raw_key]
 
     total_keys = len(key_clusters)
-    matched_keys = 0  # 모든 파일에 존재하는 key 수
+    matched_keys = 0
 
-    # 모든 컬럼명 수집 (파일 전체)
-    all_columns_with_source: List[Dict[str, str]] = []
-    for fd in file_dfs:
-        for col in fd["df"].columns:
-            if col != fd["key_column"]:
-                all_columns_with_source.append({
-                    "col": col,
-                    "file_id": fd["id"],
-                    "file_name": fd["name"],
-                })
-
-    # 유사 컬럼 그룹 생성
-    unique_cols = list(set(item["col"] for item in all_columns_with_source))
+    unique_cols = list({
+        col
+        for fd in file_dfs
+        for col in fd["df"].columns
+        if col != fd["key_column"]
+    })
     col_groups = group_similar_columns(unique_cols)
-    # col -> group representative 매핑
     col_to_group: Dict[str, str] = {}
     for group in col_groups:
         rep = group[0]
@@ -95,21 +116,20 @@ def run_consistency_check(
     issues = []
 
     for norm_key, variants in key_clusters.items():
-        # 이 key가 존재하는 파일 수 체크
         files_with_key = []
         for fd in file_dfs:
-            raw_keys_in_file = fd["df"][fd["key_column"]].astype(str).tolist()
-            norm_keys_in_file = [normalize_key(k) for k in raw_keys_in_file]
-            matching_raws = [
-                raw_keys_in_file[i]
-                for i, nk in enumerate(norm_keys_in_file)
-                if are_keys_similar(nk, norm_key)
-            ]
-            if matching_raws:
-                files_with_key.append({
-                    "fd": fd,
-                    "matching_raw": matching_raws[0],
-                })
+            df = fd["df"]
+            key_col = fd["key_column"]
+            mask = df[key_col].astype(str).apply(normalize_key).apply(
+                lambda nk: are_keys_similar(nk, norm_key)
+            )
+            matched_rows = df[mask]
+            if matched_rows.empty:
+                continue
+            files_with_key.append({
+                "fd": fd,
+                "rows": matched_rows,
+            })
 
         if len(files_with_key) == len(file_dfs):
             matched_keys += 1
@@ -117,80 +137,34 @@ def run_consistency_check(
         if len(files_with_key) < 2:
             continue
 
-        # 유사 컬럼 그룹별로 값 비교
-        checked_groups: Dict[str, bool] = {}
-
-        for item in files_with_key:
-            fd = item["fd"]
-            raw_key = item["matching_raw"]
-            df = fd["df"]
-            key_col = fd["key_column"]
-
-            # 해당 key의 행 추출 (첫 번째 매칭 행)
-            mask = df[key_col].astype(str).apply(normalize_key).apply(
-                lambda nk: are_keys_similar(nk, norm_key)
-            )
-            matched_rows = df[mask]
-            if matched_rows.empty:
-                continue
-
-            row = matched_rows.iloc[0]
-
-            for col in df.columns:
-                if col == key_col:
-                    continue
-                group_rep = col_to_group.get(col, col)
-                if group_rep in checked_groups:
-                    continue
-
-            # 그룹별로 충돌 수집
         group_conflicts: Dict[str, List[Dict[str, Any]]] = {}
         for item in files_with_key:
             fd = item["fd"]
-            raw_key = item["matching_raw"]
-            df = fd["df"]
+            rows = item["rows"]
             key_col = fd["key_column"]
 
-            mask = df[key_col].astype(str).apply(normalize_key).apply(
-                lambda nk: are_keys_similar(nk, norm_key)
-            )
-            matched_rows = df[mask]
-            if matched_rows.empty:
-                continue
-            row = matched_rows.iloc[0]
-
-            for col in df.columns:
+            grouped_columns: Dict[str, List[str]] = {}
+            for col in rows.columns:
                 if col == key_col:
                     continue
                 group_rep = col_to_group.get(col, col)
-                if group_rep not in group_conflicts:
-                    group_conflicts[group_rep] = []
-                group_conflicts[group_rep].append({
+                grouped_columns.setdefault(group_rep, []).append(col)
+
+            for group_rep, columns in grouped_columns.items():
+                group_conflicts.setdefault(group_rep, []).append({
                     "file_id": fd["id"],
                     "file_name": fd["name"],
-                    "column": col,
-                    "value": str(row[col]) if pd.notna(row[col]) else "",
+                    "columns": columns,
+                    "values": _extract_distinct_values(rows, columns),
+                    "row_count": len(rows),
                 })
 
-        # 그룹 내 값이 다른 경우 이슈 생성
         for group_rep, conflicts in group_conflicts.items():
             if len(conflicts) < 2:
                 continue
-            values = [c["value"] for c in conflicts]
-            unique_values = set(v for v in values if v != "")
-            if len(unique_values) <= 1:
+            severity = _classify_issue(conflicts)
+            if severity is None:
                 continue
-
-            # severity 판단: 완전히 다른 값이면 conflict, 유사하면 warning
-            all_pairs_similar = True
-            vals = list(unique_values)
-            for i in range(len(vals)):
-                for j in range(i + 1, len(vals)):
-                    if not are_keys_similar(vals[i], vals[j]):
-                        all_pairs_similar = False
-                        break
-
-            severity = "warning" if all_pairs_similar else "conflict"
 
             issues.append({
                 "key_normalized": norm_key,
@@ -200,8 +174,7 @@ def run_consistency_check(
                 "severity": severity,
             })
 
-    # severity 순 정렬 (conflict 먼저)
-    issues.sort(key=lambda x: 0 if x["severity"] == "conflict" else 1)
+    issues.sort(key=lambda item: 0 if item["severity"] == "conflict" else 1)
 
     return {
         "total_keys": total_keys,
