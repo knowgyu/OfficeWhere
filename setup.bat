@@ -9,6 +9,23 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYVER=%%v
+for /f "tokens=1,2 delims=." %%a in ("%PYVER%") do (
+    set PYMAJOR=%%a
+    set PYMINOR=%%b
+)
+if %PYMAJOR% LSS 3 (
+    echo [오류] Python 3.10 이상이 필요합니다. 현재 버전: %PYVER%
+    pause
+    exit /b 1
+)
+if %PYMAJOR% EQU 3 if %PYMINOR% LSS 10 (
+    echo [오류] Python 3.10 이상이 필요합니다. 현재 버전: %PYVER%
+    pause
+    exit /b 1
+)
+echo [확인] Python %PYVER% 감지됨.
+
 python -m venv venv
 if %errorlevel% neq 0 (
     echo [오류] 가상환경 생성에 실패했습니다.

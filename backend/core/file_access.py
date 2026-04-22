@@ -47,7 +47,10 @@ def pick_local_file() -> str:
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
+        root.lift()
+        root.focus_force()
         path = filedialog.askopenfilename(
+            parent=root,
             title="등록할 파일 선택",
             filetypes=[
                 ("지원 파일", "*.xlsx *.xls *.docx *.pptx"),

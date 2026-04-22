@@ -165,8 +165,20 @@
 - [x] 기술 스택 결정
 - [x] PLAN.md 작성
 - [x] 전체 코드 구현 완료 (35+ 파일)
-- [ ] 동작 검증 (setup → npm build → python launcher.py 테스트 필요)
+- [x] Windows 호환성 보완 (2026-04-22)
+  - [x] `launcher.py`: frozen 모드 uvicorn 앱 객체 직접 전달
+  - [x] `launcher.py`: `multiprocessing.freeze_support()` 추가
+  - [x] `launcher.py`: `asyncio.WindowsSelectorEventLoopPolicy()` 추가 (Windows)
+  - [x] `launcher.py`: 종료 안내 메시지 출력
+  - [x] `office_data_joiner.spec`: deprecated `block_cipher` 제거, multiprocessing/encodings hidden imports 추가
+  - [x] `backend/main.py`: deprecated `@app.on_event` → `lifespan` 방식으로 교체
+  - [x] `backend/core/file_access.py`: tkinter 파일 선택창 최전면 보장 (`lift`, `focus_force`)
+  - [x] `setup.bat`: Python 3.10+ 버전 체크 추가
+  - [x] `README.md`: Windows 사용 안내 및 트러블슈팅 섹션 추가
+  - [x] `CLAUDE.md`: CLI 에이전트용 프로젝트 가이드 최초 작성
+- [ ] 동작 검증 (Windows 환경에서 setup.bat → build.bat → .exe 실행 테스트 필요)
 
 ---
 
-_최초 작성: 2026-04-21_
+_최초 작성: 2026-04-21_  
+_Windows 호환성 보완: 2026-04-22_

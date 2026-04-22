@@ -1,4 +1,5 @@
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +11,14 @@ from .api.files import router as files_router
 from .api.query import router as query_router
 from .api.check import router as check_router
 
-app = FastAPI(title="office-data-joiner", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="office-data-joiner", version="0.1.0", lifespan=lifespan)
 
 # CORS 설정 (개발 시 localhost:5173 허용)
 app.add_middleware(
@@ -30,11 +38,6 @@ app.add_middleware(
 app.include_router(files_router)
 app.include_router(query_router)
 app.include_router(check_router)
-
-# 데이터베이스 초기화
-@app.on_event("startup")
-async def startup_event():
-    init_db()
 
 
 # 프론트엔드 static 파일 serve

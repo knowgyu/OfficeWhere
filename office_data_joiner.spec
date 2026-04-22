@@ -2,11 +2,8 @@
 # office-data-joiner PyInstaller spec 파일
 # --onedir 방식 사용 (onefile은 바이러스 오진 이슈 있음)
 
-import os
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
-
-block_cipher = None
 
 # frontend/dist 경로
 frontend_dist = str(Path('frontend') / 'dist')
@@ -20,6 +17,7 @@ a = Analysis(
         (frontend_dist, 'frontend/dist'),
     ],
     hiddenimports=backend_modules + [
+        # uvicorn
         'uvicorn.logging',
         'uvicorn.loops',
         'uvicorn.loops.auto',
@@ -33,6 +31,7 @@ a = Analysis(
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
         'uvicorn.lifespan.off',
+        # data
         'pandas',
         'pandas._libs.tslibs.timedeltas',
         'pandas._libs.tslibs.np_datetime',
@@ -43,25 +42,35 @@ a = Analysis(
         'docx',
         'pptx',
         'xlrd',
-        'aiosqlite',
+        # web framework
         'fastapi',
         'starlette',
         'pydantic',
+        'h11',
+        # async
         'anyio',
         'anyio._backends._asyncio',
         'anyio._backends._trio',
+        'aiosqlite',
+        # Windows 멀티프로세싱 (freeze_support 관련)
+        'multiprocessing',
+        'multiprocessing.spawn',
+        'multiprocessing.forkserver',
+        # 한글 파일명 처리용 인코딩
+        'encodings',
+        'encodings.utf_8',
+        'encodings.cp949',
+        'encodings.euc_kr',
+        'encodings.aliases',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
