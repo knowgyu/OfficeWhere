@@ -89,6 +89,55 @@ export interface CheckResponse {
   issues: CheckIssue[]
 }
 
+export interface ScannedFileInfo {
+  path: string
+  name: string
+  file_type: string
+  columns: string[]
+  sample: string[][]
+  suggested_key_column?: string
+  error?: string
+}
+
+export interface FolderScanRequest {
+  folder_path: string
+  recursive?: boolean
+}
+
+export interface FolderScanResponse {
+  folder_path: string
+  total_found: number
+  files: ScannedFileInfo[]
+}
+
+export interface FolderPickResponse {
+  cancelled: boolean
+  folder_path: string
+}
+
+export interface BulkRegisterItem {
+  path: string
+  key_column: string
+}
+
+export interface BulkRegisterRequest {
+  files: BulkRegisterItem[]
+}
+
+export interface BulkRegisterResult {
+  path: string
+  name: string
+  success: boolean
+  file_id?: number
+  error?: string
+}
+
+export interface BulkRegisterResponse {
+  registered: number
+  failed: number
+  results: BulkRegisterResult[]
+}
+
 export const api = {
   files: {
     list: () => axios.get<FileInfo[]>(`${BASE}/api/files`),
@@ -103,6 +152,11 @@ export const api = {
       axios.get<{ columns: string[]; suggested_key_column: string }>(
         `${BASE}/api/files/${id}/suggest-key`
       ),
+    pickFolder: () => axios.post<FolderPickResponse>(`${BASE}/api/files/pick-folder`),
+    scanFolder: (data: FolderScanRequest) =>
+      axios.post<FolderScanResponse>(`${BASE}/api/files/scan-folder`, data),
+    bulkRegister: (data: BulkRegisterRequest) =>
+      axios.post<BulkRegisterResponse>(`${BASE}/api/files/bulk-register`, data),
   },
   query: {
     join: (data: JoinRequest) => axios.post<JoinResponse>(`${BASE}/api/query/join`, data),

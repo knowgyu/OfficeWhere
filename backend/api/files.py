@@ -11,9 +11,16 @@ from ..models.schemas import (
     FileInspectResponse,
     FilePickResponse,
     SchemaResponse,
+    FolderScanRequest,
+    FolderScanResponse,
+    ScannedFileInfo,
+    FolderPickResponse,
+    BulkRegisterRequest,
+    BulkRegisterResponse,
+    BulkRegisterResult,
 )
 from ..database import register_file, get_all_files, get_file_by_id, delete_file
-from ..core.file_access import inspect_file_path, pick_local_file
+from ..core.file_access import inspect_file_path, pick_local_file, scan_folder, pick_local_folder
 from ..core.parser import get_file_schema, SUPPORTED_EXTENSIONS
 from ..core.normalizer import suggest_key_column
 
@@ -171,3 +178,63 @@ def suggest_key(file_id: int):
     columns = schema["columns"]
     suggested = suggest_key_column(columns)
     return {"columns": columns, "suggested_key_column": suggested}
+
+
+# --- 폴더 스캔 ---
+
+@router.post("/pick-folder", response_model=FolderPickResponse)
+def pick_folder():
+    """OS 폴더 선택창을 열고 경로 반환"""
+    try:
+        path = pick_local_folder()
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if not path:
+        return FolderPickResponse(cancelled=True, folder_path="")
+    return FolderPickResponse(cancelled=False, folder_path=path)
+
+
+@router.post("/scan-folder", response_model=FolderScanResponse)
+def scan_folder_endpoint(req: FolderScanRequest):
+    """폴더를 재귀적으로 스캔하여 지원 파일 목록과 스키마 반환"""
+    try:
+        files = scan_folder(req.folder_path, req.recursive)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"폴더 스캔 실패: {e}")
+    return FolderScanResponse(
+        folder_path=req.folder_path,
+        total_found=len(files),
+        files=[ScannedFileInfo(**f) for f in files],
+    )
+
+
+@router.post("/bulk-register", response_model=BulkRegisterResponse)
+def bulk_register(req: BulkRegisterRequest):
+    """여러 파일을 일괄 등록"""
+    results = []
+    registered = 0
+    failed = 0
+    for item in req.files:
+        path = os.path.normpath(item.path)
+        try:
+            inspected = inspect_file_path(path)
+            columns = inspected["columns"]
+            if item.key_column not in columns:
+                raise ValueError(f"key 컬럼 '{item.key_column}'이(가) 파일에 없습니다.")
+            file_id = register_file(
+                path=path,
+                name=inspected["name"],
+                file_type=inspected["file_type"],
+                key_column=item.key_column,
+                column_count=len(columns),
+            )
+            results.append(BulkRegisterResult(path=path, name=inspected["name"], success=True, file_id=file_id))
+            registered += 1
+        except Exception as e:
+            results.append(BulkRegisterResult(path=path, name=Path(path).name, success=False, error=str(e)))
+            failed += 1
+    return BulkRegisterResponse(registered=registered, failed=failed, results=results)

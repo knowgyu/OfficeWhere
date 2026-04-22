@@ -102,6 +102,25 @@ build.bat   # frontend build + PyInstaller
 
 ---
 
+## 주요 API 엔드포인트
+
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/api/files` | 등록 파일 목록 |
+| POST | `/api/files` | 파일 단건 등록 |
+| DELETE | `/api/files/{id}` | 파일 등록 해제 |
+| POST | `/api/files/inspect` | 경로로 파일 스키마 조회 |
+| POST | `/api/files/pick` | OS 파일 선택창 열기 |
+| POST | `/api/files/pick-folder` | OS 폴더 선택창 열기 |
+| POST | `/api/files/scan-folder` | 폴더 재귀 스캔 (지원 파일 목록 + 스키마) |
+| POST | `/api/files/bulk-register` | 여러 파일 일괄 등록 |
+| GET | `/api/files/{id}/schema` | 파일 컬럼·샘플 조회 |
+| POST | `/api/query/join` | JOIN 쿼리 실행 |
+| POST | `/api/query/export` | JOIN 결과 Excel 다운로드 |
+| POST | `/api/check` | 정합성 검사 실행 |
+
+---
+
 ## 새 기능 추가 체크리스트
 
 1. `backend/core/` — 비즈니스 로직

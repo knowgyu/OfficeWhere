@@ -87,3 +87,54 @@ class CheckResponse(BaseModel):
     total_keys: int
     matched_keys: int
     issues: List[CheckIssue]
+
+
+# --- 폴더 스캔 ---
+
+class FolderScanRequest(BaseModel):
+    folder_path: str
+    recursive: bool = True
+
+
+class ScannedFileInfo(BaseModel):
+    path: str
+    name: str
+    file_type: str
+    columns: List[str]
+    sample: List[List[Any]]
+    suggested_key_column: Optional[str] = None
+    error: Optional[str] = None
+
+
+class FolderScanResponse(BaseModel):
+    folder_path: str
+    total_found: int
+    files: List[ScannedFileInfo]
+
+
+class FolderPickResponse(BaseModel):
+    cancelled: bool
+    folder_path: str
+
+
+class BulkRegisterItem(BaseModel):
+    path: str
+    key_column: str
+
+
+class BulkRegisterRequest(BaseModel):
+    files: List[BulkRegisterItem]
+
+
+class BulkRegisterResult(BaseModel):
+    path: str
+    name: str
+    success: bool
+    file_id: Optional[int] = None
+    error: Optional[str] = None
+
+
+class BulkRegisterResponse(BaseModel):
+    registered: int
+    failed: int
+    results: List[BulkRegisterResult]

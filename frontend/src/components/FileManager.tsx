@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api, FileInfo, FileInspectResponse, SchemaResponse } from '../api/client'
+import FolderScanner from './FolderScanner'
 
 export default function FileManager() {
   const [files, setFiles] = useState<FileInfo[]>([])
@@ -279,6 +280,8 @@ export default function FileManager() {
           )}
         </div>
       </div>
+
+      <FolderScanner onRegistered={fetchFiles} />
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded">
