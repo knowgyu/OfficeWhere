@@ -1,12 +1,26 @@
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-DB_DIR = Path.home() / ".office-data-joiner"
+def _default_db_dir() -> Path:
+    configured = os.environ.get("ODJ_DATA_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path.home() / ".office-data-joiner"
+
+
+DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
+
+
+def configure_database(data_dir: str | os.PathLike[str]):
+    global DB_DIR, DB_PATH
+    DB_DIR = Path(data_dir).expanduser()
+    DB_PATH = DB_DIR / "data.db"
 
 
 def get_db_path() -> str:

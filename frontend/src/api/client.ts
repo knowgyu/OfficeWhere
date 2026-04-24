@@ -1,9 +1,16 @@
 import axios from 'axios'
 
-const BASE = import.meta.env.DEV ? 'http://localhost:8765' : ''
-
 declare global {
+  interface OfficeDataJoinerBridge {
+    getBackendBaseUrl?: () => Promise<string>
+    pickFolder?: () => Promise<FolderPickResponse & { error?: string }>
+    pickFile?: () => Promise<{ cancelled: boolean; path: string; error?: string }>
+    getAppVersion?: () => Promise<string>
+    getLogPath?: () => Promise<string>
+  }
+
   interface Window {
+    officeDataJoiner?: OfficeDataJoinerBridge
     pywebview?: {
       api?: {
         pickFolder?: () => Promise<FolderPickResponse & { error?: string }>
@@ -11,6 +18,25 @@ declare global {
       }
     }
   }
+}
+
+let backendBaseUrlPromise: Promise<string> | null = null
+
+export async function getBackendBaseUrl(): Promise<string> {
+  if (!backendBaseUrlPromise) {
+    const bridge =
+      typeof window !== 'undefined' ? window.officeDataJoiner : undefined
+    backendBaseUrlPromise = bridge?.getBackendBaseUrl
+      ? bridge.getBackendBaseUrl()
+      : Promise.resolve(import.meta.env.DEV ? 'http://localhost:8765' : '')
+  }
+
+  return backendBaseUrlPromise
+}
+
+async function apiPath(path: string): Promise<string> {
+  const baseUrl = await getBackendBaseUrl()
+  return `${baseUrl}${path}`
 }
 
 export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Unknown'
@@ -342,7 +368,10 @@ export interface LibraryGroupsResponse {
   groups: LibraryFileGroup[]
 }
 
-const desktopApi = () =>
+const electronApi = () =>
+  typeof window !== 'undefined' ? window.officeDataJoiner : undefined
+
+const pywebviewApi = () =>
   typeof window !== 'undefined' ? window.pywebview?.api : undefined
 
 function desktopError(message: string): never {
@@ -350,23 +379,45 @@ function desktopError(message: string): never {
 }
 
 async function pickFileWithBestAvailableDialog() {
-  const bridge = desktopApi()
-  if (bridge?.pickFile) {
-    const data = await bridge.pickFile()
+  const electron = electronApi()
+  if (electron?.pickFile) {
+    const picked = await electron.pickFile()
+    if (picked.error) desktopError(picked.error)
+    if (picked.cancelled || !picked.path) {
+      return { data: { cancelled: true, file: null } }
+    }
+
+    const inspected = await axios.post<FileInspectResponse>(
+      await apiPath('/api/files/inspect'),
+      { path: picked.path }
+    )
+    return { data: { cancelled: false, file: inspected.data } }
+  }
+
+  const pywebview = pywebviewApi()
+  if (pywebview?.pickFile) {
+    const data = await pywebview.pickFile()
     if (data.error) desktopError(data.error)
     return { data }
   }
-  return axios.post<FilePickResponse>(`${BASE}/api/files/pick`)
+  return axios.post<FilePickResponse>(await apiPath('/api/files/pick'))
 }
 
 async function pickFolderWithBestAvailableDialog() {
-  const bridge = desktopApi()
-  if (bridge?.pickFolder) {
-    const data = await bridge.pickFolder()
+  const electron = electronApi()
+  if (electron?.pickFolder) {
+    const data = await electron.pickFolder()
     if (data.error) desktopError(data.error)
     return { data }
   }
-  return axios.post<FolderPickResponse>(`${BASE}/api/files/pick-folder`)
+
+  const pywebview = pywebviewApi()
+  if (pywebview?.pickFolder) {
+    const data = await pywebview.pickFolder()
+    if (data.error) desktopError(data.error)
+    return { data }
+  }
+  return axios.post<FolderPickResponse>(await apiPath('/api/files/pick-folder'))
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -995,47 +1046,49 @@ export function normalizeCheckResponse(payload: unknown): CheckResponse {
 
 export const api = {
   files: {
-    list: () => axios.get<FileInfo[]>(`${BASE}/api/files`),
+    list: async () => axios.get<FileInfo[]>(await apiPath('/api/files')),
     inspect: (data: FileInspectRequest) =>
-      axios.post<FileInspectResponse>(`${BASE}/api/files/inspect`, data),
+      apiPath('/api/files/inspect').then((url) => axios.post<FileInspectResponse>(url, data)),
     pick: pickFileWithBestAvailableDialog,
     register: (data: FileRegisterRequest) =>
-      axios.post<FileRegisterResponse>(`${BASE}/api/files`, data),
-    delete: (id: number) => axios.delete(`${BASE}/api/files/${id}`),
-    schema: (id: number) => axios.get<SchemaResponse>(`${BASE}/api/files/${id}/schema`),
+      apiPath('/api/files').then((url) => axios.post<FileRegisterResponse>(url, data)),
+    delete: async (id: number) => axios.delete(await apiPath(`/api/files/${id}`)),
+    schema: async (id: number) => axios.get<SchemaResponse>(await apiPath(`/api/files/${id}/schema`)),
     suggestKey: (id: number) =>
-      axios.get<{ columns?: string[]; suggested_key_column?: string }>(
-        `${BASE}/api/files/${id}/suggest-key`
+      apiPath(`/api/files/${id}/suggest-key`).then((url) =>
+        axios.get<{ columns?: string[]; suggested_key_column?: string }>(url)
       ),
     pickFolder: pickFolderWithBestAvailableDialog,
     scanFolder: (data: FolderScanRequest) =>
-      axios.post<FolderScanResponse>(`${BASE}/api/files/scan-folder`, data),
+      apiPath('/api/files/scan-folder').then((url) => axios.post<FolderScanResponse>(url, data)),
     bulkRegister: (data: BulkRegisterRequest) =>
-      axios.post<BulkRegisterResponse>(`${BASE}/api/files/bulk-register`, data),
-    open: (id: number) => axios.post(`${BASE}/api/files/${id}/open`),
+      apiPath('/api/files/bulk-register').then((url) => axios.post<BulkRegisterResponse>(url, data)),
+    open: async (id: number) => axios.post(await apiPath(`/api/files/${id}/open`)),
   },
   query: {
-    join: (data: JoinRequest) => axios.post<JoinResponse>(`${BASE}/api/query/join`, data),
+    join: (data: JoinRequest) =>
+      apiPath('/api/query/join').then((url) => axios.post<JoinResponse>(url, data)),
     export: (data: JoinRequest) =>
-      axios.post(`${BASE}/api/query/export`, data, { responseType: 'blob' }),
+      apiPath('/api/query/export').then((url) => axios.post(url, data, { responseType: 'blob' })),
   },
   check: {
-    run: (data: CheckRequest) => axios.post<unknown>(`${BASE}/api/check`, data),
+    run: (data: CheckRequest) =>
+      apiPath('/api/check').then((url) => axios.post<unknown>(url, data)),
   },
   search: {
     query: (data: { query: string; limit?: number }) =>
-      axios.post<SearchResponse>(`${BASE}/api/search`, data),
-    reindex: () => axios.post<ReindexResponse>(`${BASE}/api/search/reindex`),
-    getSettings: () => axios.get<SchedulerSettings>(`${BASE}/api/search/settings`),
+      apiPath('/api/search').then((url) => axios.post<SearchResponse>(url, data)),
+    reindex: async () => axios.post<ReindexResponse>(await apiPath('/api/search/reindex')),
+    getSettings: async () => axios.get<SchedulerSettings>(await apiPath('/api/search/settings')),
     updateSettings: (data: SchedulerSettings) =>
-      axios.put<SchedulerSettings>(`${BASE}/api/search/settings`, data),
+      apiPath('/api/search/settings').then((url) => axios.put<SchedulerSettings>(url, data)),
   },
   library: {
-    getSettings: () => axios.get<LibrarySettings>(`${BASE}/api/library/settings`),
+    getSettings: async () => axios.get<LibrarySettings>(await apiPath('/api/library/settings')),
     updateSettings: (data: LibrarySettings) =>
-      axios.put<LibrarySettings>(`${BASE}/api/library/settings`, data),
-    rescan: () => axios.post<LibraryRescanResponse>(`${BASE}/api/library/rescan`),
-    groups: () => axios.get<LibraryGroupsResponse>(`${BASE}/api/library/groups`),
+      apiPath('/api/library/settings').then((url) => axios.put<LibrarySettings>(url, data)),
+    rescan: async () => axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan')),
+    groups: async () => axios.get<LibraryGroupsResponse>(await apiPath('/api/library/groups')),
   },
 }
 

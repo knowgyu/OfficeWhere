@@ -65,7 +65,7 @@ Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도
   - Excel: key/value/column diff
   - Word: 문단/표 블록 diff
   - PPT: 슬라이드 diff
-- **비개발자 실행**: `.exe` 더블클릭으로 서버 시작 + 브라우저 자동 오픈.
+- **비개발자 실행**: Windows zip 압축 해제 후 Electron 데스크톱 앱 실행. 앱이 Python backend를 자동으로 시작/감시합니다.
 
 ---
 
@@ -107,7 +107,7 @@ source venv/bin/activate
 ### 백엔드 (FastAPI)
 
 ```bash
-python -m uvicorn backend.main:app --port 8765 --reload
+python backend_server.py --host 127.0.0.1 --port 8765
 ```
 
 ### 프론트엔드 (React + Vite)
@@ -120,9 +120,19 @@ npm run dev
 
 브라우저에서 `http://localhost:5173` 접속.
 
+### Electron shell
+
+```bash
+cd frontend
+npm run electron:dev
+```
+
+기본적으로 빌드된 `frontend/dist`를 Electron 창에 로드하고, Electron main process가 사용 가능한 backend port를 자동 선택합니다.
+Vite 개발 서버를 Electron 창에 붙이려면 `ELECTRON_RENDERER_URL=http://localhost:5173 npm run electron:dev`를 사용합니다.
+
 ---
 
-## 5. .exe 빌드 방법
+## 5. 데스크톱 앱 빌드 방법
 
 ### Windows
 
@@ -131,8 +141,15 @@ build.bat
 ```
 
 `build.bat`은 프론트엔드 정적 파일을 먼저 빌드하므로 Node.js LTS가 필요합니다.
-개발환경이 없는 최종 사용자는 이 과정을 직접 하지 않고 Release zip의 `office-data-joiner.exe`를 실행하면 됩니다.
+개발환경이 없는 최종 사용자는 이 과정을 직접 하지 않고 Release zip을 압축 해제한 뒤 `Office Data Joiner.exe`를 실행하면 됩니다.
 Node.js가 없으면 공식 다운로드 링크를 표시하고, `winget`이 있으면 설치 여부를 묻습니다.
+
+Windows 빌드 흐름:
+
+1. React/Vite renderer build
+2. Electron main/preload TypeScript build
+3. PyInstaller backend exe build (`office_data_joiner_backend.spec`)
+4. `electron-builder` Windows zip 생성
 
 ### macOS / Linux
 
@@ -141,15 +158,16 @@ chmod +x build.sh
 ./build.sh
 ```
 
-빌드 결과물: `dist/office-data-joiner/office-data-joiner.exe` (Windows) 또는 `dist/office-data-joiner/office-data-joiner` (macOS/Linux)
+Linux/macOS의 `build.sh`는 backend exe와 Electron TypeScript build 검증용입니다.
+Windows 배포 zip은 Windows에서 `build.bat` 또는 GitHub Actions로 생성합니다.
 
 > **참고**: 빌드 전 `setup.bat` / `setup.sh`로 가상환경을 먼저 구성해야 합니다.  
-> 프론트엔드 빌드(`frontend/dist`)도 자동으로 포함됩니다.
-> 기존 `dist/office-data-joiner` 산출물이 있어도 `build.bat` / `build.sh`를 다시 실행하면 덮어써서 재빌드합니다.
+> 프론트엔드 빌드(`frontend/dist`)와 backend exe(`dist/office-data-joiner-backend`)가 Electron resources에 포함됩니다.
+> 기존 pywebview 기반 PyInstaller wrapper는 legacy로 남아 있으며 필요할 때 `python -m PyInstaller office_data_joiner.spec --clean -y`로 직접 빌드할 수 있습니다.
 
 ### GitHub Release 자동 빌드
 
-`.github/workflows/release.yml`은 Windows runner에서 실행파일을 빌드한 뒤, `dist/office-data-joiner/` 전체를 zip으로 묶어 Release asset으로 올립니다.
+`.github/workflows/release.yml`은 Windows runner에서 backend exe와 Electron app을 빌드한 뒤, Electron Windows zip과 SHA256 파일을 Release asset으로 올립니다.
 
 - 태그 릴리스: `git tag v0.1.0 && git push origin v0.1.0`
 - 수동 실행: GitHub Actions → `Build Windows Release` → `Run workflow`
@@ -165,7 +183,7 @@ chmod +x build.sh
 
 1. GitHub Releases에서 zip 파일 다운로드
 2. 원하는 폴더에 압축 해제
-3. 압축 해제한 폴더 안의 `office-data-joiner.exe` 실행
+3. 압축 해제한 폴더 안의 `Office Data Joiner.exe` 실행
 
 ---
 
@@ -231,7 +249,10 @@ chmod +x build.sh
 ```bash
 source venv/bin/activate
 pytest
-cd frontend && npm run build
+cd frontend
+npm run build
+npm run build:electron
+cd ..
 python scripts/run_demo_checks.py
 python scripts/run_perf_checks.py
 ```
@@ -257,7 +278,8 @@ python scripts/run_perf_checks.py
 | 데이터베이스 | SQLite (`~/.office-data-joiner/data.db`) |
 | 프론트엔드 | React 18, TypeScript, Vite, Tailwind CSS |
 | HTTP 클라이언트 | axios |
-| 패키징 | PyInstaller (--onedir) |
+| 데스크톱 shell | Electron, contextIsolation preload bridge |
+| 패키징 | PyInstaller backend onedir + electron-builder Windows zip |
 
 ---
 

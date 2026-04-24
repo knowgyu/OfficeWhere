@@ -39,9 +39,17 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
+
+echo [office-data-joiner] Electron main/preload 빌드 중...
+call npm run build:electron
+if %errorlevel% neq 0 (
+    echo [오류] Electron 빌드 실패
+    pause
+    exit /b 1
+)
 cd ..
 
-echo [office-data-joiner] PyInstaller 패키징 중...
+echo [office-data-joiner] Backend PyInstaller 패키징 중...
 
 if not exist "venv\Scripts\python.exe" (
     echo [오류] 가상환경 Python을 찾을 수 없습니다. setup.bat을 먼저 실행하세요.
@@ -49,16 +57,27 @@ if not exist "venv\Scripts\python.exe" (
     exit /b 1
 )
 
-venv\Scripts\python.exe -m PyInstaller office_data_joiner.spec --clean -y
+venv\Scripts\python.exe -m PyInstaller office_data_joiner_backend.spec --clean -y
 if %errorlevel% neq 0 (
-    echo [오류] PyInstaller 패키징 실패
+    echo [오류] Backend PyInstaller 패키징 실패
     pause
     exit /b 1
 )
 
+echo [office-data-joiner] Electron Windows zip 패키징 중...
+cd frontend
+call npm run package:win
+if %errorlevel% neq 0 (
+    echo [오류] Electron 패키징 실패
+    pause
+    exit /b 1
+)
+cd ..
+
 echo.
-echo [완료] dist\office-data-joiner\ 폴더에 실행파일이 생성되었습니다.
-echo 실행: dist\office-data-joiner\office-data-joiner.exe
+echo [완료] dist\electron\ 폴더에 Windows zip 산출물이 생성되었습니다.
+echo legacy PyInstaller wrapper가 필요하면 수동으로 다음을 실행하세요:
+echo venv\Scripts\python.exe -m PyInstaller office_data_joiner.spec --clean -y
 pause
 exit /b 0
 

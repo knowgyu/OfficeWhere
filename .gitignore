@@ -35,6 +35,7 @@ desktop.ini
 # Node
 node_modules/
 frontend/dist/
+frontend/dist-electron/
 frontend/.vite/
 
 # Logs

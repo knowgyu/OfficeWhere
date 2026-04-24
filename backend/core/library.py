@@ -26,10 +26,11 @@ from ..models.schemas import (
 from .file_access import scan_folder
 from .indexer import inspect_and_chunk
 from .normalizer import suggest_key_column
+from ..runtime import get_worker_count
 
 SETTINGS_KEY = "library_settings"
 LAST_RESCAN_KEY = "library_last_rescan_at"
-MAX_WORKERS = 8
+MAX_WORKERS = get_worker_count()
 
 
 def file_info_from_row(row: Dict[str, Any]) -> FileInfo:

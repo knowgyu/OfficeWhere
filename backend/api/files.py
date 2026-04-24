@@ -35,6 +35,7 @@ from ..models.schemas import (
     ScannedFileInfo,
     SchemaResponse,
 )
+from ..runtime import get_worker_count
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -286,7 +287,7 @@ def bulk_register(req: BulkRegisterRequest):
         except Exception as exc:
             return BulkRegisterResult(path=path, name=Path(path).name, success=False, error=str(exc))
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=get_worker_count()) as executor:
         results = list(executor.map(_register_one, req.files))
 
     registered = sum(1 for result in results if result.success)

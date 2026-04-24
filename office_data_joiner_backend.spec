@@ -1,29 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-# office-data-joiner PyInstaller spec 파일
-# --onedir 방식 사용 (onefile은 바이러스 오진 이슈 있음)
+# Backend-only PyInstaller spec for the Electron desktop shell.
 
-from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
-def optional_collect_submodules(name):
-    try:
-        return collect_submodules(name)
-    except Exception:
-        return []
-
-# frontend/dist 경로
-frontend_dist = str(Path('frontend') / 'dist')
 backend_modules = collect_submodules('backend')
-webview_modules = optional_collect_submodules('webview')
 
 a = Analysis(
-    ['launcher.py'],
+    ['backend_server.py'],
     pathex=['.'],
     binaries=[],
-    datas=[
-        (frontend_dist, 'frontend/dist'),
-    ],
-    hiddenimports=backend_modules + webview_modules + [
+    datas=[],
+    hiddenimports=backend_modules + [
         # uvicorn
         'uvicorn.logging',
         'uvicorn.loops',
@@ -59,12 +46,10 @@ a = Analysis(
         'anyio._backends._asyncio',
         'anyio._backends._trio',
         'aiosqlite',
-        'webview',
-        # Windows 멀티프로세싱 (freeze_support 관련)
+        # Windows multiprocessing and Korean filenames
         'multiprocessing',
         'multiprocessing.spawn',
         'multiprocessing.forkserver',
-        # 한글 파일명 처리용 인코딩
         'encodings',
         'encodings.utf_8',
         'encodings.cp949',
@@ -85,12 +70,12 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='office-data-joiner',
+    name='office-data-joiner-backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
@@ -105,5 +90,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='office-data-joiner',
+    name='office-data-joiner-backend',
 )

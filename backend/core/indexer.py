@@ -17,12 +17,13 @@ from ..database import (
 from .excel_analysis import extract_excel_table, inspect_excel_file
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_file
+from ..runtime import get_worker_count
 from .word_analysis import extract_word_blocks, inspect_word_file
 
 logger = logging.getLogger(__name__)
 
 _scheduler_thread: threading.Thread | None = None
-_MAX_WORKERS = 8
+_MAX_WORKERS = get_worker_count()
 
 
 def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:

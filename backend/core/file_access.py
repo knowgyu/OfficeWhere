@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 from .normalizer import suggest_key_column
 from .parser import SUPPORTED_EXTENSIONS, get_file_schema, get_file_type
+from ..runtime import get_worker_count
 
 
 def inspect_file_path(path: str) -> Dict[str, Any]:
@@ -117,7 +118,7 @@ def scan_folder(folder_path: str, recursive: bool = True) -> List[Dict[str, Any]
                 "error": str(e),
             }
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=get_worker_count()) as executor:
         return list(executor.map(_inspect_one, found))
 
 

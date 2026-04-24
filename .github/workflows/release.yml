@@ -29,6 +29,7 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PYTHONUTF8: "1"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
     steps:
       - name: Checkout repository
@@ -99,6 +100,11 @@ jobs:
         shell: pwsh
         run: npm run build
 
+      - name: Build Electron main process
+        working-directory: frontend
+        shell: pwsh
+        run: npm run build:electron
+
       - name: Run backend tests
         shell: pwsh
         run: pytest -q
@@ -107,9 +113,14 @@ jobs:
         shell: pwsh
         run: python scripts/run_demo_checks.py
 
-      - name: Build Windows executable
+      - name: Build backend executable
         shell: pwsh
-        run: python -m PyInstaller office_data_joiner.spec --clean -y
+        run: python -m PyInstaller office_data_joiner_backend.spec --clean -y
+
+      - name: Build Electron Windows zip
+        working-directory: frontend
+        shell: pwsh
+        run: npm run package:win
 
       - name: Package release bundle
         id: bundle
@@ -117,9 +128,6 @@ jobs:
         run: |
           $bundleName = "office-data-joiner-${{ steps.meta.outputs.version }}-windows-x64"
 
-          if (Test-Path $bundleName) {
-            Remove-Item $bundleName -Recurse -Force
-          }
           if (Test-Path "$bundleName.zip") {
             Remove-Item "$bundleName.zip" -Force
           }
@@ -127,8 +135,15 @@ jobs:
             Remove-Item "$bundleName.sha256.txt" -Force
           }
 
-          Copy-Item -Path "dist/office-data-joiner" -Destination $bundleName -Recurse
-          Compress-Archive -Path $bundleName -DestinationPath "$bundleName.zip" -Force
+          $sourceZip = Get-ChildItem "dist/electron" -Filter "office-data-joiner-*-windows-x64.zip" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+          if (-not $sourceZip) {
+            throw "Electron zip artifact was not created."
+          }
+
+          Copy-Item -Path $sourceZip.FullName -Destination "$bundleName.zip" -Force
 
           $hash = (Get-FileHash "$bundleName.zip" -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path "$bundleName.sha256.txt" -Value "$hash  $bundleName.zip" -Encoding Ascii

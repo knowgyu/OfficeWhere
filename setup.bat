@@ -84,7 +84,9 @@ cd ..
 
 echo.
 echo [완료] 개발 환경 설정이 완료되었습니다.
-echo 개발 서버 실행: venv\Scripts\activate 후 python -m uvicorn backend.main:app --port 8765 --reload
+echo Backend 실행: venv\Scripts\activate 후 python backend_server.py --host 127.0.0.1 --port 8765
+echo Frontend 실행: cd frontend 후 npm run dev
+echo Electron 실행: cd frontend 후 npm run electron:dev
 pause
 exit /b 0
 

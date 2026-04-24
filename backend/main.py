@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from .database import init_db
+from .database import get_db_path, init_db
 from .api.files import router as files_router
 from .api.query import router as query_router
 from .api.check import router as check_router
@@ -24,15 +24,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="office-data-joiner", version="0.1.0", lifespan=lifespan)
 
-# CORS 설정 (개발 시 localhost:5173 허용)
+# CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8765",
-        "http://127.0.0.1:8765",
-    ],
+    allow_origins=["null"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,6 +40,15 @@ app.include_router(query_router)
 app.include_router(check_router)
 app.include_router(search_router)
 app.include_router(library_router)
+
+
+@app.get("/api/health")
+async def health():
+    return {
+        "status": "ok",
+        "version": app.version,
+        "db_path": get_db_path(),
+    }
 
 
 # 프론트엔드 static 파일 serve
