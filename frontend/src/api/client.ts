@@ -138,6 +138,34 @@ export interface BulkRegisterResponse {
   results: BulkRegisterResult[]
 }
 
+export interface SearchResult {
+  file_id: number
+  name: string
+  path: string
+  file_type: string
+  location: string
+  snippet: string
+}
+
+export interface SearchResponse {
+  query: string
+  total: number
+  results: SearchResult[]
+}
+
+export interface SchedulerSettings {
+  mode: 'manual' | 'interval' | 'daily'
+  interval_hours: number
+  daily_time: string
+  last_reindex_at?: string
+}
+
+export interface ReindexResponse {
+  success: number
+  failed: number
+  skipped: number
+}
+
 export const api = {
   files: {
     list: () => axios.get<FileInfo[]>(`${BASE}/api/files`),
@@ -165,5 +193,13 @@ export const api = {
   },
   check: {
     run: (data: CheckRequest) => axios.post<CheckResponse>(`${BASE}/api/check`, data),
+  },
+  search: {
+    query: (data: { query: string; limit?: number }) =>
+      axios.post<SearchResponse>(`${BASE}/api/search`, data),
+    reindex: () => axios.post<ReindexResponse>(`${BASE}/api/search/reindex`),
+    getSettings: () => axios.get<SchedulerSettings>(`${BASE}/api/search/settings`),
+    updateSettings: (data: SchedulerSettings) =>
+      axios.put<SchedulerSettings>(`${BASE}/api/search/settings`, data),
   },
 }

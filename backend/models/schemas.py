@@ -138,3 +138,38 @@ class BulkRegisterResponse(BaseModel):
     registered: int
     failed: int
     results: List[BulkRegisterResult]
+
+
+# --- 파일 검색 ---
+
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 100
+
+
+class SearchResult(BaseModel):
+    file_id: int
+    name: str
+    path: str
+    file_type: str
+    location: str
+    snippet: str
+
+
+class SearchResponse(BaseModel):
+    query: str
+    total: int
+    results: List[SearchResult]
+
+
+class SchedulerSettings(BaseModel):
+    mode: str = "manual"          # manual | interval | daily
+    interval_hours: float = 24.0
+    daily_time: str = "03:00"     # HH:MM
+    last_reindex_at: Optional[str] = None
+
+
+class ReindexResponse(BaseModel):
+    success: int
+    failed: int
+    skipped: int

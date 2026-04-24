@@ -2,13 +2,15 @@ import { useState } from 'react'
 import FileManager from './components/FileManager'
 import JoinQuery from './components/JoinQuery'
 import ConsistencyCheck from './components/ConsistencyCheck'
+import FileSearch from './components/FileSearch'
 
-type Tab = 'files' | 'join' | 'check'
+type Tab = 'files' | 'join' | 'check' | 'search'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'files', label: '파일 관리' },
   { id: 'join', label: 'JOIN 쿼리' },
   { id: 'check', label: '정합성 검사' },
+  { id: 'search', label: '파일 검색' },
 ]
 
 export default function App() {
@@ -48,6 +50,7 @@ export default function App() {
         {activeTab === 'files' && <FileManager />}
         {activeTab === 'join' && <JoinQuery />}
         {activeTab === 'check' && <ConsistencyCheck />}
+        {activeTab === 'search' && <FileSearch />}
       </main>
     </div>
   )

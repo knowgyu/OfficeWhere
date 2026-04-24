@@ -10,11 +10,14 @@ from .database import init_db
 from .api.files import router as files_router
 from .api.query import router as query_router
 from .api.check import router as check_router
+from .api.search import router as search_router
+from .core.indexer import start_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    start_scheduler()
     yield
 
 
@@ -38,6 +41,7 @@ app.add_middleware(
 app.include_router(files_router)
 app.include_router(query_router)
 app.include_router(check_router)
+app.include_router(search_router)
 
 
 # 프론트엔드 static 파일 serve
