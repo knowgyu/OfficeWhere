@@ -136,6 +136,7 @@ chmod +x build.sh
 
 > **참고**: 빌드 전 `setup.bat` / `setup.sh`로 가상환경을 먼저 구성해야 합니다.  
 > 프론트엔드 빌드(`frontend/dist`)도 자동으로 포함됩니다.
+> 기존 `dist/office-data-joiner` 산출물이 있어도 `build.bat` / `build.sh`를 다시 실행하면 덮어써서 재빌드합니다.
 
 ---
 

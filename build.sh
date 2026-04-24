@@ -21,7 +21,7 @@ if [ ! -d "venv" ]; then
 fi
 
 source venv/bin/activate
-python -m PyInstaller office_data_joiner.spec --clean
+python -m PyInstaller office_data_joiner.spec --clean -y
 
 echo ""
 echo "[완료] dist/office-data-joiner/ 폴더에 실행파일이 생성되었습니다."

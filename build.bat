@@ -34,7 +34,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-python -m PyInstaller office_data_joiner.spec --clean
+python -m PyInstaller office_data_joiner.spec --clean -y
 if %errorlevel% neq 0 (
     echo [오류] PyInstaller 패키징 실패
     pause
