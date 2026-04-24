@@ -81,6 +81,7 @@ setup.bat
 
 Windows에서 소스 빌드까지 하려면 Python 3.10+와 Node.js LTS가 모두 필요합니다.
 Node.js를 새로 설치했다면 기존 CMD/PowerShell 창을 닫고 새 창에서 다시 실행하세요.
+`setup.bat`은 Python/Node.js가 없을 때 공식 다운로드 링크를 표시하고, `winget`이 있으면 설치 여부를 묻습니다.
 
 ### macOS / Linux
 
@@ -131,6 +132,7 @@ build.bat
 
 `build.bat`은 프론트엔드 정적 파일을 먼저 빌드하므로 Node.js LTS가 필요합니다.
 개발환경이 없는 최종 사용자는 이 과정을 직접 하지 않고 Release zip의 `office-data-joiner.exe`를 실행하면 됩니다.
+Node.js가 없으면 공식 다운로드 링크를 표시하고, `winget`이 있으면 설치 여부를 묻습니다.
 
 ### macOS / Linux
 
