@@ -1,9 +1,8 @@
-from itertools import combinations
 from typing import Any, Dict, List
 
 import pandas as pd
 
-from .normalizer import are_keys_similar, group_similar_columns, normalize_key
+from .normalizer import are_keys_similar, group_similar_columns, normalize_key, values_equal
 from .parser import parse_file
 
 
@@ -19,33 +18,30 @@ def _extract_distinct_values(rows: pd.DataFrame, columns: List[str]) -> List[str
     return sorted(set(values))
 
 
+def _distinct_value_count(values: List[str]) -> int:
+    """실질적으로 다른 값의 수 (values_equal 기준)"""
+    canonical: List[str] = []
+    for v in values:
+        if not any(values_equal(v, c) for c in canonical):
+            canonical.append(v)
+    return len(canonical)
+
+
 def _classify_issue(conflicts: List[Dict[str, Any]]) -> str | None:
     non_empty = [item for item in conflicts if item["values"]]
     if not non_empty:
         return None
 
-    normalized_sets = [
-        tuple(normalize_key(value) for value in conflict["values"])
-        for conflict in conflicts
-    ]
-    non_empty_sets = [value_set for value_set in normalized_sets if value_set]
-    unique_non_empty_sets = set(non_empty_sets)
-
-    # Duplicate key rows inside a single file are allowed only when
-    # they resolve to the same distinct value set for the compared column group.
-    if any(len(value_set) > 1 for value_set in normalized_sets):
+    # 한 파일 안에 실질적으로 다른 값이 여러 개 → conflict
+    if any(_distinct_value_count(item["values"]) > 1 for item in non_empty):
         return "conflict"
 
-    if len(unique_non_empty_sets) == 1:
-        if len(non_empty) == len(conflicts):
-            return None
-        return "warning"
+    # 파일 간 대표값 비교 (fuzzy 없이 exact)
+    rep_values = [item["values"][0] for item in non_empty]
+    all_equal = all(values_equal(rep_values[0], v) for v in rep_values[1:])
 
-    singleton_values = [item["values"][0] for item in non_empty if len(item["values"]) == 1]
-    if len(singleton_values) == len(non_empty):
-        if all(are_keys_similar(a, b) for a, b in combinations(singleton_values, 2)):
-            return "warning"
-
+    if all_equal:
+        return None if len(non_empty) == len(conflicts) else "warning"
     return "conflict"
 
 
@@ -55,10 +51,10 @@ def run_consistency_check(
     """
     정합성 검사 수행.
 
-    duplicate key 규칙:
-    - 같은 파일 안에서 동일 normalized key가 여러 행으로 나타날 수 있다.
-    - 같은 column group 안의 값 집합이 동일하면 허용한다.
-    - 값 집합이 여러 개로 갈리면 해당 파일 내부에서도 conflict로 본다.
+    성능 최적화:
+    - 키 정규화 파일당 1회 사전 계산
+    - exact-first 키 클러스터링 후 그룹 대표끼리만 fuzzy 비교
+    - 행 필터링 시 벡터화 딕셔너리 조회 (O(1) per row)
     """
     if len(file_infos) < 2:
         raise ValueError("정합성 검사는 최소 2개 파일이 필요합니다.")
@@ -78,24 +74,42 @@ def run_consistency_check(
             "df": df,
         })
 
-    all_raw_keys: List[str] = []
+    # 키 정규화 사전 계산 (파일당 1회)
     for fd in file_dfs:
-        all_raw_keys.extend(fd["df"][fd["key_column"]].astype(str).tolist())
-    all_raw_keys = list(set(all_raw_keys))
+        fd["norm_keys"] = fd["df"][fd["key_column"]].astype(str).apply(normalize_key)
 
-    key_clusters: Dict[str, List[str]] = {}
+    # 키 클러스터링: Step1 exact 그룹 → Step2 그룹 대표끼리만 fuzzy 비교
+    all_raw_keys = list({
+        key
+        for fd in file_dfs
+        for key in fd["df"][fd["key_column"]].astype(str).tolist()
+    })
+
+    exact_groups: Dict[str, List[str]] = {}
     for raw_key in all_raw_keys:
         norm = normalize_key(raw_key)
-        matched_cluster = None
-        for existing_norm in list(key_clusters.keys()):
-            if are_keys_similar(norm, existing_norm):
-                matched_cluster = existing_norm
-                break
-        if matched_cluster:
-            if raw_key not in key_clusters[matched_cluster]:
-                key_clusters[matched_cluster].append(raw_key)
-        else:
-            key_clusters[norm] = [raw_key]
+        exact_groups.setdefault(norm, []).append(raw_key)
+
+    group_norms = list(exact_groups.keys())
+    key_clusters: Dict[str, List[str]] = {}
+    merged: set = set()
+    for i, norm_a in enumerate(group_norms):
+        if norm_a in merged:
+            continue
+        cluster_variants = list(exact_groups[norm_a])
+        for norm_b in group_norms[i + 1:]:
+            if norm_b in merged:
+                continue
+            if are_keys_similar(norm_a, norm_b):
+                cluster_variants.extend(exact_groups[norm_b])
+                merged.add(norm_b)
+        key_clusters[norm_a] = cluster_variants
+
+    # 행 조회용 인덱스: normalized_raw_key → cluster representative
+    variant_to_cluster: Dict[str, str] = {}
+    for norm_key, variants in key_clusters.items():
+        for raw_v in variants:
+            variant_to_cluster[normalize_key(raw_v)] = norm_key
 
     total_keys = len(key_clusters)
     matched_keys = 0
@@ -118,12 +132,9 @@ def run_consistency_check(
     for norm_key, variants in key_clusters.items():
         files_with_key = []
         for fd in file_dfs:
-            df = fd["df"]
-            key_col = fd["key_column"]
-            mask = df[key_col].astype(str).apply(normalize_key).apply(
-                lambda nk: are_keys_similar(nk, norm_key)
-            )
-            matched_rows = df[mask]
+            # 벡터화 딕셔너리 조회: per-row fuzzy 호출 없음
+            mask = fd["norm_keys"].map(variant_to_cluster) == norm_key
+            matched_rows = fd["df"][mask]
             if matched_rows.empty:
                 continue
             files_with_key.append({
