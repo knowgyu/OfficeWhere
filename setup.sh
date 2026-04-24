@@ -9,9 +9,13 @@ if ! command -v python3 &> /dev/null; then
 fi
 
 python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements-dev.txt
+if [ ! -x "venv/bin/python" ]; then
+    echo "[오류] 가상환경 Python을 찾을 수 없습니다: venv/bin/python"
+    exit 1
+fi
+
+venv/bin/python -m pip install --upgrade pip
+venv/bin/python -m pip install -r requirements-dev.txt
 
 if ! command -v npm &> /dev/null; then
     echo "[오류] npm이 설치되어 있지 않습니다."

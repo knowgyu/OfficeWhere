@@ -41,9 +41,20 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-call venv\Scripts\activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+if not exist "venv\Scripts\python.exe" (
+    echo [오류] 가상환경 Python을 찾을 수 없습니다: venv\Scripts\python.exe
+    pause
+    exit /b 1
+)
+
+venv\Scripts\python.exe -m pip install --upgrade pip
+if %errorlevel% neq 0 (
+    echo [오류] pip 업그레이드에 실패했습니다.
+    pause
+    exit /b 1
+)
+
+venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 
 if %errorlevel% neq 0 (
     echo [오류] 패키지 설치에 실패했습니다.

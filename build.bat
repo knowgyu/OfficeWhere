@@ -43,14 +43,13 @@ cd ..
 
 echo [office-data-joiner] PyInstaller 패키징 중...
 
-call venv\Scripts\activate
-if %errorlevel% neq 0 (
-    echo [오류] 가상환경을 활성화할 수 없습니다. setup.bat을 먼저 실행하세요.
+if not exist "venv\Scripts\python.exe" (
+    echo [오류] 가상환경 Python을 찾을 수 없습니다. setup.bat을 먼저 실행하세요.
     pause
     exit /b 1
 )
 
-python -m PyInstaller office_data_joiner.spec --clean -y
+venv\Scripts\python.exe -m PyInstaller office_data_joiner.spec --clean -y
 if %errorlevel% neq 0 (
     echo [오류] PyInstaller 패키징 실패
     pause

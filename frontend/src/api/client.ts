@@ -2,6 +2,17 @@ import axios from 'axios'
 
 const BASE = import.meta.env.DEV ? 'http://localhost:8765' : ''
 
+declare global {
+  interface Window {
+    pywebview?: {
+      api?: {
+        pickFolder?: () => Promise<FolderPickResponse & { error?: string }>
+        pickFile?: () => Promise<FilePickResponse & { error?: string }>
+      }
+    }
+  }
+}
+
 export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Unknown'
 export type CompareMode = 'excel' | 'word' | 'ppt'
 export type CellValue = string | number | boolean | null | undefined
@@ -329,6 +340,33 @@ export interface LibraryFileGroup {
 
 export interface LibraryGroupsResponse {
   groups: LibraryFileGroup[]
+}
+
+const desktopApi = () =>
+  typeof window !== 'undefined' ? window.pywebview?.api : undefined
+
+function desktopError(message: string): never {
+  throw { response: { data: { detail: message } } }
+}
+
+async function pickFileWithBestAvailableDialog() {
+  const bridge = desktopApi()
+  if (bridge?.pickFile) {
+    const data = await bridge.pickFile()
+    if (data.error) desktopError(data.error)
+    return { data }
+  }
+  return axios.post<FilePickResponse>(`${BASE}/api/files/pick`)
+}
+
+async function pickFolderWithBestAvailableDialog() {
+  const bridge = desktopApi()
+  if (bridge?.pickFolder) {
+    const data = await bridge.pickFolder()
+    if (data.error) desktopError(data.error)
+    return { data }
+  }
+  return axios.post<FolderPickResponse>(`${BASE}/api/files/pick-folder`)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -960,7 +998,7 @@ export const api = {
     list: () => axios.get<FileInfo[]>(`${BASE}/api/files`),
     inspect: (data: FileInspectRequest) =>
       axios.post<FileInspectResponse>(`${BASE}/api/files/inspect`, data),
-    pick: () => axios.post<FilePickResponse>(`${BASE}/api/files/pick`),
+    pick: pickFileWithBestAvailableDialog,
     register: (data: FileRegisterRequest) =>
       axios.post<FileRegisterResponse>(`${BASE}/api/files`, data),
     delete: (id: number) => axios.delete(`${BASE}/api/files/${id}`),
@@ -969,7 +1007,7 @@ export const api = {
       axios.get<{ columns?: string[]; suggested_key_column?: string }>(
         `${BASE}/api/files/${id}/suggest-key`
       ),
-    pickFolder: () => axios.post<FolderPickResponse>(`${BASE}/api/files/pick-folder`),
+    pickFolder: pickFolderWithBestAvailableDialog,
     scanFolder: (data: FolderScanRequest) =>
       axios.post<FolderScanResponse>(`${BASE}/api/files/scan-folder`, data),
     bulkRegister: (data: BulkRegisterRequest) =>

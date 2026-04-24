@@ -8,6 +8,7 @@ from PyInstaller.utils.hooks import collect_submodules
 # frontend/dist 경로
 frontend_dist = str(Path('frontend') / 'dist')
 backend_modules = collect_submodules('backend')
+webview_modules = collect_submodules('webview')
 
 a = Analysis(
     ['launcher.py'],
@@ -16,7 +17,7 @@ a = Analysis(
     datas=[
         (frontend_dist, 'frontend/dist'),
     ],
-    hiddenimports=backend_modules + [
+    hiddenimports=backend_modules + webview_modules + [
         # uvicorn
         'uvicorn.logging',
         'uvicorn.loops',
@@ -52,6 +53,7 @@ a = Analysis(
         'anyio._backends._asyncio',
         'anyio._backends._trio',
         'aiosqlite',
+        'webview',
         # Windows 멀티프로세싱 (freeze_support 관련)
         'multiprocessing',
         'multiprocessing.spawn',
@@ -82,7 +84,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,  # 오류 확인을 위해 콘솔 창 표시
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,

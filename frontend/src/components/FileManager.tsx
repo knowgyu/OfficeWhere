@@ -4,6 +4,7 @@ import {
   api,
   FileInfo,
   FileInspectResponse,
+  LibraryRescanResponse,
   LibrarySettings,
   NormalizedFileInspect,
   NormalizedPreview,
@@ -63,7 +64,9 @@ export default function FileManager() {
   const [folderPathDraft, setFolderPathDraft] = useState('')
   const [folderRecursive, setFolderRecursive] = useState(true)
   const [settingsLoading, setSettingsLoading] = useState(false)
+  const [folderPicking, setFolderPicking] = useState(false)
   const [rescanning, setRescanning] = useState(false)
+  const [rescanSummary, setRescanSummary] = useState<LibraryRescanResponse | null>(null)
 
   const fetchFiles = async () => {
     setLoading(true)
@@ -100,24 +103,29 @@ export default function FileManager() {
       const response = await api.library.updateSettings(next)
       setLibrarySettings(response.data)
       snackbar.success('대상 폴더 설정이 저장되었습니다.')
+      return response.data
     } catch {
       snackbar.error('대상 폴더 설정 저장에 실패했습니다.')
+      return null
     } finally {
       setSettingsLoading(false)
     }
   }
 
   const handlePickWatchedFolder = async () => {
-    setSettingsLoading(true)
+    setFolderPicking(true)
     try {
       const response = await api.files.pickFolder()
       if (!response.data.cancelled && response.data.folder_path) {
         setFolderPathDraft(response.data.folder_path)
       }
-    } catch {
-      snackbar.error('폴더 선택창을 열지 못했습니다.')
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        '폴더 선택창을 열지 못했습니다. 경로를 직접 입력해 주세요.'
+      snackbar.error(detail)
     } finally {
-      setSettingsLoading(false)
+      setFolderPicking(false)
     }
   }
 
@@ -136,8 +144,11 @@ export default function FileManager() {
           )
         : [...librarySettings.watched_folders, { path, recursive: folderRecursive }],
     }
-    await saveLibrarySettings(next)
+    const saved = await saveLibrarySettings(next)
+    if (!saved) return
+
     setFolderPathDraft('')
+    await runLibraryRescan('added')
   }
 
   const handleRemoveWatchedFolder = async (path: string) => {
@@ -151,22 +162,36 @@ export default function FileManager() {
     await saveLibrarySettings({ ...librarySettings, ...patch })
   }
 
-  const handleRescanLibrary = async () => {
+  const runLibraryRescan = async (reason: 'manual' | 'added') => {
     setRescanning(true)
+    setRescanSummary(null)
     try {
       const response = await api.library.rescan()
+      setRescanSummary(response.data)
       const { registered, updated, skipped, failed } = response.data
       if (failed > 0) {
         snackbar.warn(`자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped} · 실패 ${failed}`)
       } else {
-        snackbar.success(`자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped}`)
+        snackbar.success(
+          reason === 'added'
+            ? `폴더 추가 및 색인 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped}`
+            : `자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped}`,
+        )
       }
       await fetchFiles()
-    } catch {
-      snackbar.error('대상 폴더 자동 등록에 실패했습니다.')
+      void fetchLibrarySettings()
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        '대상 폴더 자동 등록에 실패했습니다.'
+      snackbar.error(detail)
     } finally {
       setRescanning(false)
     }
+  }
+
+  const handleRescanLibrary = async () => {
+    await runLibraryRescan('manual')
   }
 
   const resetInspection = () => {
@@ -353,7 +378,7 @@ export default function FileManager() {
               leadingIcon="sync"
               onClick={handleRescanLibrary}
               loading={rescanning}
-              disabled={librarySettings.watched_folders.length === 0}
+              disabled={settingsLoading || librarySettings.watched_folders.length === 0}
             >
               자동 등록 / 재스캔
             </Button>
@@ -375,11 +400,18 @@ export default function FileManager() {
               variant="tonal"
               leadingIcon="drive_folder_upload"
               onClick={handlePickWatchedFolder}
-              loading={settingsLoading}
+              loading={folderPicking}
+              disabled={settingsLoading || rescanning}
             >
               폴더 찾기
             </Button>
-            <Button variant="outlined" leadingIcon="add" onClick={handleAddWatchedFolder}>
+            <Button
+              variant="outlined"
+              leadingIcon="add"
+              onClick={handleAddWatchedFolder}
+              loading={settingsLoading}
+              disabled={folderPicking || rescanning}
+            >
               대상 추가
             </Button>
           </div>
@@ -421,6 +453,43 @@ export default function FileManager() {
                   />
                 </div>
               ))}
+            </div>
+          )}
+
+          {(rescanning || rescanSummary) && (
+            <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-4 py-3 flex items-start gap-3">
+              <div className="mt-0.5 text-[var(--md-sys-color-primary)]">
+                {rescanning ? <Spinner size={20} /> : <Icon name="task_alt" size={20} filled />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                  {rescanning ? '대상 폴더 색인 중' : '최근 색인 결과'}
+                </p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  {rescanning
+                    ? '파일을 스캔하고 검색용 색인을 생성하는 중입니다. 큰 폴더는 시간이 걸릴 수 있습니다.'
+                    : `신규 ${rescanSummary?.registered ?? 0} · 갱신 ${
+                        rescanSummary?.updated ?? 0
+                      } · 건너뜀 ${rescanSummary?.skipped ?? 0} · 실패 ${
+                        rescanSummary?.failed ?? 0
+                      }`}
+                </p>
+                {!rescanning && rescanSummary && rescanSummary.failed > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {rescanSummary.results
+                      .filter((item) => !item.success)
+                      .slice(0, 3)
+                      .map((item) => (
+                        <p
+                          key={item.path}
+                          className="type-body-sm text-[var(--md-sys-color-error)] break-all"
+                        >
+                          {item.name}: {item.error}
+                        </p>
+                      ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

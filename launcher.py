@@ -1,9 +1,10 @@
 """
 office-data-joiner launcher
-.exe 진입점: uvicorn 서버를 별도 스레드에서 시작하고 브라우저를 자동으로 엽니다.
+.exe 진입점: uvicorn 서버를 별도 스레드에서 시작하고 데스크톱 WebView 창을 엽니다.
 """
 import asyncio
 import multiprocessing
+import os
 import socket
 import sys
 import threading
@@ -46,6 +47,96 @@ def run_server():
         uvicorn.run("backend.main:app", host=HOST, port=PORT, log_level="warning")
 
 
+def _normalize_dialog_result(result) -> str:
+    if not result:
+        return ""
+    if isinstance(result, (list, tuple)):
+        return os.path.normpath(str(result[0])) if result else ""
+    return os.path.normpath(str(result))
+
+
+class DesktopApi:
+    def __init__(self):
+        self.window = None
+
+    def pickFolder(self):
+        try:
+            import webview
+
+            if self.window is not None:
+                result = self.window.create_file_dialog(webview.FOLDER_DIALOG, allow_multiple=False)
+                return {"cancelled": not bool(result), "folder_path": _normalize_dialog_result(result)}
+        except Exception:
+            pass
+
+        try:
+            from backend.core.file_access import pick_local_folder
+
+            path = pick_local_folder()
+            return {"cancelled": not bool(path), "folder_path": path}
+        except Exception as exc:
+            return {"cancelled": True, "folder_path": "", "error": str(exc)}
+
+    def pickFile(self):
+        try:
+            import webview
+
+            if self.window is not None:
+                result = self.window.create_file_dialog(
+                    webview.OPEN_DIALOG,
+                    allow_multiple=False,
+                    file_types=("Office files (*.xlsx;*.xls;*.docx;*.pptx)", "All files (*.*)"),
+                )
+                path = _normalize_dialog_result(result)
+            else:
+                path = ""
+        except Exception:
+            path = ""
+
+        if not path:
+            try:
+                from backend.core.file_access import pick_local_file
+
+                path = pick_local_file()
+            except Exception as exc:
+                return {"cancelled": True, "file": None, "error": str(exc)}
+
+        if not path:
+            return {"cancelled": True, "file": None}
+
+        try:
+            from backend.core.file_access import inspect_file_path
+
+            return {"cancelled": False, "file": inspect_file_path(path)}
+        except Exception as exc:
+            return {"cancelled": True, "file": None, "error": str(exc)}
+
+
+def open_desktop_window() -> bool:
+    try:
+        import webview
+    except Exception as exc:
+        print(f"[office-data-joiner] WebView를 사용할 수 없어 브라우저로 엽니다: {exc}")
+        return False
+
+    api = DesktopApi()
+    window = webview.create_window(
+        "Office Data Joiner",
+        URL,
+        js_api=api,
+        width=1280,
+        height=860,
+        min_size=(980, 680),
+    )
+    api.window = window
+    try:
+        webview.start(debug=False)
+    except Exception as exc:
+        print(f"[office-data-joiner] WebView 창을 열 수 없어 브라우저로 엽니다: {exc}")
+        return False
+    return True
+
+
 def main():
     if is_port_in_use(PORT):
         if is_office_data_joiner_running():
@@ -71,6 +162,19 @@ def main():
         sys.exit(1)
 
     time.sleep(1.0)
+    if os.environ.get("ODJ_NO_GUI") == "1":
+        print(f"[office-data-joiner] GUI 없이 서버만 실행 중입니다: {URL}")
+        try:
+            server_thread.join()
+        except KeyboardInterrupt:
+            print("\n[office-data-joiner] 서버를 종료합니다.")
+        return
+
+    print(f"[office-data-joiner] 데스크톱 창을 엽니다: {URL}")
+    if open_desktop_window():
+        print("[office-data-joiner] 데스크톱 창이 닫혀 앱을 종료합니다.")
+        return
+
     print(f"[office-data-joiner] 브라우저를 엽니다: {URL}")
     webbrowser.open(URL)
 

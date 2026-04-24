@@ -47,12 +47,15 @@ def pick_local_file() -> str:
     except Exception as exc:
         raise RuntimeError("이 환경에서는 파일 선택창을 열 수 없습니다.") from exc
 
+    root = None
     try:
         root = tk.Tk()
         root.withdraw()
+        root.update_idletasks()
         root.attributes("-topmost", True)
         root.lift()
         root.focus_force()
+        root.after(250, lambda: root.attributes("-topmost", False))
         path = filedialog.askopenfilename(
             parent=root,
             title="등록할 파일 선택",
@@ -64,11 +67,16 @@ def pick_local_file() -> str:
                 ("모든 파일", "*.*"),
             ],
         )
-        root.destroy()
     except Exception as exc:
         raise RuntimeError(
             "파일 선택창을 열지 못했습니다. 수동으로 경로를 입력해 주세요."
         ) from exc
+    finally:
+        try:
+            if root is not None:
+                root.destroy()
+        except Exception:
+            pass
 
     return os.path.normpath(path) if path else ""
 
@@ -121,18 +129,26 @@ def pick_local_folder() -> str:
     except Exception as exc:
         raise RuntimeError("이 환경에서는 폴더 선택창을 열 수 없습니다.") from exc
 
+    root = None
     try:
         root = tk.Tk()
         root.withdraw()
+        root.update_idletasks()
         root.attributes("-topmost", True)
         root.lift()
         root.focus_force()
+        root.after(250, lambda: root.attributes("-topmost", False))
         path = filedialog.askdirectory(
             parent=root,
             title="스캔할 폴더 선택",
         )
-        root.destroy()
     except Exception as exc:
         raise RuntimeError("폴더 선택창을 열지 못했습니다. 수동으로 경로를 입력해 주세요.") from exc
+    finally:
+        try:
+            if root is not None:
+                root.destroy()
+        except Exception:
+            pass
 
     return os.path.normpath(path) if path else ""

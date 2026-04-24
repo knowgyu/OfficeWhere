@@ -15,13 +15,12 @@ cd ..
 
 echo "[office-data-joiner] PyInstaller 패키징 중..."
 
-if [ ! -d "venv" ]; then
-    echo "[오류] venv가 없습니다. 먼저 ./setup.sh 를 실행하세요."
+if [ ! -x "venv/bin/python" ]; then
+    echo "[오류] 가상환경 Python을 찾을 수 없습니다. 먼저 ./setup.sh 를 실행하세요."
     exit 1
 fi
 
-source venv/bin/activate
-python -m PyInstaller office_data_joiner.spec --clean -y
+venv/bin/python -m PyInstaller office_data_joiner.spec --clean -y
 
 echo ""
 echo "[완료] dist/office-data-joiner/ 폴더에 실행파일이 생성되었습니다."
