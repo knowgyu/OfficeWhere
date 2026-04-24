@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from ..core.library import (
     build_file_groups,
+    cancel_library_rescan,
     get_library_rescan_status,
     load_library_settings,
     rescan_library,
@@ -41,6 +42,11 @@ def start_library_rescan_job():
 @router.get("/rescan/status", response_model=LibraryRescanStatus)
 def get_library_rescan_job_status():
     return get_library_rescan_status()
+
+
+@router.post("/rescan/cancel", response_model=LibraryRescanStatus)
+def cancel_library_rescan_job():
+    return cancel_library_rescan()
 
 
 @router.get("/groups", response_model=LibraryGroupsResponse)

@@ -4,7 +4,7 @@ import re
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..database import (
     get_all_files,
@@ -126,10 +126,10 @@ def _sanitize_fts_query(raw: str) -> str:
     return " ".join(f'"{word}"' for word in words)
 
 
-def search(query: str, limit: int = 100) -> list:
+def search(query: str, limit: int = 100, file_types: Optional[Sequence[str]] = None) -> list:
     if not query.strip():
         return []
-    return search_chunks(_sanitize_fts_query(query), limit=limit)
+    return search_chunks(_sanitize_fts_query(query), limit=limit, file_types=file_types)
 
 
 def reindex_all() -> Dict[str, int]:

@@ -206,6 +206,7 @@ class BulkRegisterResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     limit: int = 100
+    file_types: List[str] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):
@@ -264,6 +265,7 @@ class LibraryRescanResponse(BaseModel):
     skipped: int
     failed: int
     results: List[LibraryRescanResult]
+    cancelled: int = 0
 
 
 class LibraryRescanStatus(BaseModel):
@@ -283,6 +285,8 @@ class LibraryRescanStatus(BaseModel):
     updated: int = 0
     skipped: int = 0
     failed: int = 0
+    cancelled: int = 0
+    cancel_requested: bool = False
     current_file: Optional[str] = None
     summary: Optional[LibraryRescanResponse] = None
     error: Optional[str] = None

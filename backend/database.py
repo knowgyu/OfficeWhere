@@ -3,7 +3,7 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 
 def _default_db_dir() -> Path:
@@ -215,22 +215,34 @@ def update_file_mtime(file_id: int, mtime: float):
     conn.close()
 
 
-def search_chunks(fts_query: str, limit: int = 100) -> List[Dict[str, Any]]:
+def search_chunks(
+    fts_query: str,
+    limit: int = 100,
+    file_types: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
     conn = sqlite3.connect(str(DB_PATH), timeout=30)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    filters = [file_type for file_type in (file_types or []) if file_type]
+    type_clause = ""
+    params: List[Any] = [fts_query]
+    if filters:
+        placeholders = ",".join("?" for _ in filters)
+        type_clause = f" AND rf.file_type IN ({placeholders})"
+        params.extend(filters)
+    params.append(limit)
     cursor.execute(
-        """
+        f"""
         SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location,
                snippet(file_search, 0, '**', '**', '...', 15) AS snippet
         FROM file_search
         JOIN file_chunks fc ON fc.id = file_search.rowid
         JOIN registered_files rf ON rf.id = fc.file_id
-        WHERE file_search MATCH ?
+        WHERE file_search MATCH ?{type_clause}
         ORDER BY rank
         LIMIT ?
         """,
-        (fts_query, limit),
+        params,
     )
     rows = cursor.fetchall()
     conn.close()

@@ -117,3 +117,32 @@ def test_search_performance(tmp_path):
     elapsed = time.perf_counter() - start
 
     assert elapsed < 0.5, f"검색 {elapsed:.3f}초 — 0.5초 초과"
+
+
+def test_search_chunks_filters_file_type(tmp_path):
+    from backend.database import save_file_chunks
+
+    doc_id = register_file(str(tmp_path / "note.docx"), "note.docx", "Word", "", 0)
+    txt_id = register_file(str(tmp_path / "note.txt"), "note.txt", "Text", "", 0)
+    save_file_chunks(doc_id, [{"location": "본문", "content": "공통 키워드"}])
+    save_file_chunks(txt_id, [{"location": "본문", "content": "공통 키워드"}])
+
+    word_results = search_chunks('"공통"', file_types=["Word"])
+
+    assert {item["file_type"] for item in word_results} == {"Word"}
+
+
+def test_search_api_filters_filename_and_content(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    doc_id = register_file(str(tmp_path / "alpha.docx"), "alpha.docx", "Word", "", 0)
+    txt_id = register_file(str(tmp_path / "alpha.txt"), "alpha.txt", "Text", "", 0)
+    save_file_chunks(doc_id, [{"location": "본문", "content": "검색 대상"}])
+    save_file_chunks(txt_id, [{"location": "본문", "content": "검색 대상"}])
+
+    response = search_files(SearchRequest(query="alpha", file_types=["txt"]))
+
+    assert response.total == 1
+    assert response.results[0].file_type == "Text"

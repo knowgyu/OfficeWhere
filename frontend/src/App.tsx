@@ -4,7 +4,8 @@ import FileManager from './components/FileManager'
 import JoinQuery from './components/JoinQuery'
 import ConsistencyCheck from './components/ConsistencyCheck'
 import FileSearch from './components/FileSearch'
-import { Icon } from './ui'
+import { Button, Icon, Spinner } from './ui'
+import { useLibraryRescan } from './contexts/LibraryRescanContext'
 
 type Tab = 'search' | 'check' | 'join' | 'files'
 
@@ -82,6 +83,69 @@ export default function App() {
             {activeTab === 'check' && <ConsistencyCheck />}
           </div>
         </main>
+      </div>
+      <GlobalRescanProgress />
+    </div>
+  )
+}
+
+function formatEta(seconds?: number | null) {
+  if (!seconds || seconds <= 0) return '계산 중'
+  if (seconds < 60) return `${seconds}초`
+  const minutes = Math.ceil(seconds / 60)
+  if (minutes < 60) return `${minutes}분`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest > 0 ? `${hours}시간 ${rest}분` : `${hours}시간`
+}
+
+function GlobalRescanProgress() {
+  const { status, running, cancelling, cancelRescan } = useLibraryRescan()
+  if (!status || (!running && status.stage !== 'cancelling')) return null
+
+  const percent = Math.min(Math.max(status.percent || 0, status.total > 0 ? 4 : 0), 100)
+  const progressText =
+    status.total > 0
+      ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}% · 남은 시간 ${formatEta(status.eta_seconds)}`
+      : status.folders_total > 0
+        ? `폴더 ${status.folders_processed}/${status.folders_total} · 발견 ${status.found}개`
+        : '진행률 계산 중'
+
+  return (
+    <div className="fixed inset-x-0 bottom-24 z-50 flex justify-center pointer-events-none px-4">
+      <div className="pointer-events-auto w-full max-w-xl rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] shadow-elev-3 p-4 animate-slide-up">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 text-[var(--md-sys-color-primary)]">
+            <Spinner size={22} />
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+              {cancelling ? '재스캔 정지 중' : '자동 등록 / 재스캔 중'}
+            </p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {status.message || '대상 폴더 상태를 확인하는 중입니다.'}
+            </p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {progressText}
+              {status.current_file ? ` · 현재 ${status.current_file}` : ''}
+            </p>
+          </div>
+          <Button
+            variant="outlined"
+            size="sm"
+            leadingIcon="stop_circle"
+            onClick={() => void cancelRescan()}
+            disabled={cancelling}
+          >
+            정지
+          </Button>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container-high)]">
+          <div
+            className="h-full rounded-full bg-[var(--md-sys-color-primary)] transition-[width] duration-300"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
       </div>
     </div>
   )

@@ -13,12 +13,41 @@ from ..database import get_all_files, get_setting, set_setting
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
+FILE_TYPE_ALIASES = {
+    "word": "Word",
+    "docx": "Word",
+    "ppt": "PowerPoint",
+    "pptx": "PowerPoint",
+    "powerpoint": "PowerPoint",
+    "md": "Markdown",
+    "markdown": "Markdown",
+    "txt": "Text",
+    "text": "Text",
+    "excel": "Excel",
+    "xlsx": "Excel",
+    "xls": "Excel",
+}
+
+
+def normalize_file_type_filters(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        canonical = FILE_TYPE_ALIASES.get(value.strip().lower())
+        if canonical and canonical not in normalized:
+            normalized.append(canonical)
+    return normalized
+
+
 @router.post("", response_model=SearchResponse)
 def search_files(req: SearchRequest):
     normalized_query = req.query.strip().lower()
+    file_types = normalize_file_type_filters(req.file_types)
+    active_filter = set(file_types)
     name_matches = []
     if normalized_query:
         for file_info in get_all_files():
+            if active_filter and file_info["file_type"] not in active_filter:
+                continue
             if normalized_query in file_info["name"].lower():
                 name_matches.append(
                     {
@@ -33,7 +62,7 @@ def search_files(req: SearchRequest):
 
     seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
     content_results = []
-    for item in search(req.query, limit=req.limit):
+    for item in search(req.query, limit=req.limit, file_types=file_types):
         key = (item["file_id"], item["location"], item["snippet"])
         if key in seen:
             continue

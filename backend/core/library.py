@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import threading
@@ -27,8 +28,8 @@ from ..models.schemas import (
     LibraryRescanStatus,
     LibrarySettings,
 )
-from .file_access import scan_folder
 from .indexer import inspect_and_chunk
+from .parser import SUPPORTED_EXTENSIONS
 from .normalizer import suggest_key_column
 from ..runtime import get_worker_count
 
@@ -38,7 +39,8 @@ MAX_WORKERS = get_worker_count()
 ProgressCallback = Callable[[Dict[str, Any]], None]
 
 _rescan_status_lock = threading.Lock()
-_rescan_status: Dict[str, Any] = LibraryRescanStatus().dict()
+_rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
+_cancel_event = threading.Event()
 
 
 def _now_iso() -> str:
@@ -74,7 +76,8 @@ def _result_counts(results: List[LibraryRescanResult]) -> Dict[str, int]:
         "registered": sum(1 for item in results if item.action == "registered" and item.success),
         "updated": sum(1 for item in results if item.action == "updated" and item.success),
         "skipped": sum(1 for item in results if item.action == "skipped" and item.success),
-        "failed": sum(1 for item in results if not item.success),
+        "cancelled": sum(1 for item in results if item.action == "cancelled"),
+        "failed": sum(1 for item in results if not item.success and item.action != "cancelled"),
     }
 
 
@@ -104,6 +107,12 @@ def load_library_settings() -> LibrarySettings:
         return LibrarySettings()
 
 
+def _normalize_interval_hours(value: float) -> int:
+    if not math.isfinite(float(value)) or value < 1:
+        return 1
+    return max(1, int(math.floor(float(value))))
+
+
 def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
     normalized = LibrarySettings(
         watched_folders=[
@@ -115,11 +124,11 @@ def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
             if folder.path.strip()
         ],
         auto_rescan_mode=settings.auto_rescan_mode,
-        auto_rescan_interval_hours=settings.auto_rescan_interval_hours,
+        auto_rescan_interval_hours=_normalize_interval_hours(settings.auto_rescan_interval_hours),
         auto_rescan_daily_time=settings.auto_rescan_daily_time,
         last_rescan_at=settings.last_rescan_at,
     )
-    set_setting(SETTINGS_KEY, normalized.json())
+    set_setting(SETTINGS_KEY, normalized.model_dump_json())
     normalized.last_rescan_at = get_setting(LAST_RESCAN_KEY) or None
     return normalized
 
@@ -146,6 +155,32 @@ def file_sort_key(file_info: FileInfo) -> Tuple[float, str]:
         except ValueError:
             pass
     return (0, file_info.name)
+
+
+def _collect_supported_paths(folder_path: str, recursive: bool) -> List[str]:
+    folder = Path(os.path.normpath(folder_path.strip()))
+    if not folder.exists():
+        raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
+    if not folder.is_dir():
+        raise ValueError(f"폴더가 아닙니다: {folder_path}")
+
+    glob_pattern = "**/*" if recursive else "*"
+    return sorted(
+        os.path.normpath(str(path))
+        for ext in SUPPORTED_EXTENSIONS
+        for path in folder.glob(f"{glob_pattern}{ext}")
+        if path.is_file() and not path.name.startswith("~$")
+    )
+
+
+def _cancelled_result(path: str) -> LibraryRescanResult:
+    return LibraryRescanResult(
+        path=path,
+        name=Path(path).name,
+        success=False,
+        action="cancelled",
+        error="사용자가 자동 등록/재스캔을 정지했습니다.",
+    )
 
 
 def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> LibraryRescanResponse:
@@ -179,25 +214,18 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                 "processed": 0,
                 "percent": 0.0,
                 "eta_seconds": None,
+                "cancel_requested": False,
             }
         )
 
     for folder_index, folder in enumerate(settings.watched_folders, start=1):
+        if _cancel_event.is_set():
+            break
         try:
-            for item in scan_folder(folder.path, folder.recursive):
-                normalized_path = os.path.normpath(item["path"])
-                if item.get("error"):
-                    scan_errors.append(
-                        LibraryRescanResult(
-                            path=normalized_path,
-                            name=item["name"],
-                            success=False,
-                            action="failed",
-                            error=item["error"],
-                        )
-                    )
-                else:
-                    found_paths[normalized_path] = item["name"]
+            for path in _collect_supported_paths(folder.path, folder.recursive):
+                if _cancel_event.is_set():
+                    break
+                found_paths[path] = Path(path).name
         except Exception as exc:
             scan_errors.append(
                 LibraryRescanResult(
@@ -211,8 +239,8 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
         if progress_callback:
             progress_callback(
                 {
-                    "stage": "scanning",
-                    "message": f"대상 폴더 스캔 중 · {folder_index}/{folders_total}",
+                    "stage": "cancelling" if _cancel_event.is_set() else "scanning",
+                    "message": "정지 요청을 처리하는 중입니다." if _cancel_event.is_set() else f"파일 경로 확인 중 · 폴더 {folder_index}/{folders_total}",
                     "folders_total": folders_total,
                     "folders_processed": folder_index,
                     "found": len(found_paths),
@@ -221,12 +249,16 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                     "processed": 0,
                     "percent": 0.0,
                     "eta_seconds": None,
+                    "cancel_requested": _cancel_event.is_set(),
                 }
             )
 
     existing_by_path = {os.path.normpath(row["path"]): row for row in get_all_files()}
 
     def _register_or_update(path: str) -> LibraryRescanResult:
+        if _cancel_event.is_set():
+            return _cancelled_result(path)
+
         name = Path(path).name
         existing = existing_by_path.get(path)
         try:
@@ -240,6 +272,9 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                         action="skipped",
                         file_id=existing["id"],
                     )
+
+            if _cancel_event.is_set():
+                return _cancelled_result(path)
 
             info, chunks = inspect_and_chunk(path, parser_config=existing.get("parser_config") if existing else None)
             key_column = suggest_key_column(info["columns"]) if info["file_type"] == "Excel" else ""
@@ -280,65 +315,130 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
     if progress_callback:
         progress_callback(
             {
-                "stage": "indexing" if total > 0 else "completed",
-                "message": f"검색 색인 생성 중 · 파일 {total}개 발견",
+                "stage": "cancelling" if _cancel_event.is_set() else ("indexing" if total > 0 else "completed"),
+                "message": "정지 요청을 처리하는 중입니다." if _cancel_event.is_set() else f"변경 여부 확인 및 색인 준비 중 · 파일 {total}개 발견",
                 "found": total,
                 "total": total,
                 "processed": 0,
                 "percent": 0.0 if total > 0 else 100.0,
                 "eta_seconds": None,
+                "cancel_requested": _cancel_event.is_set(),
                 **_result_counts(scan_errors),
             }
         )
 
+    if _cancel_event.is_set():
+        results.extend(scan_errors)
+        response = LibraryRescanResponse(results=results, **_result_counts(results))
+        if progress_callback:
+            progress_callback(
+                {
+                    "stage": "cancelled",
+                    "message": "자동 등록/재스캔이 정지되었습니다.",
+                    "found": total,
+                    "total": total,
+                    "processed": 0,
+                    "percent": 0.0,
+                    "eta_seconds": None,
+                    "summary": response,
+                    "cancel_requested": True,
+                    **_result_counts(results),
+                }
+            )
+        return response
+
     if total > 0:
+        pending_paths = iter(sorted_paths)
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            future_to_path = {executor.submit(_register_or_update, path): path for path in sorted_paths}
-            for processed, future in enumerate(as_completed(future_to_path), start=1):
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    path = future_to_path[future]
-                    result = LibraryRescanResult(
-                        path=path,
-                        name=Path(path).name,
-                        success=False,
-                        action="failed",
-                        error=str(exc),
-                    )
-                results.append(result)
-                if progress_callback:
-                    counts = _result_counts([*results, *scan_errors])
-                    progress_callback(
-                        {
-                            "stage": "indexing",
-                            "message": f"검색 색인 생성 중 · {processed}/{total}",
-                            "found": total,
-                            "total": total,
-                            "processed": processed,
-                            "percent": round((processed / total) * 100, 1),
-                            "eta_seconds": _estimate_eta_seconds(started_monotonic, processed, total),
-                            "current_file": result.name,
-                            **counts,
-                        }
-                    )
+            futures: Dict[Any, str] = {}
+            for _ in range(min(MAX_WORKERS, total)):
+                path = next(pending_paths, None)
+                if path is None:
+                    break
+                futures[executor.submit(_register_or_update, path)] = path
+
+            processed = 0
+            while futures:
+                for future in as_completed(list(futures)):
+                    path = futures.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = LibraryRescanResult(
+                            path=path,
+                            name=Path(path).name,
+                            success=False,
+                            action="failed",
+                            error=str(exc),
+                        )
+                    results.append(result)
+                    processed += 1
+
+                    if not _cancel_event.is_set():
+                        next_path = next(pending_paths, None)
+                        if next_path is not None:
+                            futures[executor.submit(_register_or_update, next_path)] = next_path
+
+                    if progress_callback:
+                        counts = _result_counts([*results, *scan_errors])
+                        progress_callback(
+                            {
+                                "stage": "cancelling" if _cancel_event.is_set() else "indexing",
+                                "message": "정지 요청을 처리하는 중입니다." if _cancel_event.is_set() else f"변경 확인 및 색인 중 · {processed}/{total}",
+                                "found": total,
+                                "total": total,
+                                "processed": processed,
+                                "percent": round((processed / total) * 100, 1),
+                                "eta_seconds": _estimate_eta_seconds(started_monotonic, processed, total),
+                                "current_file": result.name,
+                                "cancel_requested": _cancel_event.is_set(),
+                                **counts,
+                            }
+                        )
+                    break
+
+                if _cancel_event.is_set():
+                    for future in futures:
+                        future.cancel()
+                    for future, path in list(futures.items()):
+                        if future.cancelled():
+                            results.append(_cancelled_result(path))
+                            processed += 1
+                            continue
+                        try:
+                            results.append(future.result())
+                        except Exception as exc:
+                            results.append(
+                                LibraryRescanResult(
+                                    path=path,
+                                    name=Path(path).name,
+                                    success=False,
+                                    action="failed",
+                                    error=str(exc),
+                                )
+                            )
+                        processed += 1
+                    futures.clear()
+                    break
 
     results.extend(scan_errors)
     set_setting(LAST_RESCAN_KEY, datetime.now().isoformat())
     counts = _result_counts(results)
     response = LibraryRescanResponse(results=results, **counts)
+    cancelled = _cancel_event.is_set()
     if progress_callback:
         progress_callback(
             {
-                "stage": "completed",
-                "message": "대상 폴더 색인이 완료되었습니다.",
+                "stage": "cancelled" if cancelled else "completed",
+                "message": "자동 등록/재스캔이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
                 "found": total,
                 "total": total,
-                "processed": total,
-                "percent": 100.0,
+                "processed": len(results) - len(scan_errors),
+                "percent": round((len(results) - len(scan_errors)) / total * 100, 1) if total else 100.0,
                 "eta_seconds": None,
                 "current_file": None,
                 "summary": response,
+                "cancel_requested": cancelled,
                 **counts,
             }
         )
@@ -348,14 +448,16 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
 def _run_rescan_job() -> None:
     try:
         summary = rescan_library(progress_callback=_update_rescan_status)
+        cancelled = _cancel_event.is_set()
         _update_rescan_status(
             {
                 "running": False,
-                "stage": "completed",
-                "message": "대상 폴더 색인이 완료되었습니다.",
-                "percent": 100.0,
+                "stage": "cancelled" if cancelled else "completed",
+                "message": "자동 등록/재스캔이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
+                "percent": _rescan_status.get("percent", 100.0),
                 "eta_seconds": None,
                 "summary": summary,
+                "cancel_requested": cancelled,
                 "error": None,
             }
         )
@@ -369,6 +471,8 @@ def _run_rescan_job() -> None:
                 "error": str(exc),
             }
         )
+    finally:
+        _cancel_event.clear()
 
 
 def start_library_rescan() -> LibraryRescanStatus:
@@ -376,6 +480,7 @@ def start_library_rescan() -> LibraryRescanStatus:
         if _rescan_status.get("running"):
             return LibraryRescanStatus(**_rescan_status)
 
+        _cancel_event.clear()
         _rescan_status.clear()
         _rescan_status.update(
             LibraryRescanStatus(
@@ -384,13 +489,28 @@ def start_library_rescan() -> LibraryRescanStatus:
                 message="대상 폴더 색인을 준비하는 중입니다.",
                 started_at=_now_iso(),
                 updated_at=_now_iso(),
-            ).dict()
+            ).model_dump()
         )
 
     thread = threading.Thread(target=_run_rescan_job, daemon=True, name="library-rescan")
     thread.start()
     return _status_snapshot()
 
+
+def cancel_library_rescan() -> LibraryRescanStatus:
+    with _rescan_status_lock:
+        if not _rescan_status.get("running"):
+            return LibraryRescanStatus(**_rescan_status)
+        _cancel_event.set()
+        _rescan_status.update(
+            {
+                "stage": "cancelling",
+                "message": "정지 요청을 처리하는 중입니다.",
+                "cancel_requested": True,
+                "updated_at": _now_iso(),
+            }
+        )
+        return LibraryRescanStatus(**_rescan_status)
 
 def build_file_groups() -> List[LibraryFileGroup]:
     buckets: Dict[Tuple[str, str], List[FileInfo]] = {}

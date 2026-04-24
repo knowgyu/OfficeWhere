@@ -3,11 +3,14 @@ import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
 import './index.css'
 import { SnackbarProvider } from './ui'
+import { LibraryRescanProvider } from './contexts/LibraryRescanContext.tsx'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <SnackbarProvider>
-      <App />
+      <LibraryRescanProvider>
+        <App />
+      </LibraryRescanProvider>
     </SnackbarProvider>
   </React.StrictMode>,
 )

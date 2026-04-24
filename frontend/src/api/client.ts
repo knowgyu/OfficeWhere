@@ -307,6 +307,12 @@ export interface SearchResult {
   snippet: string
 }
 
+export interface SearchRequest {
+  query: string
+  limit?: number
+  file_types?: string[]
+}
+
 export interface SearchResponse {
   query: string
   total: number
@@ -343,7 +349,7 @@ export interface LibraryRescanResult {
   path: string
   name: string
   success: boolean
-  action: 'registered' | 'updated' | 'skipped' | 'failed'
+  action: 'registered' | 'updated' | 'skipped' | 'failed' | 'cancelled'
   file_id?: number
   error?: string
 }
@@ -354,11 +360,12 @@ export interface LibraryRescanResponse {
   skipped: number
   failed: number
   results: LibraryRescanResult[]
+  cancelled: number
 }
 
 export interface LibraryRescanStatus {
   running: boolean
-  stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'completed' | 'failed'
+  stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
   message: string
   started_at?: string | null
   updated_at?: string | null
@@ -373,6 +380,8 @@ export interface LibraryRescanStatus {
   updated: number
   skipped: number
   failed: number
+  cancelled: number
+  cancel_requested: boolean
   current_file?: string | null
   summary?: LibraryRescanResponse | null
   error?: string | null
@@ -1105,7 +1114,7 @@ export const api = {
       apiPath('/api/check').then((url) => axios.post<unknown>(url, data)),
   },
   search: {
-    query: (data: { query: string; limit?: number }) =>
+    query: (data: SearchRequest) =>
       apiPath('/api/search').then((url) => axios.post<SearchResponse>(url, data)),
     reindex: async () => axios.post<ReindexResponse>(await apiPath('/api/search/reindex')),
     getSettings: async () => axios.get<SchedulerSettings>(await apiPath('/api/search/settings')),
@@ -1119,6 +1128,7 @@ export const api = {
     rescan: async () => axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan')),
     startRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start')),
     rescanStatus: async () => axios.get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
+    cancelRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/cancel')),
     groups: async () => axios.get<LibraryGroupsResponse>(await apiPath('/api/library/groups')),
   },
 }

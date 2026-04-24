@@ -16,6 +16,14 @@ import {
   useSnackbar,
 } from '../ui'
 
+
+const FILE_TYPE_FILTERS = [
+  { label: 'Word / DOCX', value: 'docx', icon: 'article' },
+  { label: 'PPT / PPTX', value: 'pptx', icon: 'slideshow' },
+  { label: 'Markdown / MD', value: 'md', icon: 'docs' },
+  { label: 'Text / TXT', value: 'txt', icon: 'description' },
+]
+
 function SnippetText({ snippet }: { snippet: string }) {
   const parts = snippet.split('**')
   return (
@@ -42,6 +50,7 @@ export default function FileSearch() {
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
+  const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>([])
 
   const [settings, setSettings] = useState<SchedulerSettings | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -58,7 +67,7 @@ export default function FileSearch() {
   }, [])
 
   const doSearch = useCallback(
-    async (q: string) => {
+    async (q: string, fileTypes = selectedFileTypes) => {
       if (!q.trim()) {
         setResults([])
         setSearched(false)
@@ -66,7 +75,11 @@ export default function FileSearch() {
       }
       setLoading(true)
       try {
-        const response = await api.search.query({ query: q, limit: 200 })
+        const response = await api.search.query({
+          query: q,
+          limit: 200,
+          file_types: fileTypes.length > 0 ? fileTypes : undefined,
+        })
         setResults(response.data.results)
         setSearched(true)
       } catch {
@@ -76,13 +89,21 @@ export default function FileSearch() {
         setLoading(false)
       }
     },
-    [snackbar],
+    [selectedFileTypes, snackbar],
   )
 
   const handleQueryChange = (value: string) => {
     setQuery(value)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => doSearch(value), 300)
+  }
+
+  const toggleFileType = (value: string) => {
+    const next = selectedFileTypes.includes(value)
+      ? selectedFileTypes.filter((item) => item !== value)
+      : [...selectedFileTypes, value]
+    setSelectedFileTypes(next)
+    if (query.trim()) void doSearch(query, next)
   }
 
   const handleReindex = async () => {
@@ -104,8 +125,16 @@ export default function FileSearch() {
 
   const handleSaveSettings = async () => {
     if (!settingsDraft) return
+    const intervalHours = Math.floor(Number(settingsDraft.interval_hours))
+    if (settingsDraft.mode === 'interval' && (!Number.isFinite(intervalHours) || intervalHours < 1)) {
+      snackbar.warn('반복 주기는 1 이상인 정수만 입력할 수 있습니다.')
+      return
+    }
     try {
-      const response = await api.search.updateSettings(settingsDraft)
+      const response = await api.search.updateSettings({
+        ...settingsDraft,
+        interval_hours: settingsDraft.mode === 'interval' ? intervalHours : settingsDraft.interval_hours,
+      })
       setSettings(response.data)
       setSettingsOpen(false)
       snackbar.success('검색 갱신 주기가 저장되었습니다.')
@@ -173,14 +202,6 @@ export default function FileSearch() {
             >
               검색
             </Button>
-            <Button
-              variant="tonal"
-              leadingIcon="refresh"
-              onClick={handleReindex}
-              loading={reindexing}
-            >
-              검색 갱신
-            </Button>
             <IconButton
               icon={settingsOpen ? 'tune' : 'tune'}
               label="검색 갱신 주기"
@@ -201,6 +222,25 @@ export default function FileSearch() {
             </span>
           )}
         </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">문서 형식</span>
+            {FILE_TYPE_FILTERS.map((filter) => (
+              <Chip
+                key={filter.value}
+                label={filter.label}
+                icon={filter.icon}
+                kind="filter"
+                selected={selectedFileTypes.includes(filter.value)}
+                onClick={() => toggleFileType(filter.value)}
+              />
+            ))}
+          </div>
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            선택을 모두 해제하면 전체 형식에서 검색합니다.
+          </p>
+        </div>
       </Card>
 
       {settingsOpen && settingsDraft && (
@@ -217,7 +257,7 @@ export default function FileSearch() {
               checked={settingsDraft.mode === 'manual'}
               onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'manual' })}
               label="수동"
-              description="필요할 때 '검색 갱신' 버튼으로 실행합니다."
+              description="필요할 때 이 설정 영역에서 수동 갱신을 실행합니다."
             />
             <Radio
               name="reindex-mode"
@@ -238,10 +278,11 @@ export default function FileSearch() {
           {settingsDraft.mode === 'interval' && (
             <div className="flex items-center gap-2">
               <TextField
-                label="반복 주기"
+                label="반복 주기(시간)"
                 type="number"
                 min={1}
                 max={72}
+                step={1}
                 value={settingsDraft.interval_hours}
                 onChange={(event) =>
                   setSettingsDraft({
@@ -249,9 +290,8 @@ export default function FileSearch() {
                     interval_hours: Number(event.target.value),
                   })
                 }
-                className="w-32"
+                className="w-40"
                 fullWidth={false}
-                helper="단위: 시간"
               />
             </div>
           )}
@@ -269,13 +309,18 @@ export default function FileSearch() {
             />
           )}
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="text" onClick={() => setSettingsOpen(false)}>
-              취소
+          <div className="flex justify-between gap-2 pt-1 flex-wrap">
+            <Button variant="tonal" leadingIcon="refresh" onClick={handleReindex} loading={reindexing}>
+              지금 검색 색인 갱신
             </Button>
-            <Button variant="filled" leadingIcon="save" onClick={handleSaveSettings}>
-              저장
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="text" onClick={() => setSettingsOpen(false)}>
+                취소
+              </Button>
+              <Button variant="filled" leadingIcon="save" onClick={handleSaveSettings}>
+                저장
+              </Button>
+            </div>
           </div>
         </Card>
       )}
@@ -307,6 +352,9 @@ export default function FileSearch() {
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
             <Chip label={`${results.length}건`} tone="primary" as="span" icon="filter_list" />
+            {selectedFileTypes.length > 0 && (
+              <Chip label={`형식 ${selectedFileTypes.length}개 선택`} tone="secondary" as="span" icon="checklist" />
+            )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               {grouped.length}개 파일에서 매칭됨
             </span>

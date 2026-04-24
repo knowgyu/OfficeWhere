@@ -56,4 +56,12 @@ logs/
 ~$*.pptx
 
 # App data
-~/.office-data-joiner/
+~/.officewhere/
+~/.office-data-joiner/  # legacy
+
+# Private agent/user instruction files
+CLAUDE.md
+AGENTS.md
+
+.omx/
+.pytest_cache/

@@ -34,20 +34,9 @@ import {
   TextField,
   useSnackbar,
 } from '../ui'
+import { useLibraryRescan } from '../contexts/LibraryRescanContext'
 import FolderScanner from './FolderScanner'
 import PreviewPanel from './PreviewPanel'
-
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-function statusToSummary(status: LibraryRescanStatus): LibraryRescanResponse {
-  return {
-    registered: status.registered,
-    updated: status.updated,
-    skipped: status.skipped,
-    failed: status.failed,
-    results: [],
-  }
-}
 
 function formatEta(seconds?: number | null) {
   if (!seconds || seconds <= 0) return '계산 중'
@@ -61,9 +50,11 @@ function formatEta(seconds?: number | null) {
 
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
   if (!rescanning && status?.stage === 'failed') return '대상 폴더 색인 실패'
+  if (!rescanning && status?.stage === 'cancelled') return '대상 폴더 색인 정지됨'
   if (!rescanning) return '최근 색인 결과'
   if (status?.stage === 'scanning') return '대상 폴더 스캔 중'
-  if (status?.stage === 'indexing') return '파일 색인 중'
+  if (status?.stage === 'indexing') return '변경 확인 및 파일 색인 중'
+  if (status?.stage === 'cancelling') return '정지 요청 처리 중'
   return '대상 폴더 색인 준비 중'
 }
 
@@ -84,7 +75,10 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
 
   const source = summary ?? status?.summary
   if (!source) return '아직 실행 결과가 없습니다.'
-  return `신규 ${source.registered} · 갱신 ${source.updated} · 건너뜀 ${source.skipped} · 실패 ${source.failed}`
+  const checked = source.registered + source.updated + source.skipped
+  const unchanged = source.skipped > 0 ? ` · 변경 없음 ${source.skipped}` : ''
+  const cancelled = source.cancelled > 0 ? ` · 정지 ${source.cancelled}` : ''
+  return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${cancelled} · 실패 ${source.failed}`
 }
 
 export default function FileManager() {
@@ -116,9 +110,13 @@ export default function FileManager() {
   const [folderRecursive, setFolderRecursive] = useState(true)
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [folderPicking, setFolderPicking] = useState(false)
-  const [rescanning, setRescanning] = useState(false)
-  const [rescanSummary, setRescanSummary] = useState<LibraryRescanResponse | null>(null)
-  const [rescanStatus, setRescanStatus] = useState<LibraryRescanStatus | null>(null)
+  const {
+    status: rescanStatus,
+    summary: rescanSummary,
+    running: rescanning,
+    completionKey: rescanCompletionKey,
+    startRescan,
+  } = useLibraryRescan()
 
   const fetchFiles = async () => {
     setLoading(true)
@@ -136,6 +134,12 @@ export default function FileManager() {
     fetchFiles()
     void fetchLibrarySettings()
   }, [])
+
+  useEffect(() => {
+    if (rescanCompletionKey === 0) return
+    void fetchFiles()
+    void fetchLibrarySettings()
+  }, [rescanCompletionKey])
 
   const fetchLibrarySettings = async () => {
     setSettingsLoading(true)
@@ -200,7 +204,7 @@ export default function FileManager() {
     if (!saved) return
 
     setFolderPathDraft('')
-    await runLibraryRescan('added')
+    await startRescan('added')
   }
 
   const handleRemoveWatchedFolder = async (path: string) => {
@@ -214,51 +218,23 @@ export default function FileManager() {
     await saveLibrarySettings({ ...librarySettings, ...patch })
   }
 
-  const runLibraryRescan = async (reason: 'manual' | 'added') => {
-    setRescanning(true)
-    setRescanSummary(null)
-    setRescanStatus(null)
-    try {
-      let status = (await api.library.startRescan()).data
-      setRescanStatus(status)
-
-      while (status.running) {
-        await sleep(700)
-        status = (await api.library.rescanStatus()).data
-        setRescanStatus(status)
-      }
-
-      if (status.stage === 'failed') {
-        throw new Error(status.error || status.message || '대상 폴더 자동 등록에 실패했습니다.')
-      }
-
-      const summary = status.summary ?? statusToSummary(status)
-      setRescanSummary(summary)
-      const { registered, updated, skipped, failed } = summary
-      if (failed > 0) {
-        snackbar.warn(`자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped} · 실패 ${failed}`)
-      } else {
-        snackbar.success(
-          reason === 'added'
-            ? `폴더 추가 및 색인 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped}`
-            : `자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped}`,
-        )
-      }
-      await fetchFiles()
-      void fetchLibrarySettings()
-    } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        (error as Error)?.message ??
-        '대상 폴더 자동 등록에 실패했습니다.'
-      snackbar.error(detail)
-    } finally {
-      setRescanning(false)
+  const normalizeIntervalHours = (value: string | number) => {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric) || numeric < 1) {
+      snackbar.warn('반복 주기는 1 이상인 정수만 입력할 수 있습니다.')
+      return null
     }
+    return Math.floor(numeric)
+  }
+
+  const handleUpdateIntervalHours = async (value: string) => {
+    const normalized = normalizeIntervalHours(value)
+    if (normalized === null) return
+    await handleUpdateAutoRescan({ auto_rescan_interval_hours: normalized })
   }
 
   const handleRescanLibrary = async () => {
-    await runLibraryRescan('manual')
+    await startRescan('manual')
   }
 
   const resetInspection = () => {
@@ -525,6 +501,7 @@ export default function FileManager() {
                     label="대상 폴더 제거"
                     size="sm"
                     onClick={() => void handleRemoveWatchedFolder(folder.path)}
+                    disabled={rescanning}
                   />
                 </div>
               ))}
@@ -593,17 +570,13 @@ export default function FileManager() {
               </SelectField>
               {librarySettings.auto_rescan_mode === 'interval' && (
                 <TextField
-                  label="반복 주기"
+                  label="반복 주기(시간)"
                   type="number"
                   min={1}
                   max={168}
+                  step={1}
                   value={librarySettings.auto_rescan_interval_hours}
-                  onChange={(event) =>
-                    void handleUpdateAutoRescan({
-                      auto_rescan_interval_hours: Number(event.target.value) || 24,
-                    })
-                  }
-                  helper="단위: 시간"
+                  onChange={(event) => void handleUpdateIntervalHours(event.target.value)}
                 />
               )}
               {librarySettings.auto_rescan_mode === 'daily' && (
