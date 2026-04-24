@@ -89,16 +89,6 @@ export default function App() {
   )
 }
 
-function formatEta(seconds?: number | null) {
-  if (!seconds || seconds <= 0) return '계산 중'
-  if (seconds < 60) return `${seconds}초`
-  const minutes = Math.ceil(seconds / 60)
-  if (minutes < 60) return `${minutes}분`
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest > 0 ? `${hours}시간 ${rest}분` : `${hours}시간`
-}
-
 function GlobalRescanProgress() {
   const { status, running, cancelling, cancelRescan } = useLibraryRescan()
   if (!status || (!running && status.stage !== 'cancelling')) return null
@@ -106,7 +96,7 @@ function GlobalRescanProgress() {
   const percent = Math.min(Math.max(status.percent || 0, status.total > 0 ? 4 : 0), 100)
   const progressText =
     status.total > 0
-      ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}% · 남은 시간 ${formatEta(status.eta_seconds)}`
+      ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}%`
       : status.folders_total > 0
         ? `폴더 ${status.folders_processed}/${status.folders_total} · 발견 ${status.found}개`
         : '진행률 계산 중'

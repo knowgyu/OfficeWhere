@@ -38,16 +38,6 @@ import { useLibraryRescan } from '../contexts/LibraryRescanContext'
 import FolderScanner from './FolderScanner'
 import PreviewPanel from './PreviewPanel'
 
-function formatEta(seconds?: number | null) {
-  if (!seconds || seconds <= 0) return '계산 중'
-  if (seconds < 60) return `${seconds}초`
-  const minutes = Math.ceil(seconds / 60)
-  if (minutes < 60) return `${minutes}분`
-  const hours = Math.floor(minutes / 60)
-  const rest = minutes % 60
-  return rest > 0 ? `${hours}시간 ${rest}분` : `${hours}시간`
-}
-
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
   if (!rescanning && status?.stage === 'failed') return '대상 폴더 색인 실패'
   if (!rescanning && status?.stage === 'cancelled') return '대상 폴더 색인 정지됨'
@@ -63,9 +53,7 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
     const foundText = `발견 ${status.found}개`
     const progressText =
       status.total > 0
-        ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}% · 남은 시간 ${formatEta(
-            status.eta_seconds,
-          )}`
+        ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}%`
         : status.folders_total > 0
           ? `폴더 ${status.folders_processed}/${status.folders_total}`
           : '진행률 계산 중'

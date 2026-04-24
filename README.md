@@ -159,12 +159,17 @@ git push origin main v0.1.4
 
 ## 데이터 저장 위치
 
-사용자 데이터베이스는 기본적으로 사용자 홈 아래에 저장됩니다.
+OfficeWhere는 원본 문서를 DB에 복사하지 않고 파일 경로, 메타데이터, 검색 색인만 저장합니다.
 
-- 앱 메타데이터: `~/.officewhere/data.db`
-- 등록 파일 원본: DB에 복사하지 않고 경로와 메타데이터만 저장
+Electron 앱으로 실행할 때 데이터베이스는 OS 앱 데이터 디렉터리 아래에 저장됩니다.
 
-파일을 이동하거나 삭제하면 해당 파일은 다시 등록해야 합니다.
+- Windows: `%APPDATA%\OfficeWhere\backend-data\data.db`
+- macOS: `~/Library/Application Support/OfficeWhere/backend-data/data.db`
+- Linux: `~/.config/OfficeWhere/backend-data/data.db`
+
+백엔드를 직접 실행하고 `--data-dir` / `ODJ_DATA_DIR`를 지정하지 않은 경우에는 `~/.officewhere/data.db`를 사용합니다.
+
+파일을 이동하거나 삭제하면 해당 파일은 다시 등록해야 합니다. portable zip을 삭제해도 위 앱 데이터 디렉터리는 OS에 남을 수 있습니다.
 
 ## 문제 해결
 
