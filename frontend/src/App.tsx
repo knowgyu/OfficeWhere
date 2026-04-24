@@ -38,8 +38,8 @@ const TABS: TabDef[] = [
     id: 'join',
     label: 'Excel 통합',
     short: '통합',
-    icon: 'join_inner',
-    iconFilled: 'join_inner',
+    icon: 'table_chart',
+    iconFilled: 'table_chart',
     hint: '같은 기준 컬럼을 가진 여러 Excel 표를 하나로 합칩니다',
   },
   {
@@ -96,13 +96,12 @@ function NavigationRail({
 }) {
   return (
     <aside className="sticky top-0 self-start flex flex-col items-center gap-2 w-24 min-h-screen py-4 bg-[var(--md-sys-color-surface-container-low)] border-r border-[var(--md-sys-color-outline-variant)]">
-      <div className="flex flex-col items-center gap-1.5 py-3">
+      <div className="flex items-center justify-center py-3">
         <img
           src={LOGO_SRC}
           alt="OfficeWhere"
           className="h-10 w-10 rounded-md object-cover shadow-elev-1"
         />
-        <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">OW</p>
       </div>
 
       <nav className="flex flex-col gap-1 mt-2 w-full px-2" aria-label="메인 내비게이션">

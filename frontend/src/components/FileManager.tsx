@@ -5,6 +5,7 @@ import {
   FileInfo,
   FileInspectResponse,
   LibraryRescanResponse,
+  LibraryRescanStatus,
   LibrarySettings,
   NormalizedFileInspect,
   NormalizedPreview,
@@ -35,6 +36,56 @@ import {
 } from '../ui'
 import FolderScanner from './FolderScanner'
 import PreviewPanel from './PreviewPanel'
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+function statusToSummary(status: LibraryRescanStatus): LibraryRescanResponse {
+  return {
+    registered: status.registered,
+    updated: status.updated,
+    skipped: status.skipped,
+    failed: status.failed,
+    results: [],
+  }
+}
+
+function formatEta(seconds?: number | null) {
+  if (!seconds || seconds <= 0) return '계산 중'
+  if (seconds < 60) return `${seconds}초`
+  const minutes = Math.ceil(seconds / 60)
+  if (minutes < 60) return `${minutes}분`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest > 0 ? `${hours}시간 ${rest}분` : `${hours}시간`
+}
+
+function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
+  if (!rescanning && status?.stage === 'failed') return '대상 폴더 색인 실패'
+  if (!rescanning) return '최근 색인 결과'
+  if (status?.stage === 'scanning') return '대상 폴더 스캔 중'
+  if (status?.stage === 'indexing') return '파일 색인 중'
+  return '대상 폴더 색인 준비 중'
+}
+
+function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescanResponse | null, rescanning: boolean) {
+  if (rescanning && status) {
+    const foundText = `발견 ${status.found}개`
+    const progressText =
+      status.total > 0
+        ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}% · 남은 시간 ${formatEta(
+            status.eta_seconds,
+          )}`
+        : status.folders_total > 0
+          ? `폴더 ${status.folders_processed}/${status.folders_total}`
+          : '진행률 계산 중'
+    const current = status.current_file ? ` · 현재 ${status.current_file}` : ''
+    return `${foundText} · ${progressText}${current}`
+  }
+
+  const source = summary ?? status?.summary
+  if (!source) return '아직 실행 결과가 없습니다.'
+  return `신규 ${source.registered} · 갱신 ${source.updated} · 건너뜀 ${source.skipped} · 실패 ${source.failed}`
+}
 
 export default function FileManager() {
   const snackbar = useSnackbar()
@@ -67,6 +118,7 @@ export default function FileManager() {
   const [folderPicking, setFolderPicking] = useState(false)
   const [rescanning, setRescanning] = useState(false)
   const [rescanSummary, setRescanSummary] = useState<LibraryRescanResponse | null>(null)
+  const [rescanStatus, setRescanStatus] = useState<LibraryRescanStatus | null>(null)
 
   const fetchFiles = async () => {
     setLoading(true)
@@ -165,10 +217,24 @@ export default function FileManager() {
   const runLibraryRescan = async (reason: 'manual' | 'added') => {
     setRescanning(true)
     setRescanSummary(null)
+    setRescanStatus(null)
     try {
-      const response = await api.library.rescan()
-      setRescanSummary(response.data)
-      const { registered, updated, skipped, failed } = response.data
+      let status = (await api.library.startRescan()).data
+      setRescanStatus(status)
+
+      while (status.running) {
+        await sleep(700)
+        status = (await api.library.rescanStatus()).data
+        setRescanStatus(status)
+      }
+
+      if (status.stage === 'failed') {
+        throw new Error(status.error || status.message || '대상 폴더 자동 등록에 실패했습니다.')
+      }
+
+      const summary = status.summary ?? statusToSummary(status)
+      setRescanSummary(summary)
+      const { registered, updated, skipped, failed } = summary
       if (failed > 0) {
         snackbar.warn(`자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped} · 실패 ${failed}`)
       } else {
@@ -183,6 +249,7 @@ export default function FileManager() {
     } catch (error) {
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        (error as Error)?.message ??
         '대상 폴더 자동 등록에 실패했습니다.'
       snackbar.error(detail)
     } finally {
@@ -235,6 +302,10 @@ export default function FileManager() {
   const availableColumns = selectedCandidate?.table.columns ?? inspectedFile?.keyOptions ?? []
   const effectiveParserConfig = selectedCandidate?.parserConfig ?? inspectedFile?.parserConfig ?? {}
   const keyRequired = inspectedFile?.keyRequired ?? false
+  const normalizedFolderDraft = folderPathDraft.trim()
+  const hasPendingNewFolder =
+    Boolean(normalizedFolderDraft) &&
+    !librarySettings.watched_folders.some((folder) => folder.path === normalizedFolderDraft)
 
   const handleInspectPath = async () => {
     if (!filePath.trim()) {
@@ -408,11 +479,13 @@ export default function FileManager() {
               폴더 찾기
             </Button>
             <Button
-              variant="outlined"
-              leadingIcon="add"
+              variant={hasPendingNewFolder ? 'filled' : 'outlined'}
+              leadingIcon={hasPendingNewFolder ? 'add_circle' : 'add'}
+              iconFilled={hasPendingNewFolder}
               onClick={handleAddWatchedFolder}
               loading={settingsLoading}
               disabled={folderPicking || rescanning}
+              className={hasPendingNewFolder ? 'attention-pulse' : ''}
             >
               대상 추가
             </Button>
@@ -465,17 +538,19 @@ export default function FileManager() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                  {rescanning ? '대상 폴더 색인 중' : '최근 색인 결과'}
+                  {rescanTitle(rescanStatus, rescanning)}
                 </p>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  {rescanning
-                    ? '파일을 스캔하고 검색용 색인을 생성하는 중입니다. 큰 폴더는 시간이 걸릴 수 있습니다.'
-                    : `신규 ${rescanSummary?.registered ?? 0} · 갱신 ${
-                        rescanSummary?.updated ?? 0
-                      } · 건너뜀 ${rescanSummary?.skipped ?? 0} · 실패 ${
-                        rescanSummary?.failed ?? 0
-                      }`}
+                  {rescanDetail(rescanStatus, rescanSummary, rescanning)}
                 </p>
+                {rescanning && rescanStatus && (
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container-high)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--md-sys-color-primary)] transition-[width] duration-300"
+                      style={{ width: `${Math.min(Math.max(rescanStatus.percent, 4), 100)}%` }}
+                    />
+                  </div>
+                )}
                 {!rescanning && rescanSummary && rescanSummary.failed > 0 && (
                   <div className="mt-2 space-y-1">
                     {rescanSummary.results

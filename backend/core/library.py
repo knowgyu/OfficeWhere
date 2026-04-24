@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
+from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..database import (
     get_all_files,
@@ -21,6 +24,7 @@ from ..models.schemas import (
     LibraryFileGroup,
     LibraryRescanResponse,
     LibraryRescanResult,
+    LibraryRescanStatus,
     LibrarySettings,
 )
 from .file_access import scan_folder
@@ -31,6 +35,47 @@ from ..runtime import get_worker_count
 SETTINGS_KEY = "library_settings"
 LAST_RESCAN_KEY = "library_last_rescan_at"
 MAX_WORKERS = get_worker_count()
+ProgressCallback = Callable[[Dict[str, Any]], None]
+
+_rescan_status_lock = threading.Lock()
+_rescan_status: Dict[str, Any] = LibraryRescanStatus().dict()
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
+
+
+def _status_snapshot() -> LibraryRescanStatus:
+    with _rescan_status_lock:
+        return LibraryRescanStatus(**_rescan_status)
+
+
+def get_library_rescan_status() -> LibraryRescanStatus:
+    return _status_snapshot()
+
+
+def _update_rescan_status(patch: Dict[str, Any]) -> LibraryRescanStatus:
+    with _rescan_status_lock:
+        _rescan_status.update(patch)
+        _rescan_status["updated_at"] = _now_iso()
+        return LibraryRescanStatus(**_rescan_status)
+
+
+def _estimate_eta_seconds(started_monotonic: float, processed: int, total: int) -> Optional[int]:
+    if processed <= 0 or total <= 0 or processed >= total:
+        return None
+    elapsed = max(time.monotonic() - started_monotonic, 0.0)
+    seconds_per_item = elapsed / processed
+    return int(max((total - processed) * seconds_per_item, 0.0))
+
+
+def _result_counts(results: List[LibraryRescanResult]) -> Dict[str, int]:
+    return {
+        "registered": sum(1 for item in results if item.action == "registered" and item.success),
+        "updated": sum(1 for item in results if item.action == "updated" and item.success),
+        "skipped": sum(1 for item in results if item.action == "skipped" and item.success),
+        "failed": sum(1 for item in results if not item.success),
+    }
 
 
 def file_info_from_row(row: Dict[str, Any]) -> FileInfo:
@@ -103,14 +148,41 @@ def file_sort_key(file_info: FileInfo) -> Tuple[float, str]:
     return (0, file_info.name)
 
 
-def rescan_library() -> LibraryRescanResponse:
+def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> LibraryRescanResponse:
     settings = load_library_settings()
     if not settings.watched_folders:
+        if progress_callback:
+            progress_callback(
+                {
+                    "stage": "completed",
+                    "message": "등록된 대상 폴더가 없습니다.",
+                    "percent": 100.0,
+                    "total": 0,
+                    "processed": 0,
+                }
+            )
         return LibraryRescanResponse(registered=0, updated=0, skipped=0, failed=0, results=[])
 
+    started_monotonic = time.monotonic()
     found_paths: Dict[str, str] = {}
     scan_errors: List[LibraryRescanResult] = []
-    for folder in settings.watched_folders:
+    folders_total = len(settings.watched_folders)
+    if progress_callback:
+        progress_callback(
+            {
+                "stage": "scanning",
+                "message": "대상 폴더를 확인하는 중입니다.",
+                "folders_total": folders_total,
+                "folders_processed": 0,
+                "found": 0,
+                "total": 0,
+                "processed": 0,
+                "percent": 0.0,
+                "eta_seconds": None,
+            }
+        )
+
+    for folder_index, folder in enumerate(settings.watched_folders, start=1):
         try:
             for item in scan_folder(folder.path, folder.recursive):
                 normalized_path = os.path.normpath(item["path"])
@@ -135,6 +207,21 @@ def rescan_library() -> LibraryRescanResponse:
                     action="failed",
                     error=str(exc),
                 )
+            )
+        if progress_callback:
+            progress_callback(
+                {
+                    "stage": "scanning",
+                    "message": f"대상 폴더 스캔 중 · {folder_index}/{folders_total}",
+                    "folders_total": folders_total,
+                    "folders_processed": folder_index,
+                    "found": len(found_paths),
+                    "failed": len(scan_errors),
+                    "total": 0,
+                    "processed": 0,
+                    "percent": 0.0,
+                    "eta_seconds": None,
+                }
             )
 
     existing_by_path = {os.path.normpath(row["path"]): row for row in get_all_files()}
@@ -186,18 +273,123 @@ def rescan_library() -> LibraryRescanResponse:
                 error=str(exc),
             )
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        results = list(executor.map(_register_or_update, sorted(found_paths)))
+    sorted_paths = sorted(found_paths)
+    total = len(sorted_paths)
+    results: List[LibraryRescanResult] = []
+
+    if progress_callback:
+        progress_callback(
+            {
+                "stage": "indexing" if total > 0 else "completed",
+                "message": f"검색 색인 생성 중 · 파일 {total}개 발견",
+                "found": total,
+                "total": total,
+                "processed": 0,
+                "percent": 0.0 if total > 0 else 100.0,
+                "eta_seconds": None,
+                **_result_counts(scan_errors),
+            }
+        )
+
+    if total > 0:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            future_to_path = {executor.submit(_register_or_update, path): path for path in sorted_paths}
+            for processed, future in enumerate(as_completed(future_to_path), start=1):
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    path = future_to_path[future]
+                    result = LibraryRescanResult(
+                        path=path,
+                        name=Path(path).name,
+                        success=False,
+                        action="failed",
+                        error=str(exc),
+                    )
+                results.append(result)
+                if progress_callback:
+                    counts = _result_counts([*results, *scan_errors])
+                    progress_callback(
+                        {
+                            "stage": "indexing",
+                            "message": f"검색 색인 생성 중 · {processed}/{total}",
+                            "found": total,
+                            "total": total,
+                            "processed": processed,
+                            "percent": round((processed / total) * 100, 1),
+                            "eta_seconds": _estimate_eta_seconds(started_monotonic, processed, total),
+                            "current_file": result.name,
+                            **counts,
+                        }
+                    )
 
     results.extend(scan_errors)
     set_setting(LAST_RESCAN_KEY, datetime.now().isoformat())
-    return LibraryRescanResponse(
-        registered=sum(1 for item in results if item.action == "registered" and item.success),
-        updated=sum(1 for item in results if item.action == "updated" and item.success),
-        skipped=sum(1 for item in results if item.action == "skipped" and item.success),
-        failed=sum(1 for item in results if not item.success),
-        results=results,
-    )
+    counts = _result_counts(results)
+    response = LibraryRescanResponse(results=results, **counts)
+    if progress_callback:
+        progress_callback(
+            {
+                "stage": "completed",
+                "message": "대상 폴더 색인이 완료되었습니다.",
+                "found": total,
+                "total": total,
+                "processed": total,
+                "percent": 100.0,
+                "eta_seconds": None,
+                "current_file": None,
+                "summary": response,
+                **counts,
+            }
+        )
+    return response
+
+
+def _run_rescan_job() -> None:
+    try:
+        summary = rescan_library(progress_callback=_update_rescan_status)
+        _update_rescan_status(
+            {
+                "running": False,
+                "stage": "completed",
+                "message": "대상 폴더 색인이 완료되었습니다.",
+                "percent": 100.0,
+                "eta_seconds": None,
+                "summary": summary,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _update_rescan_status(
+            {
+                "running": False,
+                "stage": "failed",
+                "message": "대상 폴더 색인에 실패했습니다.",
+                "eta_seconds": None,
+                "error": str(exc),
+            }
+        )
+
+
+def start_library_rescan() -> LibraryRescanStatus:
+    with _rescan_status_lock:
+        if _rescan_status.get("running"):
+            return LibraryRescanStatus(**_rescan_status)
+
+        _rescan_status.clear()
+        _rescan_status.update(
+            LibraryRescanStatus(
+                running=True,
+                stage="queued",
+                message="대상 폴더 색인을 준비하는 중입니다.",
+                started_at=_now_iso(),
+                updated_at=_now_iso(),
+            ).dict()
+        )
+
+    thread = threading.Thread(target=_run_rescan_job, daemon=True, name="library-rescan")
+    thread.start()
+    return _status_snapshot()
 
 
 def build_file_groups() -> List[LibraryFileGroup]:

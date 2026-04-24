@@ -356,6 +356,28 @@ export interface LibraryRescanResponse {
   results: LibraryRescanResult[]
 }
 
+export interface LibraryRescanStatus {
+  running: boolean
+  stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'completed' | 'failed'
+  message: string
+  started_at?: string | null
+  updated_at?: string | null
+  folders_total: number
+  folders_processed: number
+  found: number
+  total: number
+  processed: number
+  percent: number
+  eta_seconds?: number | null
+  registered: number
+  updated: number
+  skipped: number
+  failed: number
+  current_file?: string | null
+  summary?: LibraryRescanResponse | null
+  error?: string | null
+}
+
 export interface LibraryFileGroup {
   id: string
   file_type: string
@@ -1095,6 +1117,8 @@ export const api = {
     updateSettings: (data: LibrarySettings) =>
       apiPath('/api/library/settings').then((url) => axios.put<LibrarySettings>(url, data)),
     rescan: async () => axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan')),
+    startRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start')),
+    rescanStatus: async () => axios.get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
     groups: async () => axios.get<LibraryGroupsResponse>(await apiPath('/api/library/groups')),
   },
 }

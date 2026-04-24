@@ -266,6 +266,28 @@ class LibraryRescanResponse(BaseModel):
     results: List[LibraryRescanResult]
 
 
+class LibraryRescanStatus(BaseModel):
+    running: bool = False
+    stage: str = "idle"
+    message: str = ""
+    started_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    folders_total: int = 0
+    folders_processed: int = 0
+    found: int = 0
+    total: int = 0
+    processed: int = 0
+    percent: float = 0.0
+    eta_seconds: Optional[int] = None
+    registered: int = 0
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+    current_file: Optional[str] = None
+    summary: Optional[LibraryRescanResponse] = None
+    error: Optional[str] = None
+
+
 class LibraryFileGroup(BaseModel):
     id: str
     file_type: str

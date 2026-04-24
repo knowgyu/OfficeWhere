@@ -2,13 +2,16 @@ from fastapi import APIRouter
 
 from ..core.library import (
     build_file_groups,
+    get_library_rescan_status,
     load_library_settings,
     rescan_library,
     save_library_settings,
+    start_library_rescan,
 )
 from ..models.schemas import (
     LibraryGroupsResponse,
     LibraryRescanResponse,
+    LibraryRescanStatus,
     LibrarySettings,
 )
 
@@ -28,6 +31,16 @@ def update_library_settings(settings: LibrarySettings):
 @router.post("/rescan", response_model=LibraryRescanResponse)
 def trigger_library_rescan():
     return rescan_library()
+
+
+@router.post("/rescan/start", response_model=LibraryRescanStatus)
+def start_library_rescan_job():
+    return start_library_rescan()
+
+
+@router.get("/rescan/status", response_model=LibraryRescanStatus)
+def get_library_rescan_job_status():
+    return get_library_rescan_status()
 
 
 @router.get("/groups", response_model=LibraryGroupsResponse)
