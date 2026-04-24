@@ -1,10 +1,14 @@
-from pydantic import BaseModel
-from typing import Optional, List, Any
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class FileRegisterRequest(BaseModel):
     path: str
-    key_column: str
+    key_column: str = ""
+    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FileInfo(BaseModel):
@@ -14,18 +18,22 @@ class FileInfo(BaseModel):
     file_type: str
     key_column: str
     column_count: int
+    parser_config: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[str] = None
 
 
 class FileRegisterResponse(BaseModel):
     id: int
     name: str
+    file_type: str
     columns: List[str]
+    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SchemaResponse(BaseModel):
     columns: List[str]
     sample: List[List[Any]]
+    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FileInspectRequest(BaseModel):
@@ -39,6 +47,9 @@ class FileInspectResponse(BaseModel):
     columns: List[str]
     sample: List[List[Any]]
     suggested_key_column: Optional[str] = None
+    parser_config: Dict[str, Any] = Field(default_factory=dict)
+    table_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    comparison_mode: str
 
 
 class FilePickResponse(BaseModel):
@@ -53,7 +64,7 @@ class JoinFileSpec(BaseModel):
 
 class JoinRequest(BaseModel):
     files: List[JoinFileSpec]
-    join_type: str = "outer"  # left | outer | inner
+    join_type: str = "outer"
     base_file_id: Optional[int] = None
 
 
@@ -67,29 +78,76 @@ class CheckRequest(BaseModel):
     file_ids: List[int]
 
 
-class ConflictEntry(BaseModel):
+class FileRef(BaseModel):
     file_id: int
     file_name: str
-    columns: List[str]
-    values: List[Any]
-    row_count: int
 
 
-class CheckIssue(BaseModel):
-    key_normalized: str
-    key_variants: List[str]
-    column_group: str
-    conflicts: List[ConflictEntry]
-    severity: str  # conflict | warning
+class ExcelConflictValue(BaseModel):
+    file_id: int
+    file_name: str
+    values: List[str]
+
+
+class ExcelCheckIssue(BaseModel):
+    issue_type: str
+    key: Optional[str] = None
+    column: Optional[str] = None
+    values: List[ExcelConflictValue] = Field(default_factory=list)
+    present_in: List[FileRef] = Field(default_factory=list)
+    missing_in: List[FileRef] = Field(default_factory=list)
+
+
+class ExcelCheckResult(BaseModel):
+    total_keys: int
+    matched_keys: int
+    issues: List[ExcelCheckIssue]
+
+
+class DiffBlock(BaseModel):
+    block_type: Optional[str] = None
+    item_type: Optional[str] = None
+    location: str
+    text: str
+
+
+class WordDiffChange(BaseModel):
+    change_type: str
+    before: List[DiffBlock] = Field(default_factory=list)
+    after: List[DiffBlock] = Field(default_factory=list)
+
+
+class WordCheckResult(BaseModel):
+    files: List[FileRef]
+    changes: List[WordDiffChange]
+
+
+class PptItemChange(BaseModel):
+    change_type: str
+    before: List[DiffBlock] = Field(default_factory=list)
+    after: List[DiffBlock] = Field(default_factory=list)
+
+
+class PptSlideChange(BaseModel):
+    change_type: str
+    slide_number_before: Optional[int] = None
+    slide_number_after: Optional[int] = None
+    title_before: Optional[str] = None
+    title_after: Optional[str] = None
+    item_changes: List[PptItemChange] = Field(default_factory=list)
+
+
+class PptCheckResult(BaseModel):
+    files: List[FileRef]
+    changes: List[PptSlideChange]
 
 
 class CheckResponse(BaseModel):
-    total_keys: int
-    matched_keys: int
-    issues: List[CheckIssue]
+    mode: str
+    excel: Optional[ExcelCheckResult] = None
+    word: Optional[WordCheckResult] = None
+    ppt: Optional[PptCheckResult] = None
 
-
-# --- 폴더 스캔 ---
 
 class FolderScanRequest(BaseModel):
     folder_path: str
@@ -103,6 +161,9 @@ class ScannedFileInfo(BaseModel):
     columns: List[str]
     sample: List[List[Any]]
     suggested_key_column: Optional[str] = None
+    parser_config: Dict[str, Any] = Field(default_factory=dict)
+    table_candidates: List[Dict[str, Any]] = Field(default_factory=list)
+    comparison_mode: str
     error: Optional[str] = None
 
 
@@ -119,7 +180,8 @@ class FolderPickResponse(BaseModel):
 
 class BulkRegisterItem(BaseModel):
     path: str
-    key_column: str
+    key_column: str = ""
+    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BulkRegisterRequest(BaseModel):
@@ -139,8 +201,6 @@ class BulkRegisterResponse(BaseModel):
     failed: int
     results: List[BulkRegisterResult]
 
-
-# --- 파일 검색 ---
 
 class SearchRequest(BaseModel):
     query: str
@@ -163,9 +223,9 @@ class SearchResponse(BaseModel):
 
 
 class SchedulerSettings(BaseModel):
-    mode: str = "manual"          # manual | interval | daily
+    mode: str = "manual"
     interval_hours: float = 24.0
-    daily_time: str = "03:00"     # HH:MM
+    daily_time: str = "03:00"
     last_reindex_at: Optional[str] = None
 
 

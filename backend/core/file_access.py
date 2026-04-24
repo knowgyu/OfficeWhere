@@ -22,13 +22,17 @@ def inspect_file_path(path: str) -> Dict[str, Any]:
 
     schema = get_file_schema(normalized_path)
     columns = schema["columns"]
+    file_type = get_file_type(normalized_path)
     return {
         "path": normalized_path,
         "name": Path(normalized_path).name,
-        "file_type": get_file_type(normalized_path),
+        "file_type": file_type,
         "columns": columns,
         "sample": schema["sample"],
-        "suggested_key_column": suggest_key_column(columns),
+        "suggested_key_column": suggest_key_column(columns) if file_type == "Excel" else None,
+        "parser_config": schema.get("parser_config", {}),
+        "table_candidates": schema.get("table_candidates", []),
+        "comparison_mode": file_type.lower().replace("powerpoint", "ppt"),
     }
 
 
@@ -99,6 +103,9 @@ def scan_folder(folder_path: str, recursive: bool = True) -> List[Dict[str, Any]
                 "columns": [],
                 "sample": [],
                 "suggested_key_column": None,
+                "parser_config": {},
+                "table_candidates": [],
+                "comparison_mode": get_file_type(str(file_path)).lower().replace("powerpoint", "ppt"),
                 "error": str(e),
             }
 

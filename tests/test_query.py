@@ -1,6 +1,11 @@
+import os
 from types import SimpleNamespace
 
-from backend.api.query import order_join_files
+import pytest
+from fastapi import HTTPException
+
+from backend.api.query import join_query, order_join_files
+from backend.models.schemas import JoinRequest
 
 
 def test_order_join_files_places_base_file_first():
@@ -14,3 +19,21 @@ def test_order_join_files_places_base_file_first():
     )
 
     assert [item.file_id for item in ordered] == [3, 2, 1]
+
+
+def test_join_query_rejects_non_excel_files(monkeypatch):
+    monkeypatch.setattr("backend.api.query.get_file_by_id", lambda _: {
+        "id": 1,
+        "name": "sample.docx",
+        "file_type": "Word",
+        "path": "/tmp/sample.docx",
+        "key_column": "",
+        "parser_config": {},
+    })
+    monkeypatch.setattr(os.path, "exists", lambda _: True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        join_query(JoinRequest(files=[{"file_id": 1, "columns": []}]))
+
+    assert exc_info.value.status_code == 400
+    assert "Excel" in exc_info.value.detail

@@ -165,6 +165,17 @@
 - [x] 기술 스택 결정
 - [x] PLAN.md 작성
 - [x] 전체 코드 구현 완료 (35+ 파일)
+- [x] 정합성 검사 아키텍처 재설계 (2026-04-24)
+  - [x] Excel JOIN 전용 파이프라인 분리
+  - [x] Excel `parser_config` 저장 및 표 후보 영역 탐지
+  - [x] Excel 정합성 검사: `value_conflict`, `missing_key`, `missing_column`
+  - [x] Word 정합성 검사: 문단 + 표 행 블록 diff
+  - [x] PowerPoint 정합성 검사: 슬라이드 추가/삭제 + 내부 항목 diff
+  - [x] 정합성 검사 응답 `mode=excel|word|ppt` 기반으로 재구성
+  - [x] JOIN Excel-only 제한
+  - [x] 폴더 스캔 / 일괄 등록 / 파일 등록에 `parser_config` 반영
+  - [x] 백엔드/프론트 검증: `venv/bin/pytest`, `npm run build` 통과
+  - [x] 데모/성능 스크립트 추가 (`scripts/run_demo_checks.py`, `scripts/run_perf_checks.py`)
 - [x] Windows 호환성 보완 (2026-04-22)
   - [x] `launcher.py`: frozen 모드 uvicorn 앱 객체 직접 전달
   - [x] `launcher.py`: `multiprocessing.freeze_support()` 추가
@@ -176,9 +187,11 @@
   - [x] `setup.bat`: Python 3.10+ 버전 체크 추가
   - [x] `README.md`: Windows 사용 안내 및 트러블슈팅 섹션 추가
   - [x] `CLAUDE.md`: CLI 에이전트용 프로젝트 가이드 최초 작성
-- [ ] 동작 검증 (Windows 환경에서 setup.bat → build.bat → .exe 실행 테스트 필요)
+- [ ] Windows 환경에서 setup.bat → build.bat → .exe 실행 테스트
+- [ ] 실제 사용자 문서로 UAT (특히 Word/PPT 수정본 비교 품질 확인)
 
 ---
 
 _최초 작성: 2026-04-21_  
-_Windows 호환성 보완: 2026-04-22_
+_Windows 호환성 보완: 2026-04-22_  
+_비교 아키텍처 재설계: 2026-04-24_

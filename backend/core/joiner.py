@@ -1,104 +1,69 @@
-from typing import List, Dict, Any, Tuple
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
 import pandas as pd
-from .parser import parse_file
+
+from .excel_analysis import extract_excel_table
 from .normalizer import normalize_key
 
 
-def join_files(
-    file_specs: List[Dict[str, Any]],
-    join_type: str = "outer"
-) -> pd.DataFrame:
-    """
-    여러 파일을 JOIN.
-
-    file_specs 형식:
-    [
-        {
-            "path": "/path/to/file.xlsx",
-            "key_column": "과제명",
-            "columns": ["담당자", "예산"],
-            "file_id": 1,
-            "file_name": "A.xlsx"
-        },
-        ...
-    ]
-    join_type: "outer" | "left" | "inner"
-    """
+def join_files(file_specs: List[Dict[str, Any]], join_type: str = "outer") -> pd.DataFrame:
     if not file_specs:
         raise ValueError("JOIN할 파일이 선택되지 않았습니다.")
 
-    pandas_how = {
-        "outer": "outer",
-        "left": "left",
-        "inner": "inner",
-    }.get(join_type, "outer")
+    pandas_how = {"outer": "outer", "left": "left", "inner": "inner"}.get(join_type, "outer")
+    dataframes: List[pd.DataFrame] = []
 
-    dfs = []
     for spec in file_specs:
-        df = parse_file(spec["path"])
-        key_col = spec["key_column"]
-        wanted_cols = spec.get("columns", [])
+        if spec.get("file_type") != "Excel":
+            raise ValueError("JOIN은 Excel 파일만 지원합니다.")
 
-        if key_col not in df.columns:
+        df = extract_excel_table(spec["path"], spec.get("parser_config"))
+        key_column = spec["key_column"]
+        if not key_column:
+            raise ValueError(f"파일 '{spec['file_name']}'의 key_column 이 비어 있습니다.")
+        if key_column not in df.columns:
             raise ValueError(
-                f"파일 '{spec['file_name']}'에 key 컬럼 '{key_col}'이(가) 없습니다."
+                f"파일 '{spec['file_name']}'에 key 컬럼 '{key_column}'이(가) 없습니다."
             )
 
-        # key 정규화 컬럼 추가
-        df["__key_normalized__"] = df[key_col].astype(str).apply(normalize_key)
-
-        # 가져올 컬럼 선택 (key 컬럼 + 선택된 컬럼들)
-        if wanted_cols:
-            # 선택된 컬럼 중 실제 존재하는 것만
-            existing = [c for c in wanted_cols if c in df.columns]
-            select_cols = ["__key_normalized__"] + existing
+        df = df.copy()
+        df["__key_normalized__"] = df[key_column].astype(str).apply(normalize_key)
+        requested_columns = spec.get("columns", [])
+        if requested_columns:
+            selected_columns = ["__key_normalized__"] + [column for column in requested_columns if column in df.columns]
         else:
-            select_cols = ["__key_normalized__"] + [
-                c for c in df.columns if c != key_col and c != "__key_normalized__"
+            selected_columns = ["__key_normalized__"] + [
+                column for column in df.columns if column not in {key_column, "__key_normalized__"}
             ]
-        df_sub = df[select_cols].copy()
 
-        # 컬럼명 충돌 방지: 파일명 suffix 추가 (key 컬럼 제외)
-        file_suffix = f"__{spec['file_name']}__"
-        rename_map = {}
-        for col in df_sub.columns:
-            if col != "__key_normalized__":
-                rename_map[col] = f"{col}{file_suffix}"
-        df_sub = df_sub.rename(columns=rename_map)
+        subset = df[selected_columns].copy()
+        suffix = f"__{spec['file_name']}__"
+        subset = subset.rename(
+            columns={
+                column: f"{column}{suffix}"
+                for column in subset.columns
+                if column != "__key_normalized__"
+            }
+        )
+        dataframes.append(subset)
 
-        dfs.append(df_sub)
+    result = dataframes[0]
+    for right_df in dataframes[1:]:
+        result = pd.merge(result, right_df, on="__key_normalized__", how=pandas_how, suffixes=("", "_dup"))
+        duplicate_columns = [column for column in result.columns if column.endswith("_dup")]
+        if duplicate_columns:
+            result = result.drop(columns=duplicate_columns)
 
-    if len(dfs) == 1:
-        result = dfs[0]
-    else:
-        result = dfs[0]
-        for df_right in dfs[1:]:
-            result = pd.merge(
-                result,
-                df_right,
-                on="__key_normalized__",
-                how=pandas_how,
-                suffixes=("", "_dup")
-            )
-            # 중복 컬럼 제거
-            dup_cols = [c for c in result.columns if c.endswith("_dup")]
-            result = result.drop(columns=dup_cols)
-
-    # __key_normalized__ 컬럼을 첫 번째 컬럼으로, 컬럼명 정리
     result = result.rename(columns={"__key_normalized__": "key(정규화)"})
-
-    # suffix 제거해서 읽기 좋게 만들기
-    clean_rename = {}
-    for col in result.columns:
-        if col == "key(정규화)":
+    renamed_columns: Dict[str, str] = {}
+    for column in result.columns:
+        if column == "key(정규화)":
             continue
         for spec in file_specs:
             suffix = f"__{spec['file_name']}__"
-            if col.endswith(suffix):
-                base = col[: -len(suffix)]
-                # 다른 파일에 같은 이름 있으면 파일명 유지
-                clean_rename[col] = f"{base} ({spec['file_name']})"
+            if column.endswith(suffix):
+                renamed_columns[column] = f"{column[:-len(suffix)]} ({spec['file_name']})"
                 break
-
-    result = result.rename(columns=clean_rename)
-    return result
+    return result.rename(columns=renamed_columns)

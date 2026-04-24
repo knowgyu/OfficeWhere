@@ -19,3 +19,11 @@ def test_inspect_file_path_returns_schema(tmp_path):
     assert result["suggested_key_column"] == "과제명"
     assert result["columns"] == ["과제명", "담당자"]
     assert result["sample"] == [["A", "Kim"]]
+    assert result["comparison_mode"] == "excel"
+    assert result["parser_config"] == {
+        "sheet_name": "Sheet1",
+        "header_row": 1,
+        "start_col": 1,
+        "end_col": 2,
+        "end_row": 2,
+    }

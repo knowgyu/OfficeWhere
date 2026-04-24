@@ -1,7 +1,11 @@
 # Office Data Joiner
 
 Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도구입니다.  
-여러 파일에 공통 key 컬럼(예: "과제명")이 있을 때 JOIN, 정합성 검사를 수행합니다.
+다만 기능은 파일 타입별로 다르게 동작합니다.
+
+- **Excel**: 표 영역을 추출해 JOIN / 정합성 검사
+- **Word**: 문단 + 표 행 기준 diff
+- **PowerPoint**: 슬라이드 추가/삭제 + 슬라이드 내부 변경 diff
 
 ---
 
@@ -23,17 +27,21 @@ Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도
 
 ---
 
-### 시나리오 B — 파일 간 데이터 불일치 찾기
+### 시나리오 B — 같은 문서 수정본 간 변경 찾기
 
-> 기획팀 Excel엔 예산이 "3억 2천만원", 사업부 PPT엔 "3억"으로 되어있었음. 보고서 나간 뒤에야 발견.
+> 지난주 Word 초안과 오늘 수정본이 있는데, 본문에 어떤 내용이 추가됐고 표 안의 승인 상태가 어떻게 바뀌었는지 한 번에 보고 싶음.
 
-기획팀 Excel + 사업부 PPT를 "사업명" key로 등록 → **정합성 검사** 실행:
+두 Word 파일을 등록 → **정합성 검사** 실행:
 ```
-[CONFLICT] 사업명: AI플랫폼 구축
-  기획팀_예산현황.xlsx  →  예산: 320,000,000
-  사업부_보고자료.pptx  →  예산: 300,000,000
+[REPLACE] paragraph:2
+  before: 본 문서는 1차 초안이다.
+  after : 본 문서는 2차 수정본이다.
+
+[REPLACE] table:1/row:3
+  before: 승인 | 대기
+  after : 승인 | 완료
 ```
-보고 전에 미리 발견.
+수정본에서 달라진 블록만 빠르게 확인.
 
 ---
 
@@ -41,16 +49,21 @@ Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도
 
 > 10개 팀에서 같은 양식 Excel을 제출받음. 복사·붙여넣기로 통합하다 행이 빠지거나 중복됨.
 
-10개 파일 폴더 스캔으로 일괄 등록 → **JOIN 쿼리**에서 전부 선택 → 통합 Excel 다운로드.
+10개 파일 폴더 스캔으로 일괄 등록 → **JOIN 쿼리**에서 Excel만 선택 → 통합 Excel 다운로드.
 
 ---
 
 ## 2. 기능 개요
 
-- **파일 등록**: `.xlsx`, `.xls`, `.docx`, `.pptx` 파일을 등록하고 key 컬럼을 지정합니다.
+- **파일 등록**: `.xlsx`, `.xls`, `.docx`, `.pptx` 파일을 등록합니다.
+  - Excel은 표 후보 영역과 key 컬럼을 선택합니다.
+  - Word/PPT는 key 없이 비교 전용으로 등록합니다.
 - **파일 검색**: 등록된 모든 파일의 내용을 전문 검색(FTS5)합니다. 슬라이드 번호, 행/열 위치까지 표시.
-- **JOIN 쿼리**: 등록된 여러 파일을 key 기준으로 LEFT / OUTER / INNER JOIN합니다.
-- **정합성 검사**: 파일 간 동일 key에 대해 컬럼 값이 일치하는지 검사합니다.
+- **JOIN 쿼리**: 등록된 **Excel 파일만** key 기준으로 LEFT / OUTER / INNER JOIN합니다.
+- **정합성 검사**:
+  - Excel: key/value/column diff
+  - Word: 문단/표 블록 diff
+  - PPT: 슬라이드 diff
 - **비개발자 실행**: `.exe` 더블클릭으로 서버 시작 + 브라우저 자동 오픈.
 
 ---
@@ -131,31 +144,37 @@ chmod +x build.sh
 ### 파일 관리
 
 - **파일 등록**: 파일 경로를 직접 입력하거나, 백엔드가 여는 **OS 파일 선택창**으로 실제 파일 경로를 가져와 등록합니다.
-  - 등록 전 컬럼 목록, 샘플 데이터, 추천 key 컬럼을 먼저 확인할 수 있습니다.
-  - key 컬럼 자동 추천: 컬럼명에 `과제`, `id`, `번호`, `name` 등 포함 시 우선 추천
+  - Excel은 등록 전 **표 후보 영역(parser_config)**, 컬럼 목록, 샘플 데이터, 추천 key 컬럼을 먼저 확인할 수 있습니다.
+  - Excel 표는 첫 행이 아니라 `C3` 같은 위치에서 시작해도 탐지합니다.
+  - Word/PPT는 key 없이 등록되며, 비교 시 문서 diff 엔진을 사용합니다.
 - **파일 목록**: 등록된 파일의 이름, 형식, key 컬럼, 컬럼 수 확인
-- **미리보기**: 파일 행 클릭 시 컬럼 목록 + 샘플 데이터(최대 5행) 모달 표시
+- **미리보기**:
+  - Excel: 선택된 표 영역의 컬럼 + 샘플 행
+  - Word: 문단/표 블록 미리보기
+  - PPT: 슬라이드 제목/항목 미리보기
 - **삭제**: 등록 해제 (원본 파일은 삭제되지 않음)
 
 ### JOIN 쿼리
 
-- 파일 체크박스로 JOIN 대상 선택
+- **Excel 파일만** JOIN 대상 선택 가능
 - 각 파일에서 가져올 컬럼 선택 (key 컬럼은 자동 포함)
 - JOIN 방식 선택: `OUTER` (전체) / `LEFT` (사용자가 선택한 기준 파일) / `INNER` (교집합)
+- 등록 시 저장된 `parser_config` 기준으로 표를 다시 읽어 JOIN
 - **미리보기**: 결과 테이블 표시 (정렬, 검색, 페이지네이션 지원)
 - **Excel 다운로드**: 결과를 `.xlsx`로 저장
 
 ### 정합성 검사
 
-- 2개 이상 파일 선택 후 "검사 실행"
-- key 정규화 후 동일 key에 대해 유사 컬럼명 그룹별 값 비교
-- duplicate key 규칙:
-  - 같은 파일에서 동일 normalized key가 여러 행으로 존재해도, 같은 column group의 값 집합이 동일하면 허용합니다.
-  - 같은 파일 안에서 값 집합이 갈라지면 `conflict`로 처리합니다.
-- 결과:
-  - **conflict** (빨강): 값이 서로 다름
-  - **warning** (노랑): 값이 비어 있거나, 유사하지만 완전히 동일하지 않음
-- 원본 key 변형 값도 함께 표시
+- **Excel**
+  - 다중 파일 선택 가능
+  - `value_conflict`, `missing_key`, `missing_column`을 표시
+  - key 정규화 후 같은 key의 셀 값 차이와 컬럼 추가/누락을 함께 확인
+- **Word**
+  - 정확히 2개 파일 비교
+  - 문단 + 표 행을 순서 보존 블록으로 추출해 `insert/delete/replace` diff 표시
+- **PowerPoint**
+  - 정확히 2개 파일 비교
+  - 슬라이드 추가/삭제와 매칭된 슬라이드 내부 항목 변경 표시
 
 ### 파일 검색
 
@@ -175,7 +194,17 @@ chmod +x build.sh
 source venv/bin/activate
 pytest
 cd frontend && npm run build
+python scripts/run_demo_checks.py
+python scripts/run_perf_checks.py
 ```
+
+### 실사용 예제 / 성능 스크립트
+
+- 설계 문서: `ARCHITECTURE.md`
+- 데모 문서 생성: `python scripts/generate_demo_cases.py`
+- 데모 비교 실행: `python scripts/run_demo_checks.py`
+- 성능 측정: `python scripts/run_perf_checks.py`
+- 생성 결과물: `examples/demo_cases/`
 
 ---
 
@@ -236,9 +265,10 @@ cd frontend && npm run build
 ## 10. 주의사항
 
 - 포트 **8765** 고정 사용 (일반적인 8000/8080 충돌 방지)
-- 파일 데이터는 서버에 저장되지 않으며, 메타데이터(경로, key 컬럼 등)만 SQLite에 저장됩니다.
+- 파일 데이터는 서버에 저장되지 않으며, 메타데이터(경로, key 컬럼, `parser_config` 등)만 SQLite에 저장됩니다.
 - 파일 경로가 변경되거나 삭제된 경우 해당 파일을 다시 등록해야 합니다.
 - Windows 경로(`C:\Users\...`) 및 한글 파일명 모두 지원합니다.
+- Word/PPT JOIN은 지원하지 않습니다. Word/PPT는 정합성 검사와 검색 전용입니다.
 
 ---
 
