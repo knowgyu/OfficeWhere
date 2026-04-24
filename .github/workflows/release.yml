@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "릴리스 태그 (예: v1.0.0). 비워두면 Actions artifact만 생성합니다."
+        description: "릴리스 태그 (예: v0.1.2). 비워두면 Actions artifact만 생성합니다."
         required: false
         type: string
       release_name:
@@ -75,9 +75,9 @@ jobs:
           if ($releaseNameInput) {
             $releaseName = $releaseNameInput.Trim()
           } elseif ($tag) {
-            $releaseName = "Office Data Joiner $tag"
+            $releaseName = "OfficeWhere $tag"
           } else {
-            $releaseName = "Office Data Joiner $version"
+            $releaseName = "OfficeWhere $version"
           }
 
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -126,7 +126,7 @@ jobs:
         id: bundle
         shell: pwsh
         run: |
-          $bundleName = "office-data-joiner-${{ steps.meta.outputs.version }}-windows-x64"
+          $bundleName = "officewhere-${{ steps.meta.outputs.version }}-windows-x64"
 
           if (Test-Path "$bundleName.zip") {
             Remove-Item "$bundleName.zip" -Force
@@ -135,7 +135,7 @@ jobs:
             Remove-Item "$bundleName.sha256.txt" -Force
           }
 
-          $sourceZip = Get-ChildItem "dist/electron" -Filter "office-data-joiner-*-windows-x64.zip" |
+          $sourceZip = Get-ChildItem "dist/electron" -Filter "officewhere-*-windows-x64.zip" |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
