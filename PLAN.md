@@ -187,6 +187,10 @@
   - [x] `setup.bat`: Python 3.10+ 버전 체크 추가
   - [x] `README.md`: Windows 사용 안내 및 트러블슈팅 섹션 추가
   - [x] `CLAUDE.md`: CLI 에이전트용 프로젝트 가이드 최초 작성
+- [x] GitHub Release 자동화 (2026-04-24)
+  - [x] `.github/workflows/release.yml`: Windows 빌드 + zip asset 업로드
+  - [x] 태그 push (`v*`) 시 Release asset 자동 생성
+  - [x] 수동 실행 시 Actions artifact 또는 Release 생성 지원
 - [ ] Windows 환경에서 setup.bat → build.bat → .exe 실행 테스트
 - [ ] 실제 사용자 문서로 UAT (특히 Word/PPT 수정본 비교 품질 확인)
 
@@ -194,4 +198,4 @@
 
 _최초 작성: 2026-04-21_  
 _Windows 호환성 보완: 2026-04-22_  
-_비교 아키텍처 재설계: 2026-04-24_
+_비교 아키텍처 재설계 / Release 자동화: 2026-04-24_

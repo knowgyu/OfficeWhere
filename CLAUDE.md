@@ -48,6 +48,7 @@ launcher.py                 — .exe 진입점: uvicorn 스레드 + 브라우저
 office_data_joiner.spec     — PyInstaller 패키징 설정
 setup.bat / setup.sh        — 개발 환경 구성
 build.bat / build.sh        — 프론트엔드 빌드 + PyInstaller
+.github/workflows/release.yml — Windows Release zip 빌드 + 업로드
 tests/                      — pytest 단위 테스트
 scripts/
   generate_demo_cases.py    — Excel/Word/PPT 데모 문서 생성
@@ -86,6 +87,17 @@ setup.bat   # 최초 1회: venv + pip install + npm ci
 build.bat   # frontend build + PyInstaller
 # 결과: dist\office-data-joiner\office-data-joiner.exe
 ```
+
+## GitHub Release 자동 배포
+
+- 워크플로: `.github/workflows/release.yml`
+- 트리거:
+  - `git push origin vX.Y.Z` → Windows zip asset을 GitHub Release에 업로드
+  - GitHub Actions 수동 실행 → `release_tag`가 비어 있으면 artifact만 생성, 값이 있으면 Release 생성/갱신
+- 산출물:
+  - `office-data-joiner-<version>-windows-x64.zip`
+  - `office-data-joiner-<version>-windows-x64.sha256.txt`
+- zip 내부에는 `office-data-joiner.exe`와 PyInstaller 의존 파일이 함께 들어 있어 압축 해제 후 바로 실행 가능
 
 ---
 

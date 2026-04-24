@@ -138,6 +138,26 @@ chmod +x build.sh
 > 프론트엔드 빌드(`frontend/dist`)도 자동으로 포함됩니다.
 > 기존 `dist/office-data-joiner` 산출물이 있어도 `build.bat` / `build.sh`를 다시 실행하면 덮어써서 재빌드합니다.
 
+### GitHub Release 자동 빌드
+
+`.github/workflows/release.yml`은 Windows runner에서 실행파일을 빌드한 뒤, `dist/office-data-joiner/` 전체를 zip으로 묶어 Release asset으로 올립니다.
+
+- 태그 릴리스: `git tag v0.1.0 && git push origin v0.1.0`
+- 수동 실행: GitHub Actions → `Build Windows Release` → `Run workflow`
+  - `release_tag` 비움: Actions artifact만 생성
+  - `release_tag` 입력: 해당 태그의 GitHub Release를 생성하거나 갱신하고 zip + SHA256 파일 업로드
+
+생성 자산:
+
+- `office-data-joiner-<version>-windows-x64.zip`
+- `office-data-joiner-<version>-windows-x64.sha256.txt`
+
+최종 사용자 사용법:
+
+1. GitHub Releases에서 zip 파일 다운로드
+2. 원하는 폴더에 압축 해제
+3. 압축 해제한 폴더 안의 `office-data-joiner.exe` 실행
+
 ---
 
 ## 6. 기능 설명
@@ -261,6 +281,10 @@ python scripts/run_perf_checks.py
 
 `setup.bat`은 Python 3.10 미만이면 오류를 출력하고 종료합니다. [python.org](https://python.org)에서 3.10 이상을 설치하세요.
 
+### SmartScreen 경고
+
+GitHub Release에서 받은 `.exe`는 코드 서명이 없으므로 Windows SmartScreen 경고가 뜰 수 있습니다. 내부 배포용이라면 일반적인 현상이며, 조직 보안 정책상 실행이 막히는 환경은 별도 코드 서명이 필요합니다.
+
 ---
 
 ## 10. 주의사항
@@ -283,3 +307,4 @@ python scripts/run_perf_checks.py
 | 한글 파일명 깨짐 | Python 3.10+, Windows 10 이상에서만 지원 |
 | `setup.bat` Python 버전 오류 | Python 3.10 이상 설치 후 재실행 |
 | PyInstaller 빌드 실패 | `setup.bat` 먼저 실행 후 `build.bat` 실행 |
+| GitHub Release zip을 풀었는데 실행이 막힘 | SmartScreen 또는 조직 보안 정책 확인, 필요하면 코드 서명 적용 |

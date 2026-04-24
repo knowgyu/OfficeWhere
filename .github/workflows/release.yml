@@ -1,0 +1,183 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "릴리스 태그 (예: v1.0.0). 비워두면 Actions artifact만 생성합니다."
+        required: false
+        type: string
+      release_name:
+        description: "GitHub Release 제목. 비워두면 기본값을 사용합니다."
+        required: false
+        type: string
+      draft:
+        description: "새 Release를 draft로 생성합니다."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUTF8: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend/package-lock.json"
+
+      - name: Resolve release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $dispatchTag = "${{ github.event.inputs.release_tag }}"
+          $refType = "${{ github.ref_type }}"
+          $refName = "${{ github.ref_name }}"
+
+          if ($refType -eq "tag") {
+            $tag = $refName
+          } elseif ($dispatchTag) {
+            $tag = $dispatchTag.Trim()
+          } else {
+            $tag = ""
+          }
+
+          if ($tag) {
+            $version = $tag
+          } else {
+            $version = "manual-$($env:GITHUB_SHA.Substring(0, 7))"
+          }
+
+          $releaseNameInput = "${{ github.event.inputs.release_name }}"
+          if ($releaseNameInput) {
+            $releaseName = $releaseNameInput.Trim()
+          } elseif ($tag) {
+            $releaseName = "Office Data Joiner $tag"
+          } else {
+            $releaseName = "Office Data Joiner $version"
+          }
+
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "release_name=$releaseName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        shell: pwsh
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        shell: pwsh
+        run: npm run build
+
+      - name: Run backend tests
+        shell: pwsh
+        run: pytest -q
+
+      - name: Run demo checks
+        shell: pwsh
+        run: python scripts/run_demo_checks.py
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: python -m PyInstaller office_data_joiner.spec --clean -y
+
+      - name: Package release bundle
+        id: bundle
+        shell: pwsh
+        run: |
+          $bundleName = "office-data-joiner-${{ steps.meta.outputs.version }}-windows-x64"
+
+          if (Test-Path $bundleName) {
+            Remove-Item $bundleName -Recurse -Force
+          }
+          if (Test-Path "$bundleName.zip") {
+            Remove-Item "$bundleName.zip" -Force
+          }
+          if (Test-Path "$bundleName.sha256.txt") {
+            Remove-Item "$bundleName.sha256.txt" -Force
+          }
+
+          Copy-Item -Path "dist/office-data-joiner" -Destination $bundleName -Recurse
+          Compress-Archive -Path $bundleName -DestinationPath "$bundleName.zip" -Force
+
+          $hash = (Get-FileHash "$bundleName.zip" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$bundleName.sha256.txt" -Value "$hash  $bundleName.zip" -Encoding Ascii
+
+          "bundle_name=$bundleName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "zip_path=$bundleName.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha_path=$bundleName.sha256.txt" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.bundle_name }}
+          path: |
+            ${{ steps.bundle.outputs.zip_path }}
+            ${{ steps.bundle.outputs.sha_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release assets
+        if: steps.meta.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_DRAFT: ${{ github.event.inputs.draft }}
+          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
+          RELEASE_SHA: ${{ steps.bundle.outputs.sha_path }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_ZIP: ${{ steps.bundle.outputs.zip_path }}
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG
+          $releaseName = $env:RELEASE_NAME
+          $zipPath = $env:RELEASE_ZIP
+          $shaPath = $env:RELEASE_SHA
+          $draft = $env:RELEASE_DRAFT -eq "true"
+
+          gh release view $tag 1>$null 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zipPath $shaPath --clobber
+            exit 0
+          }
+
+          $args = @(
+            "release", "create", $tag, $zipPath, $shaPath,
+            "--title", $releaseName,
+            "--target", $env:GITHUB_SHA,
+            "--notes", "Windows build generated by GitHub Actions."
+          )
+
+          if ($draft) {
+            $args += "--draft"
+          }
+
+          gh @args
