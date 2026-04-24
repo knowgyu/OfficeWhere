@@ -19,10 +19,11 @@ from ..models.schemas import (
     BulkRegisterResponse,
     BulkRegisterResult,
 )
-from ..database import register_file, get_all_files, get_file_by_id, delete_file
+from ..database import register_file, get_all_files, get_file_by_id, delete_file, save_file_chunks, update_file_mtime
 from ..core.file_access import inspect_file_path, pick_local_file, scan_folder, pick_local_folder
 from ..core.parser import get_file_schema, SUPPORTED_EXTENSIONS
 from ..core.normalizer import suggest_key_column
+from ..core.indexer import inspect_and_chunk
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -67,7 +68,7 @@ def pick_file():
 
 @router.post("", response_model=FileRegisterResponse)
 def register(req: FileRegisterRequest):
-    """파일 등록"""
+    """파일 등록 (1회 파싱으로 스키마 + 인덱싱 동시 처리)"""
     path = os.path.normpath(req.path)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {path}")
@@ -80,7 +81,7 @@ def register(req: FileRegisterRequest):
         )
 
     try:
-        inspected = inspect_file_path(path)
+        info, chunks = inspect_and_chunk(path)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -88,7 +89,7 @@ def register(req: FileRegisterRequest):
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {e}")
 
-    columns = inspected["columns"]
+    columns = info["columns"]
     if req.key_column not in columns:
         suggested = suggest_key_column(columns)
         raise HTTPException(
@@ -102,13 +103,19 @@ def register(req: FileRegisterRequest):
 
     file_id = register_file(
         path=path,
-        name=inspected["name"],
-        file_type=inspected["file_type"],
+        name=info["name"],
+        file_type=info["file_type"],
         key_column=req.key_column,
         column_count=len(columns),
     )
 
-    return FileRegisterResponse(id=file_id, name=inspected["name"], columns=columns)
+    try:
+        save_file_chunks(file_id, chunks)
+        update_file_mtime(file_id, os.path.getmtime(path))
+    except Exception:
+        pass
+
+    return FileRegisterResponse(id=file_id, name=info["name"], columns=columns)
 
 
 @router.get("", response_model=List[FileInfo])
@@ -214,27 +221,35 @@ def scan_folder_endpoint(req: FolderScanRequest):
 
 @router.post("/bulk-register", response_model=BulkRegisterResponse)
 def bulk_register(req: BulkRegisterRequest):
-    """여러 파일을 일괄 등록"""
-    results = []
-    registered = 0
-    failed = 0
-    for item in req.files:
+    """여러 파일을 병렬로 일괄 등록"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _register_one(item: BulkRegisterItem) -> BulkRegisterResult:
         path = os.path.normpath(item.path)
         try:
-            inspected = inspect_file_path(path)
-            columns = inspected["columns"]
+            info, chunks = inspect_and_chunk(path)
+            columns = info["columns"]
             if item.key_column not in columns:
                 raise ValueError(f"key 컬럼 '{item.key_column}'이(가) 파일에 없습니다.")
             file_id = register_file(
                 path=path,
-                name=inspected["name"],
-                file_type=inspected["file_type"],
+                name=info["name"],
+                file_type=info["file_type"],
                 key_column=item.key_column,
                 column_count=len(columns),
             )
-            results.append(BulkRegisterResult(path=path, name=inspected["name"], success=True, file_id=file_id))
-            registered += 1
+            try:
+                save_file_chunks(file_id, chunks)
+                update_file_mtime(file_id, os.path.getmtime(path))
+            except Exception:
+                pass
+            return BulkRegisterResult(path=path, name=info["name"], success=True, file_id=file_id)
         except Exception as e:
-            results.append(BulkRegisterResult(path=path, name=Path(path).name, success=False, error=str(e)))
-            failed += 1
+            return BulkRegisterResult(path=path, name=Path(path).name, success=False, error=str(e))
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(_register_one, req.files))
+
+    registered = sum(1 for r in results if r.success)
+    failed = len(results) - registered
     return BulkRegisterResponse(registered=registered, failed=failed, results=results)

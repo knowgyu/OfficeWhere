@@ -70,7 +70,9 @@ def pick_local_file() -> str:
 
 
 def scan_folder(folder_path: str, recursive: bool = True) -> List[Dict[str, Any]]:
-    """폴더 내 지원 파일을 스캔하여 파일 정보 목록 반환. 파싱 실패 시 error 필드 포함."""
+    """폴더 내 지원 파일을 병렬로 스캔하여 파일 정보 목록 반환."""
+    from concurrent.futures import ThreadPoolExecutor
+
     folder = Path(os.path.normpath(folder_path.strip()))
     if not folder.exists():
         raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
@@ -78,20 +80,19 @@ def scan_folder(folder_path: str, recursive: bool = True) -> List[Dict[str, Any]
         raise ValueError(f"폴더가 아닙니다: {folder_path}")
 
     glob_pattern = "**/*" if recursive else "*"
-    found: List[Path] = []
-    for ext in SUPPORTED_EXTENSIONS:
-        found.extend(folder.glob(f"{glob_pattern}{ext}"))
+    found: List[Path] = sorted(
+        p for ext in SUPPORTED_EXTENSIONS
+        for p in folder.glob(f"{glob_pattern}{ext}")
+        if p.is_file() and not p.name.startswith("~$")
+    )
 
-    results = []
-    for file_path in sorted(found):
-        if not file_path.is_file():
-            continue
+    def _inspect_one(file_path: Path) -> Dict[str, Any]:
         try:
             info = inspect_file_path(str(file_path))
             info["error"] = None
-            results.append(info)
+            return info
         except Exception as e:
-            results.append({
+            return {
                 "path": str(file_path),
                 "name": file_path.name,
                 "file_type": get_file_type(str(file_path)),
@@ -99,9 +100,10 @@ def scan_folder(folder_path: str, recursive: bool = True) -> List[Dict[str, Any]
                 "sample": [],
                 "suggested_key_column": None,
                 "error": str(e),
-            })
+            }
 
-    return results
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        return list(executor.map(_inspect_one, found))
 
 
 def pick_local_folder() -> str:
