@@ -79,6 +79,9 @@ Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도
 setup.bat
 ```
 
+Windows에서 소스 빌드까지 하려면 Python 3.10+와 Node.js LTS가 모두 필요합니다.
+Node.js를 새로 설치했다면 기존 CMD/PowerShell 창을 닫고 새 창에서 다시 실행하세요.
+
 ### macOS / Linux
 
 ```bash
@@ -125,6 +128,9 @@ npm run dev
 ```bat
 build.bat
 ```
+
+`build.bat`은 프론트엔드 정적 파일을 먼저 빌드하므로 Node.js LTS가 필요합니다.
+개발환경이 없는 최종 사용자는 이 과정을 직접 하지 않고 Release zip의 `office-data-joiner.exe`를 실행하면 됩니다.
 
 ### macOS / Linux
 
