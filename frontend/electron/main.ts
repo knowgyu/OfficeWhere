@@ -17,7 +17,7 @@ let backendBaseUrl = ''
 let backendLogPath = ''
 let isQuitting = false
 
-app.setName('Office Data Joiner')
+app.setName('OfficeWhere')
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
@@ -67,6 +67,7 @@ async function createMainWindow() {
     height: 860,
     minWidth: 980,
     minHeight: 680,
+    icon: getAppIconPath(),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -105,6 +106,13 @@ function getRendererIndexPath(): string {
   return path.join(app.getAppPath(), 'dist', 'index.html')
 }
 
+function getAppIconPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'renderer', 'officewhere-logo.png')
+  }
+  return path.join(app.getAppPath(), 'dist', 'officewhere-logo.png')
+}
+
 async function startBackendWithRetry() {
   let lastError: unknown
 
@@ -125,7 +133,7 @@ async function startBackendWithRetry() {
 
   const detail = errorToMessage(lastError)
   dialog.showErrorBox(
-    'Office Data Joiner backend 시작 실패',
+      'OfficeWhere backend 시작 실패',
     `Python backend를 시작하지 못했습니다.\n\n${detail}\n\n로그: ${backendLogPath || '생성되지 않음'}`
   )
   throw lastError
@@ -141,7 +149,7 @@ async function startBackend(port: number) {
 
   const command = getBackendCommand(port, dataDir)
   const logStream = fs.createWriteStream(backendLogPath, { flags: 'a' })
-  logStream.write(`[office-data-joiner] command: ${command.file} ${command.args.join(' ')}\n`)
+  logStream.write(`[officewhere] command: ${command.file} ${command.args.join(' ')}\n`)
 
   let spawnError: Error | null = null
   let exited = false
@@ -165,12 +173,12 @@ async function startBackend(port: number) {
 
   child.once('error', (error) => {
     spawnError = error
-    logStream.write(`[office-data-joiner] spawn error: ${error.message}\n`)
+    logStream.write(`[officewhere] spawn error: ${error.message}\n`)
   })
 
   child.once('exit', (code, signal) => {
     exited = true
-    logStream.write(`[office-data-joiner] backend exited code=${code ?? ''} signal=${signal ?? ''}\n`)
+    logStream.write(`[officewhere] backend exited code=${code ?? ''} signal=${signal ?? ''}\n`)
     logStream.end()
 
     const expectedExit = isQuitting || expectedBackendExits.has(child)
@@ -180,7 +188,7 @@ async function startBackend(port: number) {
 
     if (!expectedExit) {
       dialog.showErrorBox(
-        'Office Data Joiner backend 종료',
+        'OfficeWhere backend 종료',
         `Python backend가 예기치 않게 종료되었습니다.\n\n로그: ${backendLogPath}`
       )
       app.quit()
@@ -206,7 +214,7 @@ function getBackendCommand(port: number, dataDir: string): { file: string; args:
   }
 
   if (app.isPackaged) {
-    const exeName = process.platform === 'win32' ? 'office-data-joiner-backend.exe' : 'office-data-joiner-backend'
+    const exeName = process.platform === 'win32' ? 'officewhere-backend.exe' : 'officewhere-backend'
     const file = path.join(process.resourcesPath, 'backend', exeName)
     return { file, args, cwd: path.dirname(file) }
   }

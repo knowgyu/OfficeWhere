@@ -39,7 +39,7 @@ async function apiPath(path: string): Promise<string> {
   return `${baseUrl}${path}`
 }
 
-export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Unknown'
+export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Text' | 'Markdown' | 'Unknown'
 export type CompareMode = 'excel' | 'word' | 'ppt'
 export type CellValue = string | number | boolean | null | undefined
 
@@ -116,6 +116,7 @@ export interface FileInspectResponse {
   name: string
   file_type: string
   compare_mode?: CompareMode | string
+  comparison_mode?: CompareMode | string
   suggested_key_column?: string | null
   parser_config?: ParserConfig | null
   parser_candidates?: unknown[]
@@ -163,6 +164,7 @@ export interface FileRegisterResponse {
 export interface SchemaResponse {
   file_type?: string
   compare_mode?: CompareMode | string
+  comparison_mode?: CompareMode | string
   parser_config?: ParserConfig | null
   preview?: unknown
   summary?: unknown
@@ -453,6 +455,8 @@ export function normalizeFileType(fileType: unknown): FileType {
   if (raw.includes('excel')) return 'Excel'
   if (raw.includes('word')) return 'Word'
   if (raw.includes('power') || raw === 'ppt' || raw === 'pptx') return 'PowerPoint'
+  if (raw.includes('markdown') || raw === 'md') return 'Markdown'
+  if (raw.includes('text') || raw === 'txt') return 'Text'
   return 'Unknown'
 }
 
@@ -518,10 +522,13 @@ export function formatParserConfigSummary(parserConfig: ParserConfig | null | un
   ]
 }
 
-function buildCapabilitySummary(mode: CompareMode): string[] {
-  if (mode === 'excel') return ['JOIN 지원', '멀티 파일 정합성 검사', '표 영역 parser_config 저장']
-  if (mode === 'word') return ['2문서 diff', '문단/표 블록 비교', 'key 없이 등록 가능']
-  return ['2문서 diff', '슬라이드 추가/삭제 감지', '슬라이드 항목 변경 비교']
+function buildCapabilitySummary(mode: CompareMode, fileType: FileType): string[] {
+  if (fileType === 'Text' || fileType === 'Markdown') {
+    return ['본문 검색 가능', '내용 미리보기 가능', '정합성 검사 제외']
+  }
+  if (mode === 'excel') return ['Excel 통합 가능', '여러 파일 비교 가능', '표 영역 자동 저장']
+  if (mode === 'word') return ['2개 문서 비교', '문단/표 행 변경 확인', '기준 컬럼 불필요']
+  return ['2개 발표자료 비교', '슬라이드 추가/삭제 확인', '슬라이드 내용 변경 확인']
 }
 
 function normalizePreviewBlocks(value: unknown): PreviewBlock[] {
@@ -689,7 +696,7 @@ function normalizePreview(
 
 export function normalizeFileInspect(payload: FileInspectResponse): NormalizedFileInspect {
   const fileType = normalizeFileType(payload.file_type)
-  const compareMode = getCompareMode(payload.compare_mode, fileType)
+  const compareMode = getCompareMode(payload.compare_mode ?? payload.comparison_mode, fileType)
   const parserCandidates = normalizeExcelCandidates(payload.table_candidates ?? payload.parser_candidates)
   const parserConfig =
     normalizeParserConfig(payload.parser_config) ||
@@ -705,7 +712,7 @@ export function normalizeFileInspect(payload: FileInspectResponse): NormalizedFi
   const capabilitySummary = uniqueStrings([
     ...toStringArray(payload.summary),
     ...toStringArray(payload.compare_capabilities),
-    ...buildCapabilitySummary(compareMode),
+    ...buildCapabilitySummary(compareMode, fileType),
   ])
 
   return {
@@ -731,7 +738,7 @@ export function normalizeSchemaResponse(
   fileType: unknown
 ): NormalizedPreview {
   const normalizedType = normalizeFileType(payload.file_type ?? fileType)
-  const compareMode = getCompareMode(payload.compare_mode, normalizedType)
+  const compareMode = getCompareMode(payload.compare_mode ?? payload.comparison_mode, normalizedType)
   const parserConfig = normalizeParserConfig(payload.parser_config)
   const parserCandidates = normalizeExcelCandidates(
     payload.table_candidates ?? payload.parser_candidates
@@ -806,10 +813,10 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
       message:
         toStringValue(record.message) ||
         (type === 'missing_key'
-          ? '일부 파일에 key가 없습니다.'
+          ? '일부 파일에 기준 항목이 없습니다.'
           : type === 'missing_column'
             ? '일부 파일에 컬럼이 없습니다.'
-            : '같은 key에서 값 차이가 발견되었습니다.'),
+            : '같은 기준 항목에서 값 차이가 발견되었습니다.'),
       conflicts,
     }
   })

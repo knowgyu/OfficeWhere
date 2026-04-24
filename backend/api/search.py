@@ -19,15 +19,14 @@ def search_files(req: SearchRequest):
     name_matches = []
     if normalized_query:
         for file_info in get_all_files():
-            haystack = f"{file_info['name']} {file_info['path']}".lower()
-            if normalized_query in haystack:
+            if normalized_query in file_info["name"].lower():
                 name_matches.append(
                     {
                         "file_id": file_info["id"],
                         "name": file_info["name"],
                         "path": file_info["path"],
                         "file_type": file_info["file_type"],
-                        "location": "파일명 / 경로",
+                        "location": "파일명",
                         "snippet": file_info["name"],
                     }
                 )

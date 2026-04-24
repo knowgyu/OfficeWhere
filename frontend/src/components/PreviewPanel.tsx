@@ -1,9 +1,19 @@
 import { NormalizedPreview } from '../api/client'
 import { Chip } from '../ui'
 
+const BLOCK_TYPE_KO: Record<string, string> = {
+  paragraph: '문단',
+  table_row: '표 행',
+  table: '표',
+  text: '텍스트',
+  slide: '슬라이드',
+}
+
 interface PreviewPanelProps {
   preview: NormalizedPreview
 }
+
+const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
 
 export default function PreviewPanel({ preview }: PreviewPanelProps) {
   return (
@@ -69,7 +79,7 @@ export default function PreviewPanel({ preview }: PreviewPanelProps) {
               className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3"
             >
               <div className="flex items-center gap-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                <Chip label={block.blockType} tone="neutral" as="span" />
+                <Chip label={blockTypeLabel(block.blockType)} tone="neutral" as="span" />
                 <span>{block.location}</span>
               </div>
               <p className="type-body-md text-[var(--md-sys-color-on-surface)] mt-2 whitespace-pre-wrap break-words">
@@ -88,7 +98,7 @@ export default function PreviewPanel({ preview }: PreviewPanelProps) {
               className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3"
             >
               <div className="flex items-center gap-2 flex-wrap">
-                <Chip label={`Slide ${slide.slideNumber}`} tone="primary" as="span" />
+                <Chip label={`슬라이드 ${slide.slideNumber}`} tone="primary" as="span" />
                 <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
                   {slide.title}
                 </span>
@@ -101,7 +111,7 @@ export default function PreviewPanel({ preview }: PreviewPanelProps) {
                       className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2"
                     >
                       <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
-                        {item.itemType} · {item.location}
+                        {blockTypeLabel(item.itemType)} · {item.location}
                       </p>
                       <p className="type-body-md text-[var(--md-sys-color-on-surface)] mt-1 whitespace-pre-wrap break-words">
                         {item.afterText || item.beforeText || '(텍스트 없음)'}

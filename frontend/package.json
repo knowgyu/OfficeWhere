@@ -1,6 +1,6 @@
 {
-  "name": "office-data-joiner",
-  "productName": "Office Data Joiner",
+  "name": "officewhere",
+  "productName": "OfficeWhere",
   "version": "0.1.0",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -30,8 +30,8 @@
     "vite": "^5.1.0"
   },
   "build": {
-    "appId": "com.office-data-joiner.app",
-    "productName": "Office Data Joiner",
+    "appId": "com.officewhere.app",
+    "productName": "OfficeWhere",
     "directories": {
       "output": "../dist/electron"
     },
@@ -45,7 +45,7 @@
         "to": "renderer"
       },
       {
-        "from": "../dist/office-data-joiner-backend",
+        "from": "../dist/officewhere-backend",
         "to": "backend"
       }
     ],
@@ -58,7 +58,7 @@
           ]
         }
       ],
-      "artifactName": "office-data-joiner-${version}-windows-x64.${ext}"
+      "artifactName": "officewhere-${version}-windows-x64.${ext}"
     }
   }
 }

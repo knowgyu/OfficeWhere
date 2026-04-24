@@ -17,6 +17,7 @@ from ..database import (
 from .excel_analysis import extract_excel_table, inspect_excel_file
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_file
+from .text_analysis import extract_text_blocks, inspect_text_file
 from ..runtime import get_worker_count
 from .word_analysis import extract_word_blocks, inspect_word_file
 
@@ -69,6 +70,13 @@ def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, s
     return inspection, chunks
 
 
+def _inspect_and_chunk_text(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
+    inspection = inspect_text_file(path)
+    blocks = extract_text_blocks(path)
+    chunks = [{"location": block["location"], "content": block["text"]} for block in blocks]
+    return inspection, chunks
+
+
 def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     ext = Path(path).suffix.lower()
     if ext in (".xlsx", ".xls"):
@@ -77,6 +85,8 @@ def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None)
         inspection, chunks = _inspect_and_chunk_word(path)
     elif ext == ".pptx":
         inspection, chunks = _inspect_and_chunk_pptx(path)
+    elif ext in (".txt", ".md"):
+        inspection, chunks = _inspect_and_chunk_text(path)
     else:
         raise ValueError(f"지원하지 않는 파일 형식: {ext}")
 
@@ -98,6 +108,8 @@ def index_file(file_id: int, path: str, parser_config: Optional[Dict[str, Any]] 
         _, chunks = _inspect_and_chunk_word(path)
     elif ext == ".pptx":
         _, chunks = _inspect_and_chunk_pptx(path)
+    elif ext in (".txt", ".md"):
+        _, chunks = _inspect_and_chunk_text(path)
     else:
         return 0
 

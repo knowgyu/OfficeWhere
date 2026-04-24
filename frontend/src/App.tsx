@@ -24,7 +24,7 @@ const TABS: TabDef[] = [
     short: '검색',
     icon: 'search',
     iconFilled: 'search',
-    hint: 'Finder처럼 파일명과 문서 내용을 함께 검색',
+    hint: '등록한 폴더와 파일에서 파일명과 문서 내용을 함께 찾습니다',
   },
   {
     id: 'check',
@@ -32,7 +32,7 @@ const TABS: TabDef[] = [
     short: '검사',
     icon: 'difference',
     iconFilled: 'difference',
-    hint: '유사 파일 묶음을 기준으로 변경과 불일치 탐지',
+    hint: '같은 문서의 여러 버전에서 빠진 항목과 변경 내용을 확인합니다',
   },
   {
     id: 'join',
@@ -40,7 +40,7 @@ const TABS: TabDef[] = [
     short: '통합',
     icon: 'join_inner',
     iconFilled: 'join_inner',
-    hint: '같은 key를 기준으로 여러 Excel 컬럼 통합',
+    hint: '같은 기준 컬럼을 가진 여러 Excel 표를 하나로 합칩니다',
   },
   {
     id: 'files',
@@ -48,11 +48,12 @@ const TABS: TabDef[] = [
     short: '설정',
     icon: 'settings',
     iconFilled: 'settings',
-    hint: '대상 폴더, 자동 등록, 파일 라이브러리 관리',
+    hint: '검색과 비교에 사용할 폴더와 파일을 등록합니다',
   },
 ]
 
 const LS_TAB = 'odj:last-tab'
+const LOGO_SRC = './officewhere-logo.png'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
@@ -96,10 +97,12 @@ function NavigationRail({
   return (
     <aside className="sticky top-0 self-start flex flex-col items-center gap-2 w-24 min-h-screen py-4 bg-[var(--md-sys-color-surface-container-low)] border-r border-[var(--md-sys-color-outline-variant)]">
       <div className="flex flex-col items-center gap-1.5 py-3">
-        <div className="h-10 w-10 rounded-md bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)] flex items-center justify-center shadow-elev-1">
-          <Icon name="table_view" size={22} filled />
-        </div>
-        <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">ODJ</p>
+        <img
+          src={LOGO_SRC}
+          alt="OfficeWhere"
+          className="h-10 w-10 rounded-md object-cover shadow-elev-1"
+        />
+        <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">OW</p>
       </div>
 
       <nav className="flex flex-col gap-1 mt-2 w-full px-2" aria-label="메인 내비게이션">
@@ -146,7 +149,7 @@ function TopAppBar({ title, hint }: { title: string; hint: string }) {
       <div className="mx-auto w-full max-w-[1400px] px-6 h-16 flex items-center justify-between gap-4">
         <div className="min-w-0">
           <p className="type-label-md text-[var(--md-sys-color-primary)] uppercase">
-            Office Data Joiner
+            OfficeWhere
           </p>
           <h1 className="type-title-lg text-[var(--md-sys-color-on-surface)] truncate">
             {title}

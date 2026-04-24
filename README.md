@@ -1,11 +1,12 @@
-# Office Data Joiner
+# OfficeWhere
 
-Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도구입니다.  
+Excel / Word / PPT / 텍스트(.txt, .md) 파일들을 마치 데이터베이스처럼 관리하는 도구입니다.  
 다만 기능은 파일 타입별로 다르게 동작합니다.
 
 - **Excel**: 표 영역을 추출해 Excel 통합 / 정합성 검사
 - **Word**: 문단 + 표 행 기준 diff
 - **PowerPoint**: 슬라이드 추가/삭제 + 슬라이드 내부 변경 diff
+- **Text / Markdown**: 단락 기준으로 색인해 전문 검색
 
 ---
 
@@ -13,51 +14,58 @@ Excel / Word / PPT 파일들을 마치 데이터베이스처럼 관리하는 도
 
 ### 시나리오 A — 파일 내용으로 문서 찾기
 
-> PPT가 70개 있는데, 6개월 전에 작성한 제안서에 "클라우드 마이그레이션 비용 추정" 내용이 있었던 것 같은데 어느 파일인지 기억이 안 남.
+> 문서가 수십~수백 개 쌓여 있는데, 예전에 본 특정 내용이 어느 파일에 있었는지 기억이 안 남.
 
-**문서 검색** 탭에서 `클라우드 마이그레이션 비용` 입력 → 결과:
+**문서 검색** 탭에서 키워드 입력 → 결과:
 ```
-📄 2024_인프라제안서_v2.pptx
-  슬라이드 14  ·  "클라우드 마이그레이션 예상 비용: 연 1.2억..."
+📄 2024_하반기_기획안.pptx
+  슬라이드 14  ·  "전환에 따른 예상 비용: 연 1.2억..."
 
-📄 IT전략보고서_최종.pptx
-  슬라이드 8   ·  "클라우드 전환에 따른 초기 비용 분석..."
+📄 인프라_검토_노트.md
+  단락 3 (줄 7)  ·  "전환 초기 비용 분석..."
 ```
-파일명·슬라이드 번호까지 즉시 확인하고, 결과를 클릭해 원본 파일을 바로 엽니다.
+파일명·슬라이드/단락 번호까지 즉시 확인하고, 결과를 클릭해 원본 파일을 바로 엽니다.
+
+> 💡 직장인 회의록·제안서, 학생 강의자료·레포트, 연구자 실험노트·논문 초안, 개발자 설계 문서·기술 메모 등 형식이 달라도 한 번에 검색됩니다.
 
 ---
 
 ### 시나리오 B — 같은 문서 수정본 간 변경 찾기
 
-> 지난주 Word 초안과 오늘 수정본이 있는데, 본문에 어떤 내용이 추가됐고 표 안의 승인 상태가 어떻게 바뀌었는지 한 번에 보고 싶음.
+> 초안과 수정본이 있는데, 본문 문단과 표 값 중 어디가 달라졌는지 한눈에 보고 싶음.
 
-대상 폴더를 설정해두면 앱이 유사한 Word 버전 묶음을 제안 → **버전 묶음 / 정합성**에서 최신 2개 비교:
+대상 폴더를 설정해두면 앱이 유사한 파일 묶음을 제안 → **버전 묶음 / 정합성**에서 최신 2개 비교:
 ```
 [REPLACE] paragraph:2
   before: 본 문서는 1차 초안이다.
   after : 본 문서는 2차 수정본이다.
 
 [REPLACE] table:1/row:3
-  before: 승인 | 대기
-  after : 승인 | 완료
+  before: 상태 | 검토
+  after : 상태 | 완료
 ```
 수정본에서 달라진 블록만 빠르게 확인.
 
+> 💡 보고서 v1/v2, 교수님 피드백 반영본, 논문 수정본, 설계 문서 개정판 등 버전이 쌓이는 모든 Word/PPT에 유효.
+
 ---
 
-### 시나리오 C — 여러 팀 Excel 취합
+### 시나리오 C — 여러 출처의 Excel 취합
 
-> 10개 팀에서 같은 양식 Excel을 제출받음. 복사·붙여넣기로 통합하다 행이 빠지거나 중복됨.
+> 여러 사람 또는 여러 시점에 같은 양식 Excel을 받아 합쳐야 함. 복사·붙여넣기로 하다 보면 행이 빠지거나 중복됨.
 
-대상 폴더 자동 등록 → **Excel 통합**에서 Excel만 선택 → 통합 Excel 다운로드.
+대상 폴더 자동 등록 → **Excel 통합**에서 Excel만 선택 → key 컬럼 기준 병합 → 통합 Excel 다운로드.
+
+> 💡 팀별 제출 현황, 월별 측정값, 실험 회차별 결과, 조원 분담 표 등 취합이 잦은 상황에 바로 적용.
 
 ---
 
 ## 2. 기능 개요
 
-- **설정 / 라이브러리**: 검색·검사 대상 폴더를 지정하고 `.xlsx`, `.xls`, `.docx`, `.pptx` 파일을 자동 등록/색인합니다.
+- **설정 / 라이브러리**: 검색·검사 대상 폴더를 지정하고 `.xlsx`, `.xls`, `.docx`, `.pptx`, `.txt`, `.md` 파일을 자동 등록/색인합니다.
   - Excel은 표 후보 영역과 key 컬럼을 선택합니다.
   - Word/PPT는 key 없이 비교 전용으로 등록합니다.
+  - Text/Markdown은 단락 단위로 색인되며 검색 전용입니다.
 - **문서 검색**: 등록된 모든 파일의 파일명·경로·내용을 검색합니다. 슬라이드 번호, 행/열 위치까지 표시하고 원본 파일을 바로 엽니다.
 - **Excel 통합**: 등록된 **Excel 파일만** key 기준으로 LEFT / OUTER / INNER 방식으로 합칩니다.
 - **버전 묶음 / 정합성**:
@@ -141,7 +149,7 @@ build.bat
 ```
 
 `build.bat`은 프론트엔드 정적 파일을 먼저 빌드하므로 Node.js LTS가 필요합니다.
-개발환경이 없는 최종 사용자는 이 과정을 직접 하지 않고 Release zip을 압축 해제한 뒤 `Office Data Joiner.exe`를 실행하면 됩니다.
+개발환경이 없는 최종 사용자는 이 과정을 직접 하지 않고 Release zip을 압축 해제한 뒤 `OfficeWhere.exe`를 실행하면 됩니다.
 Node.js가 없으면 공식 다운로드 링크를 표시하고, `winget`이 있으면 설치 여부를 묻습니다.
 
 Windows 빌드 흐름:
@@ -162,7 +170,7 @@ Linux/macOS의 `build.sh`는 backend exe와 Electron TypeScript build 검증용�
 Windows 배포 zip은 Windows에서 `build.bat` 또는 GitHub Actions로 생성합니다.
 
 > **참고**: 빌드 전 `setup.bat` / `setup.sh`로 가상환경을 먼저 구성해야 합니다.  
-> 프론트엔드 빌드(`frontend/dist`)와 backend exe(`dist/office-data-joiner-backend`)가 Electron resources에 포함됩니다.
+> 프론트엔드 빌드(`frontend/dist`)와 backend exe(`dist/officewhere-backend`)가 Electron resources에 포함됩니다.
 > 기존 pywebview 기반 PyInstaller wrapper는 legacy로 남아 있으며 필요할 때 `python -m PyInstaller office_data_joiner.spec --clean -y`로 직접 빌드할 수 있습니다.
 
 ### GitHub Release 자동 빌드
@@ -176,14 +184,14 @@ Windows 배포 zip은 Windows에서 `build.bat` 또는 GitHub Actions로 생성�
 
 생성 자산:
 
-- `office-data-joiner-<version>-windows-x64.zip`
-- `office-data-joiner-<version>-windows-x64.sha256.txt`
+- `officewhere-<version>-windows-x64.zip`
+- `officewhere-<version>-windows-x64.sha256.txt`
 
 최종 사용자 사용법:
 
 1. GitHub Releases에서 zip 파일 다운로드
 2. 원하는 폴더에 압축 해제
-3. 압축 해제한 폴더 안의 `Office Data Joiner.exe` 실행
+3. 압축 해제한 폴더 안의 `OfficeWhere.exe` 실행
 
 ---
 
@@ -238,6 +246,7 @@ Windows 배포 zip은 Windows에서 `build.bat` 또는 GitHub Actions로 생성�
   - PPT: `슬라이드 14`
   - Word: `단락 3` / `표 1, 행 2, 열 1`
   - Excel: `행 5, 열 담당자`
+  - Text/Markdown: `단락 2 (줄 7)`
 - 키워드 하이라이트, 파일별 그룹핑
 - 검색 결과 클릭 시 OS 기본 앱으로 원본 파일 열기
 - 인덱싱 스케줄: 수동 / N시간마다 / 매일 HH:MM 중 선택
@@ -267,7 +276,30 @@ python scripts/run_perf_checks.py
 
 ---
 
-## 7. 기술 스택
+## 7. TODO / 1.0.0 Major
+
+1.0.0으로 올리기 전에는 처음 쓰는 사용자도 바로 이해하고, 반복 사용자가 자기 환경에 맞춰 편하게 쓸 수 있는 수준까지 다듬습니다.
+
+- **Light mode / Dark mode 지원**
+  - 시스템 설정 연동, 앱 내부 수동 전환, 선택값 저장
+  - 현재 Material 색상 토큰을 기준으로 light/dark 팔레트 분리
+  - 표, diff, 검색 하이라이트, 빈 상태, 오류 상태까지 양쪽 테마에서 가독성 확인
+- **영어 지원**
+  - UI 문구를 i18n 구조로 분리
+  - 한국어/영어 전환 옵션 제공
+  - 버튼, 상태 메시지, 오류 문구, 빈 상태 문구, README/릴리스 설명의 영어 버전 준비
+- **스킵 가능한 튜토리얼**
+  - 첫 실행 시 핵심 흐름 안내: 폴더 등록 → 검색 → Excel 통합 → 버전 비교
+  - 언제든 다시 볼 수 있는 도움말/튜토리얼 진입점 제공
+  - 사용자가 스킵하면 다시 묻지 않도록 상태 저장
+- **첫 실행 Usecase 캐러셀**
+  - 문서 찾기, 수정본 비교, Excel 취합, 회의/수업/연구 자료 관리 같은 대표 상황 소개
+  - 각 usecase에서 바로 관련 탭으로 이동할 수 있는 액션 제공
+  - 튜토리얼과 겹치지 않도록 "왜 쓰는가"는 캐러셀, "어떻게 쓰는가"는 튜토리얼로 역할 분리
+
+---
+
+## 8. 기술 스택
 
 | 구분 | 기술 |
 |------|------|
@@ -275,7 +307,7 @@ python scripts/run_perf_checks.py
 | 데이터 처리 | pandas, openpyxl, xlrd, python-docx, python-pptx |
 | 유사도 매칭 | rapidfuzz (threshold: 85) |
 | 전문 검색 | SQLite FTS5 (unicode61 tokenizer) |
-| 데이터베이스 | SQLite (`~/.office-data-joiner/data.db`) |
+| 데이터베이스 | SQLite (`~/.officewhere/data.db`) |
 | 프론트엔드 | React 18, TypeScript, Vite, Tailwind CSS |
 | HTTP 클라이언트 | axios |
 | 데스크톱 shell | Electron, contextIsolation preload bridge |
@@ -283,7 +315,7 @@ python scripts/run_perf_checks.py
 
 ---
 
-## 8. 리소스 사용량
+## 9. 리소스 사용량
 
 | 상태 | 메모리 | CPU |
 |------|--------|-----|
@@ -296,14 +328,14 @@ python scripts/run_perf_checks.py
 
 ---
 
-## 9. Windows 사용 시 주의사항
+## 10. Windows 사용 시 주의사항
 
 ### 파일 경로 입력
 
 파일 경로를 직접 입력할 때는 Windows 탐색기에서 **주소 표시줄 경로를 그대로 붙여넣기** 하면 됩니다.
 
 ```
-예) C:\Users\홍길동\Documents\과제현황.xlsx
+예) C:\Users\사용자이름\Documents\월간보고서.xlsx
 ```
 
 또는 **"파일 찾기" 버튼**을 클릭하면 OS 파일 선택창이 열립니다 (경로 직접 입력 불필요).
@@ -326,17 +358,17 @@ GitHub Release에서 받은 `.exe`는 코드 서명이 없으므로 Windows Smar
 
 ---
 
-## 10. 주의사항
+## 11. 주의사항
 
 - 포트 **8765** 고정 사용 (일반적인 8000/8080 충돌 방지)
 - 파일 데이터는 서버에 저장되지 않으며, 메타데이터(경로, key 컬럼, `parser_config` 등)만 SQLite에 저장됩니다.
 - 파일 경로가 변경되거나 삭제된 경우 해당 파일을 다시 등록해야 합니다.
 - Windows 경로(`C:\Users\...`) 및 한글 파일명 모두 지원합니다.
-- Word/PPT JOIN은 지원하지 않습니다. Word/PPT는 정합성 검사와 검색 전용입니다.
+- JOIN은 Excel만 지원합니다. Word/PPT는 정합성 검사와 검색, Text/Markdown은 검색 전용입니다.
 
 ---
 
-## 11. 트러블슈팅
+## 12. 트러블슈팅
 
 | 증상 | 해결 방법 |
 |------|-----------|

@@ -90,13 +90,13 @@ export default function FileSearch() {
     try {
       const response = await api.search.reindex()
       snackbar.success(
-        `재인덱싱 완료 — 성공 ${response.data.success} · 실패 ${response.data.failed}`,
+        `검색 갱신 완료 · 성공 ${response.data.success} · 실패 ${response.data.failed}`,
       )
       const next = await api.search.getSettings()
       setSettings(next.data)
       setSettingsDraft(next.data)
     } catch {
-      snackbar.error('재인덱싱에 실패했습니다.')
+      snackbar.error('검색 갱신에 실패했습니다.')
     } finally {
       setReindexing(false)
     }
@@ -108,7 +108,7 @@ export default function FileSearch() {
       const response = await api.search.updateSettings(settingsDraft)
       setSettings(response.data)
       setSettingsOpen(false)
-      snackbar.success('인덱싱 스케줄이 저장되었습니다.')
+      snackbar.success('검색 갱신 주기가 저장되었습니다.')
     } catch {
       snackbar.error('설정 저장에 실패했습니다.')
     }
@@ -145,7 +145,7 @@ export default function FileSearch() {
           <div className="flex-1">
             <TextField
               leadingIcon="search"
-              placeholder="파일 안의 단어를 검색 (예: 클라우드 비용, 승인 일자)"
+              placeholder="파일 안의 단어를 검색 (예: 회의록, 예산안, 실험 결과)"
               value={query}
               onChange={(event) => handleQueryChange(event.target.value)}
               trailing={
@@ -179,11 +179,11 @@ export default function FileSearch() {
               onClick={handleReindex}
               loading={reindexing}
             >
-              재인덱싱
+              검색 갱신
             </Button>
             <IconButton
               icon={settingsOpen ? 'tune' : 'tune'}
-              label="인덱싱 스케줄"
+              label="검색 갱신 주기"
               variant="outlined"
               onClick={() => setSettingsOpen((open) => !open)}
               selected={settingsOpen}
@@ -193,11 +193,11 @@ export default function FileSearch() {
 
         <div className="flex items-center gap-4 flex-wrap type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
           <span className="inline-flex items-center gap-1.5">
-            <Icon name="bolt" size={16} /> FTS5 전문 검색 · 평균 응답 0.5초 미만
+            <Icon name="bolt" size={16} /> 파일명과 본문을 함께 검색
           </span>
           {lastReindex && (
             <span className="inline-flex items-center gap-1.5">
-              <Icon name="schedule" size={16} /> 마지막 인덱싱 {lastReindex}
+              <Icon name="schedule" size={16} /> 마지막 검색 갱신 {lastReindex}
             </span>
           )}
         </div>
@@ -206,9 +206,9 @@ export default function FileSearch() {
       {settingsOpen && settingsDraft && (
         <Card variant="elevated" className="p-5 space-y-4 animate-slide-up">
           <div>
-            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">인덱싱 스케줄</p>
+            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">검색 갱신 주기</p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              변경된 파일만 증분 인덱싱합니다.
+              검색 결과가 최신 상태가 되도록 변경된 파일만 다시 읽습니다.
             </p>
           </div>
           <div className="flex flex-col gap-2">
@@ -216,22 +216,22 @@ export default function FileSearch() {
               name="reindex-mode"
               checked={settingsDraft.mode === 'manual'}
               onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'manual' })}
-              label="수동 (Off)"
-              description="필요할 때 '재인덱싱' 버튼으로 실행합니다."
+              label="수동"
+              description="필요할 때 '검색 갱신' 버튼으로 실행합니다."
             />
             <Radio
               name="reindex-mode"
               checked={settingsDraft.mode === 'interval'}
               onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'interval' })}
               label="주기 반복"
-              description="지정한 시간마다 백그라운드에서 실행합니다."
+              description="지정한 시간마다 변경된 파일을 자동으로 다시 읽습니다."
             />
             <Radio
               name="reindex-mode"
               checked={settingsDraft.mode === 'daily'}
               onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'daily' })}
               label="매일 정시"
-              description="매일 지정한 시각에 실행합니다."
+              description="매일 지정한 시각에 검색 색인을 갱신합니다."
             />
           </div>
 
@@ -299,7 +299,7 @@ export default function FileSearch() {
         <EmptyState
           icon="manage_search"
           title="파일명과 문서 내용을 한 번에 검색"
-          description="설정에서 대상 폴더를 지정해두면 Finder처럼 찾고, 결과를 눌러 원본 파일을 바로 열 수 있습니다."
+          description="먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT, 텍스트 파일 안의 단어까지 검색할 수 있습니다."
         />
       )}
 

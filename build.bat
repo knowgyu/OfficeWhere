@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 chcp 65001 > nul
-echo [office-data-joiner] 프론트엔드 빌드 중...
+echo [officewhere] 프론트엔드 빌드 중...
 
 where node >nul 2>&1
 if %errorlevel% neq 0 (
@@ -40,7 +40,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [office-data-joiner] Electron main/preload 빌드 중...
+echo [officewhere] Electron main/preload 빌드 중...
 call npm run build:electron
 if %errorlevel% neq 0 (
     echo [오류] Electron 빌드 실패
@@ -49,7 +49,7 @@ if %errorlevel% neq 0 (
 )
 cd ..
 
-echo [office-data-joiner] Backend PyInstaller 패키징 중...
+echo [officewhere] Backend PyInstaller 패키징 중...
 
 if not exist "venv\Scripts\python.exe" (
     echo [오류] 가상환경 Python을 찾을 수 없습니다. setup.bat을 먼저 실행하세요.
@@ -64,7 +64,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [office-data-joiner] Electron Windows zip 패키징 중...
+echo [officewhere] Electron Windows zip 패키징 중...
 cd frontend
 call npm run package:win
 if %errorlevel% neq 0 (

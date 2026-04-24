@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# office-data-joiner PyInstaller spec 파일
+# officewhere PyInstaller spec 파일
 # --onedir 방식 사용 (onefile은 바이러스 오진 이슈 있음)
 
 from pathlib import Path
@@ -85,7 +85,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='office-data-joiner',
+    name='officewhere',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -105,5 +105,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='office-data-joiner',
+    name='officewhere',
 )

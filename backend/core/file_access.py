@@ -18,7 +18,7 @@ def inspect_file_path(path: str) -> Dict[str, Any]:
     ext = Path(normalized_path).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValueError(
-            f"지원하지 않는 파일 형식입니다: {ext}. 지원 형식: .xlsx, .xls, .docx, .pptx"
+            f"지원하지 않는 파일 형식입니다: {ext}. 지원 형식: .xlsx, .xls, .docx, .pptx, .txt, .md"
         )
 
     schema = get_file_schema(normalized_path)
@@ -61,10 +61,11 @@ def pick_local_file() -> str:
             parent=root,
             title="등록할 파일 선택",
             filetypes=[
-                ("지원 파일", "*.xlsx *.xls *.docx *.pptx"),
+                ("지원 파일", "*.xlsx *.xls *.docx *.pptx *.txt *.md"),
                 ("Excel", "*.xlsx *.xls"),
                 ("Word", "*.docx"),
                 ("PowerPoint", "*.pptx"),
+                ("텍스트", "*.txt *.md"),
                 ("모든 파일", "*.*"),
             ],
         )

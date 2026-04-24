@@ -8,10 +8,11 @@ import pandas as pd
 
 from .excel_analysis import extract_excel_table, inspect_excel_file
 from .ppt_analysis import inspect_ppt_file
+from .text_analysis import inspect_text_file
 from .word_analysis import inspect_word_file
 
 
-SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".docx", ".pptx"}
+SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".docx", ".pptx", ".txt", ".md"}
 
 
 def get_file_type(path: str) -> str:
@@ -21,6 +22,8 @@ def get_file_type(path: str) -> str:
         ".xls": "Excel",
         ".docx": "Word",
         ".pptx": "PowerPoint",
+        ".txt": "Text",
+        ".md": "Markdown",
     }
     return mapping.get(ext, "Unknown")
 
@@ -54,4 +57,6 @@ def get_file_schema(path: str, parser_config: Optional[Dict[str, Any]] = None) -
         return inspect_word_file(path)
     if file_type == "PowerPoint":
         return inspect_ppt_file(path)
+    if file_type in ("Text", "Markdown"):
+        return inspect_text_file(path)
     raise ValueError(f"지원하지 않는 파일 형식입니다: {Path(path).suffix.lower()}")

@@ -10,7 +10,7 @@ def _default_db_dir() -> Path:
     configured = os.environ.get("ODJ_DATA_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
-    return Path.home() / ".office-data-joiner"
+    return Path.home() / ".officewhere"
 
 
 DB_DIR = _default_db_dir()

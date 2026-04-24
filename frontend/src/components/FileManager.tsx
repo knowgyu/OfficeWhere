@@ -11,7 +11,7 @@ import {
   SchemaResponse,
   formatParserConfigSummary,
   getCompareMode,
-  getFileTypeLabel,
+  normalizeFileType,
   isExcelFile,
   normalizeFileInspect,
   normalizeSchemaResponse,
@@ -301,7 +301,7 @@ export default function FileManager() {
       return
     }
     if (keyRequired && !keyColumn.trim()) {
-      snackbar.warn('Excel 등록에는 key 컬럼이 필요합니다.')
+      snackbar.warn('Excel 등록에는 기준 컬럼이 필요합니다.')
       return
     }
 
@@ -353,17 +353,19 @@ export default function FileManager() {
   }
 
   const registeredSummary = (file: FileInfo) => {
+    const fileType = normalizeFileType(file.file_type)
     const mode = getCompareMode(undefined, file.file_type)
     const parserSummary = formatParserConfigSummary(file.parser_config ?? undefined)
     if (mode === 'excel') {
       return [
         parserSummary.join(' · ') || `등록 컬럼 ${file.column_count}개`,
-        file.key_column ? `key ${file.key_column}` : 'key 미지정',
-        'JOIN + 다중 파일 비교',
+        file.key_column ? `기준 컬럼 ${file.key_column}` : '기준 컬럼 미지정',
+        'Excel 통합과 여러 파일 비교',
       ]
     }
-    if (mode === 'word') return ['문단/표 블록 diff', '비교 전용', 'key 입력 불필요']
-    return ['슬라이드 diff', '추가/삭제 및 변경 감지', 'key 입력 불필요']
+    if (mode === 'word') return ['문단/표 행 변경 확인', '2개 파일 비교', '기준 컬럼 불필요']
+    if (fileType === 'PowerPoint') return ['슬라이드 변경 확인', '추가/삭제 및 내용 변경', '기준 컬럼 불필요']
+    return ['검색 내용 미리보기', '정합성 검사 제외', '기준 컬럼 불필요']
   }
 
   return (
@@ -371,7 +373,7 @@ export default function FileManager() {
       <Card variant="elevated">
         <CardSection
           title="대상 폴더"
-          description="평소 검색과 정합성 검사에 사용할 폴더를 지정합니다. 자동 재스캔은 변경 파일만 다시 파싱/색인합니다."
+          description="자주 쓰는 문서 폴더를 등록하면 검색과 비교에 바로 사용할 수 있습니다. 자동 재스캔은 바뀐 파일만 다시 읽습니다."
           trailing={
             <Button
               variant="filled"
@@ -426,7 +428,7 @@ export default function FileManager() {
             <EmptyState
               icon="folder_off"
               title="지정된 대상 폴더가 없습니다"
-              description="먼저 자주 쓰는 과제 문서 폴더를 추가한 뒤 자동 등록을 실행하세요."
+              description="먼저 자주 쓰는 작업 폴더(업무/연구/강의/프로젝트 등)를 추가한 뒤 자동 등록을 실행하세요."
               compact
             />
           ) : (
@@ -497,7 +499,7 @@ export default function FileManager() {
             <div>
               <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">자동 재스캔 주기</p>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                폴더 목록은 주기적으로 훑지만, 파일 수정 시간이 바뀐 경우에만 재등록/재색인합니다.
+                등록한 폴더를 주기적으로 확인해 새 파일과 수정된 파일을 검색 대상으로 반영합니다.
               </p>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_160px_140px] gap-3 items-end">
@@ -558,11 +560,11 @@ export default function FileManager() {
       <Card variant="elevated">
         <CardSection
           title="개별 파일 추가"
-          description="대상 폴더 밖의 파일만 수동으로 추가하세요. Excel은 표 후보 영역과 추천 key를 확인한 뒤 등록합니다."
+          description="대상 폴더 밖에 있는 파일만 수동으로 추가하세요. Excel은 어떤 행을 제목으로 볼지와 기준 컬럼을 확인한 뒤 등록합니다."
           trailing={
             <div className="flex gap-2 flex-wrap">
-              <Chip label="Excel · JOIN + 비교" tone="success" icon="table_chart" as="span" />
-              <Chip label="Word / PPT · diff 전용" tone="primary" icon="article" as="span" />
+              <Chip label="Excel · 통합 + 비교" tone="success" icon="table_chart" as="span" />
+              <Chip label="Word / PPT · 변경 비교" tone="primary" icon="article" as="span" />
             </div>
           }
         >
@@ -618,7 +620,7 @@ export default function FileManager() {
             )}
           </div>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            지원 형식 · .xlsx · .xls · .docx · .pptx
+            지원 형식 · .xlsx · .xls · .docx · .pptx · .txt · .md
           </p>
         </CardSection>
       </Card>
@@ -632,7 +634,7 @@ export default function FileManager() {
               등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({files.length})</span>
             </h3>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              각 파일을 눌러 미리보기. 등록 해제는 휴지통 아이콘.
+              파일명을 누르면 미리보기를 볼 수 있습니다. 등록 해제는 목록에서만 제거하며 원본 파일은 삭제하지 않습니다.
             </p>
           </div>
           <IconButton
@@ -652,7 +654,7 @@ export default function FileManager() {
           <EmptyState
             icon="library_add"
             title="아직 등록된 파일이 없습니다"
-            description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT를 추가해 보세요."
+            description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT / 텍스트(.txt, .md) 파일을 추가해 보세요."
             compact
           />
         ) : (
@@ -673,9 +675,11 @@ export default function FileManager() {
                     </span>
                     <FileTypeBadge fileType={file.file_type} />
                     {isExcelFile(file.file_type) ? (
-                      <Badge tone="success">JOIN 가능</Badge>
+                      <Badge tone="success">통합 가능</Badge>
+                    ) : ['Text', 'Markdown'].includes(normalizeFileType(file.file_type)) ? (
+                      <Badge tone="neutral">검색용</Badge>
                     ) : (
-                      <Badge tone="warning">비교 전용</Badge>
+                      <Badge tone="warning">검색/비교용</Badge>
                     )}
                   </div>
                   <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
@@ -693,8 +697,8 @@ export default function FileManager() {
                   </p>
                   <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                     {isExcelFile(file.file_type) && file.key_column
-                      ? `key ${file.key_column}`
-                      : 'key 없음'}
+                      ? `기준 컬럼 ${file.key_column}`
+                      : '기준 컬럼 없음'}
                   </p>
                   <IconButton
                     icon="delete"
@@ -729,7 +733,7 @@ export default function FileManager() {
             <div className="flex gap-2 flex-wrap">
               <FileTypeBadge fileType={previewFile.file_type} />
               {isExcelFile(previewFile.file_type) && previewFile.key_column && (
-                <Chip label={`key ${previewFile.key_column}`} tone="primary" as="span" />
+                <Chip label={`기준 컬럼 ${previewFile.key_column}`} tone="primary" as="span" />
               )}
               {formatParserConfigSummary(previewFile.parser_config ?? undefined).map((item) => (
                 <Chip key={item} label={item} tone="neutral" as="span" />
@@ -781,10 +785,6 @@ export default function FileManager() {
           이 파일의 등록 정보와 인덱스를 삭제합니다. 원본 파일은 영향받지 않습니다.
         </p>
       </Dialog>
-
-      <p className="type-body-sm text-center text-[var(--md-sys-color-on-surface-variant)] opacity-80">
-        {getFileTypeLabel('unknown') ? '' : ''}
-      </p>
     </div>
   )
 }
@@ -828,11 +828,13 @@ function InspectionCard({
           <div className="flex gap-2 flex-wrap pt-1">
             <FileTypeBadge fileType={inspectedFile.fileType} />
             <Badge tone="primary">
-              {inspectedFile.compareMode === 'excel'
-                ? '표 기반 비교'
+              {inspectedFile.fileType === 'Text' || inspectedFile.fileType === 'Markdown'
+                ? '검색 등록용'
+                : inspectedFile.compareMode === 'excel'
+                ? '표 통합/비교'
                 : inspectedFile.compareMode === 'word'
-                  ? '문서 diff'
-                  : '슬라이드 diff'}
+                  ? '문서 변경 비교'
+                  : '슬라이드 변경 비교'}
             </Badge>
           </div>
         </div>
@@ -850,7 +852,7 @@ function InspectionCard({
               표 후보 영역
             </p>
             <p className="type-body-sm text-[var(--md-sys-color-on-primary-container)] opacity-80">
-              선택한 parser_config가 등록 시 함께 저장됩니다.
+              실제 데이터 표로 사용할 영역을 선택하세요. 선택값은 다음 검색/비교 때 그대로 사용됩니다.
             </p>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -908,11 +910,11 @@ function InspectionCard({
               <div className="space-y-2">
                 {availableColumns.length > 0 ? (
                   <SelectField
-                    label="key 컬럼"
+                    label="기준 컬럼"
                     value={keyColumn}
                     onChange={(event) => onKeyColumn(event.target.value)}
                   >
-                    <option value="">key 컬럼 선택</option>
+                    <option value="">기준 컬럼 선택</option>
                     {availableColumns.map((column) => (
                       <option key={column} value={column}>
                         {column}
@@ -922,23 +924,28 @@ function InspectionCard({
                   </SelectField>
                 ) : (
                   <TextField
-                    label="key 컬럼"
-                    placeholder="key 컬럼명"
+                    label="기준 컬럼"
+                    placeholder="예: ID, 사번, 과제명"
                     value={keyColumn}
                     onChange={(event) => onKeyColumn(event.target.value)}
                   />
                 )}
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  추천 key · <strong>{inspectedFile.suggestedKey || '없음'}</strong>
+                  추천 기준 컬럼 · <strong>{inspectedFile.suggestedKey || '없음'}</strong>
+                </p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  기준 컬럼은 여러 Excel 파일에서 같은 행을 맞춰 통합하거나 값 차이를 찾는 데 사용됩니다.
                 </p>
               </div>
             ) : (
               <div className="rounded-md bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 space-y-1">
                 <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
-                  이 형식은 key 없이 등록됩니다.
+                  이 형식은 기준 컬럼 없이 등록됩니다.
                 </p>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  비교 시 문서 diff 엔진이 parser_config를 사용합니다.
+                  {inspectedFile.fileType === 'Text' || inspectedFile.fileType === 'Markdown'
+                    ? '검색과 내용 미리보기에 사용할 수 있습니다.'
+                    : '검색과 2개 파일 변경 비교에 사용할 수 있습니다.'}
                 </p>
               </div>
             )}
@@ -946,7 +953,7 @@ function InspectionCard({
             {parserSummary.length > 0 && (
               <div className="space-y-1">
                 <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
-                  저장될 parser_config
+                  저장될 표 읽기 설정
                 </p>
                 {parserSummary.map((item) => (
                   <p

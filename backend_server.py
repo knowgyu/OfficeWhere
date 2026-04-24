@@ -17,7 +17,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Office Data Joiner backend server")
+    parser = argparse.ArgumentParser(description="OfficeWhere backend server")
     parser.add_argument("--host", default=os.environ.get("ODJ_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("ODJ_PORT", "8765")))
     parser.add_argument("--data-dir", default=os.environ.get("ODJ_DATA_DIR", ""))

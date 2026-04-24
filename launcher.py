@@ -1,5 +1,5 @@
 """
-office-data-joiner launcher
+officewhere launcher
 .exe 진입점: uvicorn 서버를 별도 스레드에서 시작하고 데스크톱 WebView 창을 엽니다.
 """
 import asyncio
@@ -116,12 +116,12 @@ def open_desktop_window() -> bool:
     try:
         import webview
     except Exception as exc:
-        print(f"[office-data-joiner] WebView를 사용할 수 없어 브라우저로 엽니다: {exc}")
+        print(f"[officewhere] WebView를 사용할 수 없어 브라우저로 엽니다: {exc}")
         return False
 
     api = DesktopApi()
     window = webview.create_window(
-        "Office Data Joiner",
+        "OfficeWhere",
         URL,
         js_api=api,
         width=1280,
@@ -132,7 +132,7 @@ def open_desktop_window() -> bool:
     try:
         webview.start(debug=False)
     except Exception as exc:
-        print(f"[office-data-joiner] WebView 창을 열 수 없어 브라우저로 엽니다: {exc}")
+        print(f"[officewhere] WebView 창을 열 수 없어 브라우저로 엽니다: {exc}")
         return False
     return True
 
@@ -140,15 +140,15 @@ def open_desktop_window() -> bool:
 def main():
     if is_port_in_use(PORT):
         if is_office_data_joiner_running():
-            print(f"[office-data-joiner] 이미 실행 중입니다. 브라우저를 엽니다: {URL}")
+            print(f"[officewhere] 이미 실행 중입니다. 브라우저를 엽니다: {URL}")
             webbrowser.open(URL)
             return
-        print(f"[office-data-joiner] 포트 {PORT}가 다른 프로그램에서 사용 중입니다.")
-        print("[office-data-joiner] 해당 프로그램을 종료한 뒤 다시 실행해 주세요.")
+        print(f"[officewhere] 포트 {PORT}가 다른 프로그램에서 사용 중입니다.")
+        print("[officewhere] 해당 프로그램을 종료한 뒤 다시 실행해 주세요.")
         return
 
-    print(f"[office-data-joiner] 서버를 시작합니다... (포트: {PORT})")
-    print("[office-data-joiner] 종료하려면 이 창을 닫으세요.")
+    print(f"[officewhere] 서버를 시작합니다... (포트: {PORT})")
+    print("[officewhere] 종료하려면 이 창을 닫으세요.")
 
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
@@ -158,30 +158,30 @@ def main():
         if is_port_in_use(PORT):
             break
     else:
-        print("[office-data-joiner] 서버 시작에 실패했습니다.")
+        print("[officewhere] 서버 시작에 실패했습니다.")
         sys.exit(1)
 
     time.sleep(1.0)
     if os.environ.get("ODJ_NO_GUI") == "1":
-        print(f"[office-data-joiner] GUI 없이 서버만 실행 중입니다: {URL}")
+        print(f"[officewhere] GUI 없이 서버만 실행 중입니다: {URL}")
         try:
             server_thread.join()
         except KeyboardInterrupt:
-            print("\n[office-data-joiner] 서버를 종료합니다.")
+            print("\n[officewhere] 서버를 종료합니다.")
         return
 
-    print(f"[office-data-joiner] 데스크톱 창을 엽니다: {URL}")
+    print(f"[officewhere] 데스크톱 창을 엽니다: {URL}")
     if open_desktop_window():
-        print("[office-data-joiner] 데스크톱 창이 닫혀 앱을 종료합니다.")
+        print("[officewhere] 데스크톱 창이 닫혀 앱을 종료합니다.")
         return
 
-    print(f"[office-data-joiner] 브라우저를 엽니다: {URL}")
+    print(f"[officewhere] 브라우저를 엽니다: {URL}")
     webbrowser.open(URL)
 
     try:
         server_thread.join()
     except KeyboardInterrupt:
-        print("\n[office-data-joiner] 서버를 종료합니다.")
+        print("\n[officewhere] 서버를 종료합니다.")
 
 
 if __name__ == "__main__":

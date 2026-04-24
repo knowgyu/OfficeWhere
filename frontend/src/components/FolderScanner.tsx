@@ -81,7 +81,7 @@ export default function FolderScanner({ onRegistered }: FolderScannerProps) {
       setRows(nextRows)
       setScanDone(true)
       if (response.data.total_found === 0) {
-        snackbar.warn('지원 파일(.xlsx · .xls · .docx · .pptx)을 찾지 못했습니다.')
+        snackbar.warn('지원 파일(.xlsx · .xls · .docx · .pptx · .txt · .md)을 찾지 못했습니다.')
       } else {
         snackbar.info(`${response.data.total_found}개 파일을 찾았습니다.`)
       }
@@ -178,10 +178,10 @@ export default function FolderScanner({ onRegistered }: FolderScannerProps) {
     <Card variant="outlined">
       <CardSection
         title="폴더 스캔으로 일괄 등록"
-        description="Excel은 파일별 parser 후보와 key를 선택하고, Word/PPT는 key 없이 compare-only로 등록됩니다."
+        description="폴더 안의 지원 파일을 한 번에 찾습니다. Excel은 기준 컬럼을 확인하고, Word/PPT/텍스트는 기준 컬럼 없이 등록합니다."
         trailing={
           <Chip
-            label="parser_config 자동 저장"
+            label="표 읽기 설정 자동 저장"
             tone="tertiary"
             icon="auto_fix_high"
             as="span"
@@ -306,9 +306,9 @@ export default function FolderScanner({ onRegistered }: FolderScannerProps) {
                             </p>
                             <FileTypeBadge fileType={row.raw.file_type} />
                             {row.info.keyRequired ? (
-                              <Badge tone="primary">key 필요</Badge>
+                              <Badge tone="primary">기준 컬럼 필요</Badge>
                             ) : (
-                              <Badge tone="neutral">key 불필요</Badge>
+                              <Badge tone="neutral">기준 컬럼 불필요</Badge>
                             )}
                           </div>
                           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
@@ -351,11 +351,11 @@ export default function FolderScanner({ onRegistered }: FolderScannerProps) {
                           )}
                           {row.info.keyRequired ? (
                             <SelectField
-                              label="key 컬럼"
+                              label="기준 컬럼"
                               value={row.keyColumn}
                               onChange={(event) => setKeyColumn(index, event.target.value)}
                             >
-                              <option value="">key 컬럼 선택</option>
+                              <option value="">기준 컬럼 선택</option>
                               {(selectedCandidate?.table.columns ?? row.info.keyOptions).map(
                                 (column) => (
                                   <option key={column} value={column}>
@@ -367,7 +367,9 @@ export default function FolderScanner({ onRegistered }: FolderScannerProps) {
                             </SelectField>
                           ) : (
                             <div className="rounded-md bg-[var(--md-sys-color-surface-container-high)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                              비교 전용 등록 · parser_config만 저장됩니다.
+                              {row.info.fileType === 'Text' || row.info.fileType === 'Markdown'
+                                ? '기준 컬럼 없이 검색용으로 등록됩니다.'
+                                : '기준 컬럼 없이 검색과 변경 비교용으로 등록됩니다.'}
                             </div>
                           )}
                         </div>

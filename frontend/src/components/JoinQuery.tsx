@@ -27,6 +27,12 @@ import ResultTable from './ResultTable'
 
 type JoinType = 'left' | 'outer' | 'inner'
 
+const JOIN_TYPE_HELP: Record<JoinType, string> = {
+  outer: '모든 파일의 기준 컬럼 값을 빠짐없이 모읍니다. 누락된 값은 빈칸으로 표시됩니다.',
+  left: '기준 파일에 있는 행만 남기고, 다른 파일의 컬럼 값을 옆에 붙입니다.',
+  inner: '선택한 모든 파일에 공통으로 있는 행만 남깁니다.',
+}
+
 interface FileSelection {
   fileId: number
   selectedColumns: Set<string>
@@ -184,7 +190,7 @@ export default function JoinQuery() {
         <EmptyState
           icon="table_view"
           title="먼저 대상 폴더를 설정해 주세요"
-          description="Excel 통합은 설정에서 자동 등록된 Excel 파일을 대상으로 합니다."
+          description="설정에서 Excel 파일이 있는 폴더를 추가하고 자동 등록을 실행하면 이 화면에서 통합할 수 있습니다."
         />
       </Card>
     )
@@ -195,7 +201,7 @@ export default function JoinQuery() {
       <Card variant="elevated">
         <CardSection
           title="통합할 Excel 파일 선택"
-          description="같은 key를 가진 Excel 파일을 하나의 표로 합칩니다. Word/PPT는 비교 전용 문서이므로 제외됩니다."
+          description="같은 기준 컬럼을 가진 Excel 파일을 하나의 표로 합칩니다. Word/PPT/텍스트 파일은 통합 대상에서 제외됩니다."
           trailing={
             <div className="flex gap-2 flex-wrap">
               <Chip
@@ -205,7 +211,7 @@ export default function JoinQuery() {
                 as="span"
               />
               <Chip
-                label={`compare-only ${compareOnlyFiles.length}개`}
+                label={`통합 제외 ${compareOnlyFiles.length}개`}
                 tone="neutral"
                 icon="do_not_disturb_on"
                 as="span"
@@ -253,7 +259,7 @@ export default function JoinQuery() {
                             {file.name}
                           </span>
                           <FileTypeBadge fileType={file.file_type} />
-                          <Badge tone="primary">key {file.key_column || '미지정'}</Badge>
+                          <Badge tone="primary">기준 컬럼 {file.key_column || '미지정'}</Badge>
                           <Badge tone="neutral">컬럼 {file.column_count}개</Badge>
                         </div>
                         <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
@@ -310,7 +316,7 @@ export default function JoinQuery() {
                                 label={
                                   <span className="inline-flex items-center gap-1">
                                     {column}
-                                    {isKey && <Badge tone="primary">key</Badge>}
+                                    {isKey && <Badge tone="primary">기준</Badge>}
                                   </span>
                                 }
                                 onClick={() => !isKey && toggleColumn(file.id, column)}
@@ -357,9 +363,9 @@ export default function JoinQuery() {
               value={joinType}
               onChange={setJoinType}
               options={[
-                { value: 'outer', label: 'OUTER' },
-                { value: 'left', label: 'LEFT' },
-                { value: 'inner', label: 'INNER' },
+                { value: 'outer', label: '전체' },
+                { value: 'left', label: '기준 파일' },
+                { value: 'inner', label: '공통' },
               ]}
               aria-label="Excel 통합 방식"
             />
@@ -382,6 +388,9 @@ export default function JoinQuery() {
             )}
           </div>
         </div>
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          {JOIN_TYPE_HELP[joinType]}
+        </p>
 
         {joinType === 'left' && selections.size > 0 && (
           <div className="border-t border-[var(--md-sys-color-outline-variant)] pt-3">
@@ -413,7 +422,7 @@ export default function JoinQuery() {
             <div>
               <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 통합 결과</h3>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                parser_config로 재파싱한 표만 대상으로 통합했습니다. 총 {result.total_rows}행
+                등록할 때 확인한 표 영역만 대상으로 통합했습니다. 총 {result.total_rows}행
               </p>
             </div>
           </div>

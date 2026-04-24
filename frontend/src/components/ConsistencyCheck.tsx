@@ -9,6 +9,7 @@ import {
   WordDiffCard,
   api,
   getCompareMode,
+  normalizeFileType,
   normalizeCheckResponse,
 } from '../api/client'
 import {
@@ -26,11 +27,36 @@ import {
 } from '../ui'
 
 const MODE_GUIDE: Record<string, string> = {
-  excel: 'Excel은 다중 선택 가능. value conflict · missing key · missing column을 탐지합니다.',
-  word: 'Word는 2개 파일만 비교. insert / delete / replace diff 카드가 표시됩니다.',
-  ppt: 'PPT는 2개 파일만 비교. 슬라이드 추가/삭제 및 항목 변경을 카드로 표시합니다.',
-  none: 'Excel은 다중 파일 비교, Word/PPT는 2개 파일 비교가 가능합니다.',
+  excel: 'Excel은 여러 파일을 동시에 비교합니다. 기준 컬럼이 같은 행에서 값이 다르거나 컬럼·항목이 누락된 경우를 찾습니다.',
+  word: 'Word는 2개 파일만 비교합니다. 추가·삭제·수정된 문단과 표 행을 카드 형태로 보여줍니다.',
+  ppt: 'PPT는 2개 파일만 비교합니다. 슬라이드 추가/삭제와 슬라이드 내 항목 변경을 보여줍니다.',
+  none: 'Excel은 여러 파일 동시 비교, Word/PPT는 2개 파일 비교가 가능합니다. 텍스트 파일은 검색 등록용입니다.',
 }
+
+const DIFF_TYPE_KO: Record<string, string> = {
+  insert: '추가',
+  delete: '삭제',
+  replace: '수정',
+}
+
+const BLOCK_TYPE_KO: Record<string, string> = {
+  paragraph: '문단',
+  table_row: '표 행',
+  table: '표',
+  text: '텍스트',
+  slide: '슬라이드',
+}
+
+const PPT_TYPE_KO: Record<string, string> = {
+  inserted_slide: '슬라이드 추가',
+  removed_slide: '슬라이드 제거',
+  matched_slide_change: '슬라이드 변경',
+}
+
+const isCheckableFile = (file: FileInfo) =>
+  ['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(file.file_type))
+
+const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
 
 export default function ConsistencyCheck() {
   const snackbar = useSnackbar()
@@ -64,6 +90,10 @@ export default function ConsistencyCheck() {
     : null
 
   const toggleFile = (file: FileInfo) => {
+    if (!isCheckableFile(file)) {
+      snackbar.warn('이 파일 형식은 검색 등록은 가능하지만 정합성 검사는 지원하지 않습니다.')
+      return
+    }
     const next = new Set(selectedIds)
     const isSelected = next.has(file.id)
     const fileMode = getCompareMode(undefined, file.file_type)
@@ -124,8 +154,12 @@ export default function ConsistencyCheck() {
   }
 
   const selectGroup = (group: LibraryFileGroup) => {
+    if (!['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(group.file_type))) {
+      snackbar.warn('이 묶음은 검색 등록용 파일이라 정합성 검사 대상으로 선택할 수 없습니다.')
+      return
+    }
     const ids =
-      group.file_type === 'Excel'
+      normalizeFileType(group.file_type) === 'Excel'
         ? group.files.map((file) => file.id)
         : group.files.slice(0, 2).map((file) => file.id)
     setSelectedIds(new Set(ids))
@@ -150,7 +184,7 @@ export default function ConsistencyCheck() {
         <Card variant="elevated">
           <CardSection
             title="자동 감지된 유사 파일 묶음"
-            description="파일명에서 날짜/버전/최종 같은 토큰을 제거해 같은 문서의 버전 후보를 먼저 보여줍니다."
+            description="파일명에서 날짜, 버전, 최종 같은 표현을 걷어내고 같은 문서로 보이는 파일을 묶어 보여줍니다."
             trailing={<Chip label={`${groups.length}개 묶음`} tone="primary" icon="auto_awesome" as="span" />}
           >
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
@@ -182,9 +216,9 @@ export default function ConsistencyCheck() {
                       ))}
                     </div>
                     <p className="type-label-md text-[var(--md-sys-color-primary)]">
-                      {group.file_type === 'Excel'
-                        ? '이 묶음 전체를 Excel 정합성 검사 대상으로 선택'
-                        : '최신 2개 파일을 비교 대상으로 선택'}
+                      {normalizeFileType(group.file_type) === 'Excel'
+                        ? '이 묶음 전체를 비교 대상으로 선택'
+                        : '이 묶음에서 최신 2개 파일을 비교 대상으로 선택'}
                     </p>
                   </div>
                 </button>
@@ -220,10 +254,12 @@ export default function ConsistencyCheck() {
             {files.map((file) => {
               const checked = selectedIds.has(file.id)
               const fileMode = getCompareMode(undefined, file.file_type)
+              const unsupported = !isCheckableFile(file)
               const disabled =
                 !checked &&
                 Boolean(
-                  (selectedMode && fileMode !== selectedMode) ||
+                  unsupported ||
+                    (selectedMode && fileMode !== selectedMode) ||
                     ((selectedMode === 'word' || selectedMode === 'ppt') && selectedIds.size >= 2),
                 )
               return (
@@ -251,9 +287,11 @@ export default function ConsistencyCheck() {
                       <FileTypeBadge fileType={file.file_type} />
                     </div>
                     <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
-                      {fileMode === 'excel'
-                        ? `key ${file.key_column || '미지정'} · 다중 비교`
-                        : `${fileMode === 'word' ? '문서 diff' : '슬라이드 diff'} · 2개 비교`}
+                      {unsupported
+                        ? '검색 등록 가능 · 정합성 검사 제외'
+                        : fileMode === 'excel'
+                          ? `기준 컬럼 ${file.key_column || '미지정'} · 여러 파일 비교`
+                          : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
                     </p>
                   </div>
                 </label>
@@ -293,22 +331,22 @@ function ExcelCheckResult({ result }: { result: Extract<CheckResponse, { mode: '
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
-        <StatCard label="전체 key" value={result.totalKeys} icon="tag" />
-        <StatCard label="공통 key" value={result.matchedKeys} icon="check_circle" tone="success" />
+        <StatCard label="전체 항목" value={result.totalKeys} icon="tag" />
+        <StatCard label="공통 항목" value={result.matchedKeys} icon="check_circle" tone="success" />
         <StatCard
-          label="value conflict"
+          label="값 불일치"
           value={valueConflicts.length}
           icon="report_problem"
           tone={valueConflicts.length > 0 ? 'danger' : 'neutral'}
         />
         <StatCard
-          label="missing key"
+          label="항목 누락"
           value={missingKeys.length}
           icon="pending"
           tone={missingKeys.length > 0 ? 'warning' : 'neutral'}
         />
         <StatCard
-          label="missing column"
+          label="컬럼 누락"
           value={missingColumns.length}
           icon="view_column_off"
           tone={missingColumns.length > 0 ? 'warning' : 'neutral'}
@@ -316,21 +354,21 @@ function ExcelCheckResult({ result }: { result: Extract<CheckResponse, { mode: '
       </div>
 
       <ExcelIssueSection
-        title="Value Conflict"
+        title="값 불일치"
         icon="report_problem"
-        description="같은 key에서 같은 컬럼 그룹의 값이 다릅니다."
+        description="기준 컬럼 값이 같은 행에서 파일마다 셀 값이 다릅니다."
         issues={valueConflicts}
       />
       <ExcelIssueSection
-        title="Missing Key"
+        title="항목 누락"
         icon="pending"
-        description="일부 파일에 key가 없어 데이터가 누락됩니다."
+        description="일부 파일에 같은 기준 컬럼 값을 가진 행이 없습니다."
         issues={missingKeys}
       />
       <ExcelIssueSection
-        title="Missing Column"
+        title="컬럼 누락"
         icon="view_column_off"
-        description="일부 파일에 컬럼 그룹이 존재하지 않습니다."
+        description="일부 파일에 해당 컬럼이 아예 없습니다."
         issues={missingColumns}
       />
     </div>
@@ -377,10 +415,10 @@ function ExcelIssueSection({
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                      {issue.key || '(빈 key)'}
+                      {issue.key || '(빈 기준 값)'}
                     </span>
                     <Badge tone={issue.severity === 'conflict' ? 'danger' : 'warning'}>
-                      {issue.severity}
+                      {issue.severity === 'conflict' ? '확인 필요' : '주의'}
                     </Badge>
                   </div>
                   <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
@@ -388,7 +426,7 @@ function ExcelIssueSection({
                   </p>
                   {issue.keyVariants.length > 0 && (
                     <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
-                      key 변형 · {issue.keyVariants.join(', ')}
+                      기준 값 표기 차이 · {issue.keyVariants.join(', ')}
                     </p>
                   )}
                 </div>
@@ -451,14 +489,14 @@ function WordCheckResult({ diffs }: { diffs: WordDiffCard[] }) {
     <div className="space-y-5">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard label="전체 변경" value={diffs.length} icon="edit_note" />
-        <StatCard label="insert" value={insertCount} icon="add_circle" tone="success" />
-        <StatCard label="delete" value={deleteCount} icon="do_not_disturb_on" tone="danger" />
-        <StatCard label="replace" value={replaceCount} icon="change_circle" tone="warning" />
+        <StatCard label="추가" value={insertCount} icon="add_circle" tone="success" />
+        <StatCard label="삭제" value={deleteCount} icon="do_not_disturb_on" tone="danger" />
+        <StatCard label="수정" value={replaceCount} icon="change_circle" tone="warning" />
       </div>
 
       <Card variant="outlined" className="overflow-hidden">
         <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">Word 변경 카드</p>
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">Word 변경 내용</p>
         </header>
         {diffs.length === 0 ? (
           <p className="px-6 py-8 type-body-sm text-[var(--md-sys-color-on-surface-variant)] text-center">
@@ -478,18 +516,18 @@ function WordCheckResult({ diffs }: { diffs: WordDiffCard[] }) {
                           : 'warning'
                     }
                   >
-                    {diff.type}
+                    {DIFF_TYPE_KO[diff.type]}
                   </Badge>
                   <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
                     {diff.location}
                   </span>
                   <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                    {diff.blockType}
+                    {blockTypeLabel(diff.blockType)}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  <DiffPanel title="Before" content={diff.beforeText} tone="danger" />
-                  <DiffPanel title="After" content={diff.afterText} tone="success" />
+                  <DiffPanel title="이전 내용" content={diff.beforeText} tone="danger" />
+                  <DiffPanel title="변경 후 내용" content={diff.afterText} tone="success" />
                 </div>
               </li>
             ))}
@@ -509,10 +547,10 @@ function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
     <div className="space-y-5">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard label="전체 변경" value={slides.length} icon="slideshow" />
-        <StatCard label="inserted slide" value={inserted} icon="add_to_photos" tone="success" />
-        <StatCard label="removed slide" value={removed} icon="delete_sweep" tone="danger" />
+        <StatCard label="슬라이드 추가" value={inserted} icon="add_to_photos" tone="success" />
+        <StatCard label="슬라이드 제거" value={removed} icon="delete_sweep" tone="danger" />
         <StatCard
-          label="matched change"
+          label="내용 변경"
           value={changed}
           icon="compare_arrows"
           tone="warning"
@@ -521,7 +559,7 @@ function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
 
       <Card variant="outlined" className="overflow-hidden">
         <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">PPT 변경 카드</p>
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">PPT 변경 내용</p>
         </header>
         {slides.length === 0 ? (
           <p className="px-6 py-8 type-body-sm text-[var(--md-sys-color-on-surface-variant)] text-center">
@@ -541,10 +579,10 @@ function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
                           : 'warning'
                     }
                   >
-                    {slide.type.replace('_', ' ')}
+                    {PPT_TYPE_KO[slide.type]}
                   </Badge>
                   <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                    Slide {slide.slideNumber}
+                    슬라이드 {slide.slideNumber}
                     {slide.matchedSlideNumber ? ` ↔ ${slide.matchedSlideNumber}` : ''}
                   </span>
                   <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
@@ -555,11 +593,11 @@ function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
                   {slide.description}
                 </p>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  <DiffPanel title="Before" content={slide.beforeText} tone="danger" />
-                  <DiffPanel title="After" content={slide.afterText} tone="success" />
+                  <DiffPanel title="이전 내용" content={slide.beforeText} tone="danger" />
+                  <DiffPanel title="변경 후 내용" content={slide.afterText} tone="success" />
                 </div>
                 <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
-                  항목 유형 · {slide.itemType || 'slide'}
+                  항목 유형 · {blockTypeLabel(slide.itemType || 'slide')}
                 </p>
               </li>
             ))}
@@ -585,7 +623,7 @@ function DiffPanel({
       : 'bg-[var(--md-sys-color-success-container)]/50 border-[var(--md-sys-color-success-container)]'
   return (
     <div className={`rounded-md border p-3 ${bg}`}>
-      <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
+      <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
         {title}
       </p>
       <p className="type-body-md text-[var(--md-sys-color-on-surface)] mt-2 whitespace-pre-wrap break-words">
