@@ -4,6 +4,7 @@ import {
   api,
   FileInfo,
   FileInspectResponse,
+  LibrarySettings,
   NormalizedFileInspect,
   NormalizedPreview,
   SchemaResponse,
@@ -14,12 +15,30 @@ import {
   normalizeFileInspect,
   normalizeSchemaResponse,
 } from '../api/client'
+import {
+  Badge,
+  Button,
+  Card,
+  CardSection,
+  Chip,
+  Dialog,
+  EmptyState,
+  FileTypeBadge,
+  Icon,
+  IconButton,
+  SelectField,
+  Spinner,
+  Switch,
+  TextField,
+  useSnackbar,
+} from '../ui'
 import FolderScanner from './FolderScanner'
+import PreviewPanel from './PreviewPanel'
 
 export default function FileManager() {
+  const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
 
   const [filePath, setFilePath] = useState('')
   const [keyColumn, setKeyColumn] = useState('')
@@ -33,13 +52,26 @@ export default function FileManager() {
   const [schema, setSchema] = useState<NormalizedPreview | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
 
+  const [confirmDelete, setConfirmDelete] = useState<FileInfo | null>(null)
+  const [librarySettings, setLibrarySettings] = useState<LibrarySettings>({
+    watched_folders: [],
+    auto_rescan_mode: 'interval',
+    auto_rescan_interval_hours: 24,
+    auto_rescan_daily_time: '03:00',
+    last_rescan_at: null,
+  })
+  const [folderPathDraft, setFolderPathDraft] = useState('')
+  const [folderRecursive, setFolderRecursive] = useState(true)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [rescanning, setRescanning] = useState(false)
+
   const fetchFiles = async () => {
     setLoading(true)
     try {
-      const res = await api.files.list()
-      setFiles(res.data)
+      const response = await api.files.list()
+      setFiles(response.data)
     } catch {
-      setError('파일 목록을 불러오지 못했습니다.')
+      snackbar.error('파일 목록을 불러오지 못했습니다.')
     } finally {
       setLoading(false)
     }
@@ -47,7 +79,95 @@ export default function FileManager() {
 
   useEffect(() => {
     fetchFiles()
+    void fetchLibrarySettings()
   }, [])
+
+  const fetchLibrarySettings = async () => {
+    setSettingsLoading(true)
+    try {
+      const response = await api.library.getSettings()
+      setLibrarySettings(response.data)
+    } catch {
+      snackbar.error('라이브러리 설정을 불러오지 못했습니다.')
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  const saveLibrarySettings = async (next: LibrarySettings) => {
+    setSettingsLoading(true)
+    try {
+      const response = await api.library.updateSettings(next)
+      setLibrarySettings(response.data)
+      snackbar.success('대상 폴더 설정이 저장되었습니다.')
+    } catch {
+      snackbar.error('대상 폴더 설정 저장에 실패했습니다.')
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  const handlePickWatchedFolder = async () => {
+    setSettingsLoading(true)
+    try {
+      const response = await api.files.pickFolder()
+      if (!response.data.cancelled && response.data.folder_path) {
+        setFolderPathDraft(response.data.folder_path)
+      }
+    } catch {
+      snackbar.error('폴더 선택창을 열지 못했습니다.')
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  const handleAddWatchedFolder = async () => {
+    const path = folderPathDraft.trim()
+    if (!path) {
+      snackbar.warn('대상 폴더 경로를 입력해 주세요.')
+      return
+    }
+    const exists = librarySettings.watched_folders.some((folder) => folder.path === path)
+    const next: LibrarySettings = {
+      ...librarySettings,
+      watched_folders: exists
+        ? librarySettings.watched_folders.map((folder) =>
+            folder.path === path ? { ...folder, recursive: folderRecursive } : folder,
+          )
+        : [...librarySettings.watched_folders, { path, recursive: folderRecursive }],
+    }
+    await saveLibrarySettings(next)
+    setFolderPathDraft('')
+  }
+
+  const handleRemoveWatchedFolder = async (path: string) => {
+    await saveLibrarySettings({
+      ...librarySettings,
+      watched_folders: librarySettings.watched_folders.filter((folder) => folder.path !== path),
+    })
+  }
+
+  const handleUpdateAutoRescan = async (patch: Partial<LibrarySettings>) => {
+    await saveLibrarySettings({ ...librarySettings, ...patch })
+  }
+
+  const handleRescanLibrary = async () => {
+    setRescanning(true)
+    try {
+      const response = await api.library.rescan()
+      const { registered, updated, skipped, failed } = response.data
+      if (failed > 0) {
+        snackbar.warn(`자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped} · 실패 ${failed}`)
+      } else {
+        snackbar.success(`자동 등록 완료 · 신규 ${registered} · 갱신 ${updated} · 건너뜀 ${skipped}`)
+      }
+      await fetchFiles()
+    } catch {
+      snackbar.error('대상 폴더 자동 등록에 실패했습니다.')
+    } finally {
+      setRescanning(false)
+    }
+  }
 
   const resetInspection = () => {
     setInspectedFile(null)
@@ -62,7 +182,9 @@ export default function FileManager() {
     setInspectedFile(normalized)
     setFilePath(normalized.path)
     setSelectedCandidateId(firstCandidateId)
-    setKeyColumn(normalized.keyRequired ? normalized.suggestedKey || normalized.keyOptions[0] || '' : '')
+    setKeyColumn(
+      normalized.keyRequired ? normalized.suggestedKey || normalized.keyOptions[0] || '' : '',
+    )
   }
 
   const selectedCandidate = useMemo(() => {
@@ -77,7 +199,6 @@ export default function FileManager() {
   const effectivePreview = useMemo(() => {
     if (!inspectedFile) return null
     if (!selectedCandidate) return inspectedFile.preview
-
     return {
       ...inspectedFile.preview,
       table: selectedCandidate.table,
@@ -92,20 +213,18 @@ export default function FileManager() {
 
   const handleInspectPath = async () => {
     if (!filePath.trim()) {
-      setError('파일 경로를 입력해 주세요.')
+      snackbar.warn('파일 경로를 입력해 주세요.')
       return
     }
-
     setInspecting(true)
-    setError('')
     try {
-      const res = await api.files.inspect({ path: filePath.trim() })
-      applyInspection(res.data)
-    } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+      const response = await api.files.inspect({ path: filePath.trim() })
+      applyInspection(response.data)
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         '파일 검사에 실패했습니다.'
-      setError(msg)
+      snackbar.error(detail)
       resetInspection()
     } finally {
       setInspecting(false)
@@ -114,17 +233,16 @@ export default function FileManager() {
 
   const handlePickFile = async () => {
     setPicking(true)
-    setError('')
     try {
-      const res = await api.files.pick()
-      if (!res.data.cancelled && res.data.file) {
-        applyInspection(res.data.file)
+      const response = await api.files.pick()
+      if (!response.data.cancelled && response.data.file) {
+        applyInspection(response.data.file)
       }
-    } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         '파일 선택창을 열지 못했습니다.'
-      setError(msg)
+      snackbar.error(detail)
     } finally {
       setPicking(false)
     }
@@ -150,46 +268,48 @@ export default function FileManager() {
 
   const handleRegister = async () => {
     if (!filePath.trim()) {
-      setError('파일 경로를 입력해 주세요.')
+      snackbar.warn('파일 경로를 입력해 주세요.')
       return
     }
     if (!inspectedFile) {
-      setError('먼저 파일 검사로 parser/preview 정보를 확인해 주세요.')
+      snackbar.warn('먼저 파일 검사를 실행해 주세요.')
       return
     }
     if (keyRequired && !keyColumn.trim()) {
-      setError('Excel 등록에는 key 컬럼이 필요합니다.')
+      snackbar.warn('Excel 등록에는 key 컬럼이 필요합니다.')
       return
     }
 
     setRegistering(true)
-    setError('')
     try {
       await api.files.register({
         path: filePath.trim(),
         key_column: keyRequired ? keyColumn.trim() : '',
         parser_config: effectiveParserConfig,
       })
+      snackbar.success(`"${inspectedFile.name}" 등록 완료.`)
       setFilePath('')
       resetInspection()
       await fetchFiles()
-    } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         '파일 등록에 실패했습니다.'
-      setError(msg)
+      snackbar.error(detail)
     } finally {
       setRegistering(false)
     }
   }
 
-  const handleDelete = async (id: number, name: string) => {
-    if (!confirm(`"${name}" 파일 등록을 해제하시겠습니까?`)) return
+  const handleDelete = async (file: FileInfo) => {
     try {
-      await api.files.delete(id)
+      await api.files.delete(file.id)
+      snackbar.success(`"${file.name}" 등록 해제됨.`)
       await fetchFiles()
     } catch {
-      setError('파일 삭제에 실패했습니다.')
+      snackbar.error('파일 삭제에 실패했습니다.')
+    } finally {
+      setConfirmDelete(null)
     }
   }
 
@@ -198,8 +318,8 @@ export default function FileManager() {
     setSchema(null)
     setSchemaLoading(true)
     try {
-      const res = await api.files.schema(file.id)
-      setSchema(normalizeSchemaResponse(res.data as SchemaResponse, file.file_type))
+      const response = await api.files.schema(file.id)
+      setSchema(normalizeSchemaResponse(response.data as SchemaResponse, file.file_type))
     } catch {
       setSchema(null)
     } finally {
@@ -210,477 +330,583 @@ export default function FileManager() {
   const registeredSummary = (file: FileInfo) => {
     const mode = getCompareMode(undefined, file.file_type)
     const parserSummary = formatParserConfigSummary(file.parser_config ?? undefined)
-
     if (mode === 'excel') {
       return [
         parserSummary.join(' · ') || `등록 컬럼 ${file.column_count}개`,
         file.key_column ? `key ${file.key_column}` : 'key 미지정',
-        'JOIN + 멀티 파일 비교',
+        'JOIN + 다중 파일 비교',
       ]
     }
-    if (mode === 'word') {
-      return ['문단/표 블록 diff', '비교 전용', 'key 입력 불필요']
-    }
+    if (mode === 'word') return ['문단/표 블록 diff', '비교 전용', 'key 입력 불필요']
     return ['슬라이드 diff', '추가/삭제 및 변경 감지', 'key 입력 불필요']
   }
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-gray-800">파일 관리</h2>
-
-      <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h3 className="text-sm font-medium text-gray-700">파일 등록</h3>
-            <p className="text-xs text-gray-500 mt-1">
-              Excel은 표 후보 영역과 추천 key를 확인한 뒤 등록하고, Word/PPT는 key 없이 비교 전용으로 등록합니다.
-            </p>
+      <Card variant="elevated">
+        <CardSection
+          title="대상 폴더"
+          description="평소 검색과 정합성 검사에 사용할 폴더를 지정합니다. 자동 재스캔은 변경 파일만 다시 파싱/색인합니다."
+          trailing={
+            <Button
+              variant="filled"
+              leadingIcon="sync"
+              onClick={handleRescanLibrary}
+              loading={rescanning}
+              disabled={librarySettings.watched_folders.length === 0}
+            >
+              자동 등록 / 재스캔
+            </Button>
+          }
+        >
+          <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
+            <div className="flex-1 min-w-0">
+              <TextField
+                leadingIcon="folder"
+                placeholder="검색/검사 대상 폴더 경로"
+                value={folderPathDraft}
+                onChange={(event) => setFolderPathDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void handleAddWatchedFolder()
+                }}
+              />
+            </div>
+            <Button
+              variant="tonal"
+              leadingIcon="drive_folder_upload"
+              onClick={handlePickWatchedFolder}
+              loading={settingsLoading}
+            >
+              폴더 찾기
+            </Button>
+            <Button variant="outlined" leadingIcon="add" onClick={handleAddWatchedFolder}>
+              대상 추가
+            </Button>
           </div>
-          <div className="flex gap-2 text-xs text-gray-500">
-            <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-              Excel: JOIN + 비교
-            </span>
-            <span className="px-2 py-1 rounded-full bg-gray-50 text-gray-700 border border-gray-200">
-              Word/PPT: diff 전용
-            </span>
-          </div>
-        </div>
+          <Switch
+            checked={folderRecursive}
+            onChange={(event) => setFolderRecursive(event.target.checked)}
+            label="하위 폴더 포함"
+            description="프로젝트/연도별 하위 폴더까지 자동 등록합니다."
+          />
 
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="파일 경로 입력 또는 파일 찾기 사용"
-              value={filePath}
-              onChange={(e) => {
-                setFilePath(e.target.value)
-                if (inspectedFile && e.target.value !== inspectedFile.path) {
-                  resetInspection()
-                }
-              }}
-              className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+          {librarySettings.watched_folders.length === 0 ? (
+            <EmptyState
+              icon="folder_off"
+              title="지정된 대상 폴더가 없습니다"
+              description="먼저 자주 쓰는 과제 문서 폴더를 추가한 뒤 자동 등록을 실행하세요."
+              compact
             />
-            <button
-              onClick={handleInspectPath}
-              disabled={inspecting}
-              className="px-3 py-2 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 whitespace-nowrap"
-            >
-              {inspecting ? '검사 중...' : '경로 검사'}
-            </button>
-            <button
-              onClick={handlePickFile}
-              disabled={picking}
-              className="px-3 py-2 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
-            >
-              {picking ? '여는 중...' : '파일 찾기'}
-            </button>
-          </div>
-
-          {inspectedFile && (
-            <div className="border border-blue-200 bg-blue-50 rounded-lg p-4 space-y-4">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="space-y-1">
-                  <p className="font-medium text-blue-950">{inspectedFile.name}</p>
-                  <p className="text-xs text-blue-700 break-all">{inspectedFile.path}</p>
-                  <div className="flex gap-2 flex-wrap text-xs">
-                    <span className="px-2 py-1 rounded-full bg-white border border-blue-200 text-blue-700">
-                      {getFileTypeLabel(inspectedFile.fileType)}
-                    </span>
-                    <span className="px-2 py-1 rounded-full bg-white border border-blue-200 text-blue-700">
-                      {inspectedFile.compareMode === 'excel'
-                        ? '표 기반 비교'
-                        : inspectedFile.compareMode === 'word'
-                          ? '문서 diff'
-                          : '슬라이드 diff'}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex gap-2 flex-wrap justify-end">
-                  {inspectedFile.capabilitySummary.map((item) => (
-                    <span
-                      key={item}
-                      className="px-2 py-1 rounded-full bg-white border border-blue-100 text-xs text-blue-700"
-                    >
-                      {item}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {inspectedFile.compareMode === 'excel' && inspectedFile.parserCandidates.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <p className="text-sm font-medium text-blue-950">표 후보 영역</p>
-                    <span className="text-xs text-blue-700">
-                      선택한 parser_config가 등록 시 함께 저장됩니다.
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    {inspectedFile.parserCandidates.map((candidate) => {
-                      const active = candidate.id === (selectedCandidate?.id ?? '')
-                      return (
-                        <button
-                          key={candidate.id}
-                          type="button"
-                          onClick={() => handleCandidateChange(candidate.id)}
-                          className={`text-left rounded-lg border p-3 transition-colors ${
-                            active
-                              ? 'bg-white border-blue-300 shadow-sm'
-                              : 'bg-blue-50/50 border-blue-100 hover:bg-white'
-                          }`}
-                        >
-                          <p className="text-sm font-medium text-gray-800">{candidate.label}</p>
-                          <div className="mt-2 flex gap-2 flex-wrap">
-                            {candidate.summary.map((item) => (
-                              <span
-                                key={item}
-                                className="px-2 py-1 rounded-full bg-gray-50 border border-gray-200 text-xs text-gray-600"
-                              >
-                                {item}
-                              </span>
-                            ))}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,240px)_1fr] gap-4">
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-blue-100 bg-white p-3">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                      등록 옵션
+          ) : (
+            <div className="space-y-2">
+              {librarySettings.watched_folders.map((folder) => (
+                <div
+                  key={folder.path}
+                  className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-4 py-3 flex items-center gap-3"
+                >
+                  <Icon name="folder" size={20} className="text-[var(--md-sys-color-primary)]" />
+                  <div className="min-w-0 flex-1">
+                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)] break-all">
+                      {folder.path}
                     </p>
-                    {keyRequired ? (
-                      <div className="mt-3 space-y-2">
-                        <label className="text-sm font-medium text-gray-700">key 컬럼</label>
-                        {availableColumns.length > 0 ? (
-                          <select
-                            value={keyColumn}
-                            onChange={(e) => setKeyColumn(e.target.value)}
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          >
-                            <option value="">key 컬럼 선택</option>
-                            {availableColumns.map((column) => (
-                              <option key={column} value={column}>
-                                {column}
-                                {column === inspectedFile.suggestedKey ? ' (추천)' : ''}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type="text"
-                            placeholder="key 컬럼명"
-                            value={keyColumn}
-                            onChange={(e) => setKeyColumn(e.target.value)}
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          />
-                        )}
-                        <p className="text-xs text-gray-500">
-                          추천 key: <strong>{inspectedFile.suggestedKey || '없음'}</strong>
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="mt-3 rounded-md bg-gray-50 border border-gray-200 px-3 py-2">
-                        <p className="text-sm text-gray-700">이 형식은 key 없이 등록됩니다.</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          비교 시 문서 diff 엔진이 parser_config와 내부 블록/슬라이드 구조를 사용합니다.
-                        </p>
-                      </div>
-                    )}
-
-                    {formatParserConfigSummary(effectiveParserConfig).length > 0 && (
-                      <div className="mt-3 space-y-1">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                          저장될 parser_config
-                        </p>
-                        {formatParserConfigSummary(effectiveParserConfig).map((item) => (
-                          <p key={item} className="text-xs text-gray-600">
-                            {item}
-                          </p>
-                        ))}
-                      </div>
-                    )}
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                      {folder.recursive ? '하위 폴더 포함' : '현재 폴더만'}
+                    </p>
                   </div>
-
-                  <button
-                    onClick={handleRegister}
-                    disabled={registering}
-                    className="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {registering ? '등록 중...' : '현재 설정으로 등록'}
-                  </button>
+                  <IconButton
+                    icon="delete"
+                    label="대상 폴더 제거"
+                    size="sm"
+                    onClick={() => void handleRemoveWatchedFolder(folder.path)}
+                  />
                 </div>
-
-                <div className="rounded-lg border border-blue-100 bg-white p-4">
-                  <p className="text-sm font-medium text-gray-800 mb-3">미리보기</p>
-                  {effectivePreview && <PreviewPanel preview={effectivePreview} />}
-                </div>
-              </div>
+              ))}
             </div>
           )}
-        </div>
 
-        <p className="text-xs text-gray-400">
-          지원 형식: .xlsx, .xls, .docx, .pptx. Excel은 표 후보와 key를 확인한 뒤 등록하고, Word/PPT는 compare-only 문서로 관리합니다.
-        </p>
-      </div>
+          <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+            <div>
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">자동 재스캔 주기</p>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                폴더 목록은 주기적으로 훑지만, 파일 수정 시간이 바뀐 경우에만 재등록/재색인합니다.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_160px_140px] gap-3 items-end">
+              <SelectField
+                label="자동 재스캔"
+                value={librarySettings.auto_rescan_mode}
+                onChange={(event) =>
+                  void handleUpdateAutoRescan({
+                    auto_rescan_mode: event.target.value as LibrarySettings['auto_rescan_mode'],
+                  })
+                }
+              >
+                <option value="manual">수동으로만 실행</option>
+                <option value="interval">주기 반복</option>
+                <option value="daily">매일 정시</option>
+              </SelectField>
+              {librarySettings.auto_rescan_mode === 'interval' && (
+                <TextField
+                  label="반복 주기"
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={librarySettings.auto_rescan_interval_hours}
+                  onChange={(event) =>
+                    void handleUpdateAutoRescan({
+                      auto_rescan_interval_hours: Number(event.target.value) || 24,
+                    })
+                  }
+                  helper="단위: 시간"
+                />
+              )}
+              {librarySettings.auto_rescan_mode === 'daily' && (
+                <TextField
+                  label="실행 시각"
+                  type="time"
+                  value={librarySettings.auto_rescan_daily_time}
+                  onChange={(event) =>
+                    void handleUpdateAutoRescan({
+                      auto_rescan_daily_time: event.target.value,
+                    })
+                  }
+                />
+              )}
+              <div className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                마지막 재스캔
+                <br />
+                <span className="text-[var(--md-sys-color-on-surface)]">
+                  {librarySettings.last_rescan_at
+                    ? new Date(librarySettings.last_rescan_at).toLocaleString('ko-KR')
+                    : '아직 없음'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </CardSection>
+      </Card>
+
+      <Card variant="elevated">
+        <CardSection
+          title="개별 파일 추가"
+          description="대상 폴더 밖의 파일만 수동으로 추가하세요. Excel은 표 후보 영역과 추천 key를 확인한 뒤 등록합니다."
+          trailing={
+            <div className="flex gap-2 flex-wrap">
+              <Chip label="Excel · JOIN + 비교" tone="success" icon="table_chart" as="span" />
+              <Chip label="Word / PPT · diff 전용" tone="primary" icon="article" as="span" />
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
+              <div className="flex-1 min-w-0">
+                <TextField
+                  leadingIcon="folder_open"
+                  placeholder="파일 경로 입력 또는 파일 찾기 사용"
+                  value={filePath}
+                  onChange={(event) => {
+                    setFilePath(event.target.value)
+                    if (inspectedFile && event.target.value !== inspectedFile.path) {
+                      resetInspection()
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') handleInspectPath()
+                  }}
+                />
+              </div>
+              <Button
+                variant="outlined"
+                leadingIcon="find_in_page"
+                onClick={handleInspectPath}
+                loading={inspecting}
+              >
+                경로 검사
+              </Button>
+              <Button
+                variant="tonal"
+                leadingIcon="upload_file"
+                onClick={handlePickFile}
+                loading={picking}
+              >
+                파일 찾기
+              </Button>
+            </div>
+
+            {inspectedFile && (
+              <InspectionCard
+                inspectedFile={inspectedFile}
+                selectedCandidateId={selectedCandidateId}
+                effectivePreview={effectivePreview}
+                effectiveParserConfig={effectiveParserConfig}
+                keyColumn={keyColumn}
+                onKeyColumn={setKeyColumn}
+                onCandidateChange={handleCandidateChange}
+                availableColumns={availableColumns}
+                onRegister={handleRegister}
+                registering={registering}
+              />
+            )}
+          </div>
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            지원 형식 · .xlsx · .xls · .docx · .pptx
+          </p>
+        </CardSection>
+      </Card>
 
       <FolderScanner onRegistered={fetchFiles} />
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded flex items-start justify-between gap-3">
-          <span>{error}</span>
-          <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
-            ✕
-          </button>
-        </div>
-      )}
-
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+      <Card variant="outlined" className="overflow-hidden">
+        <header className="px-6 py-4 flex items-center justify-between gap-4 border-b border-[var(--md-sys-color-outline-variant)]">
           <div>
-            <h3 className="text-sm font-medium text-gray-700">등록된 파일 ({files.length})</h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              파일 타입별 parser/config와 비교 capability를 기준으로 관리합니다.
+            <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
+              등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({files.length})</span>
+            </h3>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              각 파일을 눌러 미리보기. 등록 해제는 휴지통 아이콘.
             </p>
           </div>
-          <button onClick={fetchFiles} className="text-xs text-gray-500 hover:text-gray-700">
-            새로고침
-          </button>
-        </div>
+          <IconButton
+            icon="refresh"
+            label="새로고침"
+            variant="tonal"
+            onClick={fetchFiles}
+            disabled={loading}
+          />
+        </header>
 
         {loading ? (
-          <div className="px-5 py-8 text-center text-gray-400 text-sm">불러오는 중...</div>
-        ) : files.length === 0 ? (
-          <div className="px-5 py-8 text-center text-gray-400 text-sm">
-            등록된 파일이 없습니다. 위에서 파일을 등록해 주세요.
+          <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+            <Spinner size={18} /> 불러오는 중…
           </div>
+        ) : files.length === 0 ? (
+          <EmptyState
+            icon="library_add"
+            title="아직 등록된 파일이 없습니다"
+            description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT를 추가해 보세요."
+            compact
+          />
         ) : (
-          <div className="divide-y divide-gray-100">
+          <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
             {files.map((file) => (
-              <div key={file.id} className="px-5 py-4 flex items-start justify-between gap-4">
+              <li
+                key={file.id}
+                className="px-6 py-4 flex items-start justify-between gap-4 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors"
+              >
                 <button
                   type="button"
                   onClick={() => handlePreview(file)}
-                  className="flex-1 min-w-0 text-left"
+                  className="flex-1 min-w-0 text-left group"
                 >
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium text-blue-600 hover:underline">
+                    <span className="type-title-sm text-[var(--md-sys-color-primary)] group-hover:underline">
                       {file.name}
                     </span>
-                    <span className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-600">
-                      {getFileTypeLabel(file.file_type)}
-                    </span>
+                    <FileTypeBadge fileType={file.file_type} />
                     {isExcelFile(file.file_type) ? (
-                      <span className="px-2 py-0.5 bg-blue-50 rounded text-xs text-blue-700">
-                        JOIN 가능
-                      </span>
+                      <Badge tone="success">JOIN 가능</Badge>
                     ) : (
-                      <span className="px-2 py-0.5 bg-amber-50 rounded text-xs text-amber-700">
-                        비교 전용
-                      </span>
+                      <Badge tone="warning">비교 전용</Badge>
                     )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-1 break-all">{file.path}</p>
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
+                    {file.path}
+                  </p>
                   <div className="mt-3 flex gap-2 flex-wrap">
                     {registeredSummary(file).map((item) => (
-                      <span
-                        key={item}
-                        className="px-2 py-1 rounded-full border border-gray-200 bg-gray-50 text-xs text-gray-600"
-                      >
-                        {item}
-                      </span>
+                      <Chip key={item} label={item} tone="neutral" as="span" />
                     ))}
                   </div>
                 </button>
-
-                <div className="shrink-0 text-right space-y-3">
-                  <div className="text-xs text-gray-400">
+                <div className="shrink-0 flex flex-col items-end gap-2">
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                     {file.created_at ? file.created_at.replace('T', ' ').slice(0, 19) : '-'}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {isExcelFile(file.file_type) && file.key_column ? `key ${file.key_column}` : 'key 없음'}
-                  </div>
-                  <button
-                    onClick={() => handleDelete(file.id, file.name)}
-                    className="text-red-500 hover:text-red-700 text-xs px-2 py-1 border border-red-200 rounded hover:bg-red-50"
-                  >
-                    삭제
-                  </button>
+                  </p>
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    {isExcelFile(file.file_type) && file.key_column
+                      ? `key ${file.key_column}`
+                      : 'key 없음'}
+                  </p>
+                  <IconButton
+                    icon="delete"
+                    label={`${file.name} 삭제`}
+                    variant="standard"
+                    size="sm"
+                    onClick={() => setConfirmDelete(file)}
+                    className="text-[var(--md-sys-color-error)]"
+                  />
                 </div>
-              </div>
+              </li>
             ))}
+          </ul>
+        )}
+      </Card>
+
+      <Dialog
+        open={!!previewFile}
+        onClose={() => setPreviewFile(null)}
+        size="lg"
+        icon="preview"
+        title={previewFile?.name}
+        description={previewFile?.path}
+        actions={
+          <Button variant="filled" onClick={() => setPreviewFile(null)}>
+            닫기
+          </Button>
+        }
+      >
+        {previewFile && (
+          <div className="space-y-4">
+            <div className="flex gap-2 flex-wrap">
+              <FileTypeBadge fileType={previewFile.file_type} />
+              {isExcelFile(previewFile.file_type) && previewFile.key_column && (
+                <Chip label={`key ${previewFile.key_column}`} tone="primary" as="span" />
+              )}
+              {formatParserConfigSummary(previewFile.parser_config ?? undefined).map((item) => (
+                <Chip key={item} label={item} tone="neutral" as="span" />
+              ))}
+            </div>
+
+            {schemaLoading ? (
+              <div className="flex items-center justify-center gap-2 py-10 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+                <Spinner size={18} /> 미리보기 불러오는 중…
+              </div>
+            ) : schema ? (
+              <PreviewPanel preview={schema} />
+            ) : (
+              <EmptyState
+                icon="error_outline"
+                title="미리보기를 불러올 수 없습니다"
+                description="파일 경로가 변경되었거나 잠겨있을 수 있습니다."
+                compact
+              />
+            )}
           </div>
         )}
-      </div>
+      </Dialog>
 
-      {previewFile && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
-            <div className="px-5 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
-              <div className="space-y-1 min-w-0">
-                <h3 className="font-medium text-gray-800">{previewFile.name}</h3>
-                <p className="text-xs text-gray-500 break-all">{previewFile.path}</p>
-                <div className="flex gap-2 flex-wrap">
-                  <span className="px-2 py-0.5 bg-gray-100 rounded text-xs text-gray-600">
-                    {getFileTypeLabel(previewFile.file_type)}
-                  </span>
-                  {isExcelFile(previewFile.file_type) && previewFile.key_column && (
-                    <span className="px-2 py-0.5 bg-blue-50 rounded text-xs text-blue-700">
-                      key {previewFile.key_column}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                onClick={() => setPreviewFile(null)}
-                className="text-gray-400 hover:text-gray-600 text-lg"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="overflow-auto p-5 flex-1">
-              {schemaLoading ? (
-                <p className="text-gray-400 text-sm">불러오는 중...</p>
-              ) : schema ? (
-                <div className="space-y-4">
-                  {formatParserConfigSummary(previewFile.parser_config ?? undefined).length > 0 && (
-                    <div className="flex gap-2 flex-wrap">
-                      {formatParserConfigSummary(previewFile.parser_config ?? undefined).map((item) => (
-                        <span
-                          key={item}
-                          className="px-2 py-1 rounded-full border border-gray-200 bg-gray-50 text-xs text-gray-600"
-                        >
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <PreviewPanel preview={schema} />
-                </div>
-              ) : (
-                <p className="text-red-500 text-sm">미리보기를 불러올 수 없습니다.</p>
-              )}
-            </div>
-            <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
-              <button
-                onClick={() => setPreviewFile(null)}
-                className="px-3 py-1.5 text-sm bg-gray-800 text-white rounded hover:bg-gray-700"
-              >
-                닫기
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog
+        open={!!confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        size="sm"
+        icon="delete"
+        title="등록 해제"
+        description={confirmDelete?.name}
+        actions={
+          <>
+            <Button variant="text" onClick={() => setConfirmDelete(null)}>
+              취소
+            </Button>
+            <Button
+              variant="filled"
+              leadingIcon="delete"
+              className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
+              onClick={() => confirmDelete && handleDelete(confirmDelete)}
+            >
+              해제
+            </Button>
+          </>
+        }
+      >
+        <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+          이 파일의 등록 정보와 인덱스를 삭제합니다. 원본 파일은 영향받지 않습니다.
+        </p>
+      </Dialog>
+
+      <p className="type-body-sm text-center text-[var(--md-sys-color-on-surface-variant)] opacity-80">
+        {getFileTypeLabel('unknown') ? '' : ''}
+      </p>
     </div>
   )
 }
 
-function PreviewPanel({ preview }: { preview: NormalizedPreview }) {
+function InspectionCard({
+  inspectedFile,
+  selectedCandidateId,
+  effectivePreview,
+  effectiveParserConfig,
+  keyColumn,
+  onKeyColumn,
+  onCandidateChange,
+  availableColumns,
+  onRegister,
+  registering,
+}: {
+  inspectedFile: NormalizedFileInspect
+  selectedCandidateId: string
+  effectivePreview: NormalizedPreview | null
+  effectiveParserConfig: NormalizedFileInspect['parserConfig']
+  keyColumn: string
+  onKeyColumn: (value: string) => void
+  onCandidateChange: (id: string) => void
+  availableColumns: string[]
+  onRegister: () => void
+  registering: boolean
+}) {
+  const parserSummary = formatParserConfigSummary(effectiveParserConfig)
+  const keyRequired = inspectedFile.keyRequired
+
   return (
-    <div className="space-y-4">
-      {preview.summary.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
-          {preview.summary.map((item) => (
-            <span
-              key={item}
-              className="px-2 py-1 rounded-full border border-gray-200 bg-gray-50 text-xs text-gray-600"
-            >
-              {item}
-            </span>
+    <div className="rounded-md bg-[var(--md-sys-color-primary-container)] p-5 space-y-5 animate-slide-up">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="space-y-1 min-w-0">
+          <p className="type-title-md text-[var(--md-sys-color-on-primary-container)]">
+            {inspectedFile.name}
+          </p>
+          <p className="type-body-sm text-[var(--md-sys-color-on-primary-container)] opacity-80 break-all">
+            {inspectedFile.path}
+          </p>
+          <div className="flex gap-2 flex-wrap pt-1">
+            <FileTypeBadge fileType={inspectedFile.fileType} />
+            <Badge tone="primary">
+              {inspectedFile.compareMode === 'excel'
+                ? '표 기반 비교'
+                : inspectedFile.compareMode === 'word'
+                  ? '문서 diff'
+                  : '슬라이드 diff'}
+            </Badge>
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap justify-end">
+          {inspectedFile.capabilitySummary.map((item) => (
+            <Chip key={item} label={item} tone="primary" as="span" icon="check" />
           ))}
         </div>
-      )}
+      </div>
 
-      {preview.mode === 'excel' || preview.table.columns.length > 0 ? (
-        <div className="overflow-x-auto border border-gray-200 rounded bg-white">
-          <table className="min-w-full text-xs">
-            <thead className="bg-gray-50">
-              <tr>
-                {preview.table.columns.map((column) => (
-                  <th key={column} className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {preview.table.rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={Math.max(preview.table.columns.length, 1)}
-                    className="px-3 py-6 text-center text-gray-400"
-                  >
-                    표시할 샘플 행이 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                preview.table.rows.map((row, rowIndex) => (
-                  <tr key={`${row.join('|')}-${rowIndex}`}>
-                    {row.map((cell, cellIndex) => (
-                      <td key={`${cell}-${cellIndex}`} className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-
-      {preview.mode === 'word' && preview.blocks.length > 0 && (
+      {inspectedFile.compareMode === 'excel' && inspectedFile.parserCandidates.length > 0 && (
         <div className="space-y-2">
-          {preview.blocks.map((block) => (
-            <div key={block.id} className="rounded-lg border border-gray-200 p-3 bg-white">
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
-                  {block.blockType}
-                </span>
-                <span>{block.location}</span>
-              </div>
-              <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap break-words">{block.text || '(빈 블록)'}</p>
-            </div>
-          ))}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="type-title-sm text-[var(--md-sys-color-on-primary-container)]">
+              표 후보 영역
+            </p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-primary-container)] opacity-80">
+              선택한 parser_config가 등록 시 함께 저장됩니다.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {inspectedFile.parserCandidates.map((candidate) => {
+              const active = candidate.id === selectedCandidateId
+              return (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  onClick={() => onCandidateChange(candidate.id)}
+                  aria-pressed={active}
+                  className={`text-left rounded-md p-4 border-2 transition-all state-host relative ${
+                    active
+                      ? 'bg-[var(--md-sys-color-surface-container-lowest)] border-[var(--md-sys-color-primary)] shadow-elev-2'
+                      : 'bg-[var(--md-sys-color-surface-container-lowest)]/60 border-transparent hover:border-[var(--md-sys-color-outline-variant)]'
+                  }`}
+                >
+                  <span className="state-layer" />
+                  <div className="flex items-center gap-2">
+                    <Icon
+                      name={active ? 'check_circle' : 'grid_on'}
+                      size={18}
+                      filled={active}
+                      className={
+                        active
+                          ? 'text-[var(--md-sys-color-primary)]'
+                          : 'text-[var(--md-sys-color-on-surface-variant)]'
+                      }
+                    />
+                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                      {candidate.label}
+                    </p>
+                  </div>
+                  {candidate.summary.length > 0 && (
+                    <div className="mt-3 flex gap-1.5 flex-wrap">
+                      {candidate.summary.map((item) => (
+                        <Chip key={item} label={item} tone="neutral" as="span" />
+                      ))}
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 
-      {preview.mode === 'ppt' && preview.slides.length > 0 && (
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,280px)_1fr] gap-4">
         <div className="space-y-3">
-          {preview.slides.map((slide) => (
-            <div key={slide.id} className="rounded-lg border border-gray-200 p-3 bg-white">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-2 py-0.5 rounded-full bg-gray-100 text-xs text-gray-700">
-                  Slide {slide.slideNumber}
-                </span>
-                <span className="text-sm font-medium text-gray-800">{slide.title}</span>
+          <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
+            <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
+              등록 옵션
+            </p>
+            {keyRequired ? (
+              <div className="space-y-2">
+                {availableColumns.length > 0 ? (
+                  <SelectField
+                    label="key 컬럼"
+                    value={keyColumn}
+                    onChange={(event) => onKeyColumn(event.target.value)}
+                  >
+                    <option value="">key 컬럼 선택</option>
+                    {availableColumns.map((column) => (
+                      <option key={column} value={column}>
+                        {column}
+                        {column === inspectedFile.suggestedKey ? ' (추천)' : ''}
+                      </option>
+                    ))}
+                  </SelectField>
+                ) : (
+                  <TextField
+                    label="key 컬럼"
+                    placeholder="key 컬럼명"
+                    value={keyColumn}
+                    onChange={(event) => onKeyColumn(event.target.value)}
+                  />
+                )}
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  추천 key · <strong>{inspectedFile.suggestedKey || '없음'}</strong>
+                </p>
               </div>
-              {slide.items.length > 0 ? (
-                <div className="mt-3 space-y-2">
-                  {slide.items.map((item) => (
-                    <div key={item.id} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
-                      <p className="text-xs text-gray-500">
-                        {item.itemType} · {item.location}
-                      </p>
-                      <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap break-words">
-                        {item.afterText || item.beforeText || '(텍스트 없음)'}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-400 mt-2">표시할 슬라이드 항목이 없습니다.</p>
-              )}
-            </div>
-          ))}
+            ) : (
+              <div className="rounded-md bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 space-y-1">
+                <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
+                  이 형식은 key 없이 등록됩니다.
+                </p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  비교 시 문서 diff 엔진이 parser_config를 사용합니다.
+                </p>
+              </div>
+            )}
+
+            {parserSummary.length > 0 && (
+              <div className="space-y-1">
+                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
+                  저장될 parser_config
+                </p>
+                {parserSummary.map((item) => (
+                  <p
+                    key={item}
+                    className="type-body-sm text-[var(--md-sys-color-on-surface)] font-mono"
+                  >
+                    {item}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Button
+            variant="filled"
+            leadingIcon="add_circle"
+            onClick={onRegister}
+            loading={registering}
+            fullWidth
+          >
+            현재 설정으로 등록
+          </Button>
         </div>
-      )}
+
+        <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)] mb-3">미리보기</p>
+          {effectivePreview && <PreviewPanel preview={effectivePreview} />}
+        </div>
+      </div>
     </div>
   )
 }

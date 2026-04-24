@@ -163,9 +163,14 @@ def _do_reindex_incremental():
 def _scheduler_loop():
     import time
 
+    from .library import rescan_library, should_auto_rescan
+
     while True:
         time.sleep(60)
         try:
+            if should_auto_rescan():
+                rescan_library()
+
             mode = get_setting("reindex_mode", "manual")
             if mode == "manual":
                 continue

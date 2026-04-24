@@ -1,0 +1,88 @@
+/*
+ * Material 3 디자인 토큰.
+ * 소스: Material 3 baseline blue scheme (tuned for Office productivity).
+ * Tailwind config 에서 `var(--md-sys-color-*)` 형태로 참조합니다.
+ */
+:root {
+  color-scheme: light;
+
+  /* Primary — action / accent */
+  --md-sys-color-primary: #285da8;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #d4e3ff;
+  --md-sys-color-on-primary-container: #001b3d;
+
+  /* Secondary — supportive, neutral-warm */
+  --md-sys-color-secondary: #555f71;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #d9e3f9;
+  --md-sys-color-on-secondary-container: #121c2b;
+
+  /* Tertiary — highlight / contrasting accent */
+  --md-sys-color-tertiary: #6f5575;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #f8d8fe;
+  --md-sys-color-on-tertiary-container: #28132e;
+
+  /* Error */
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #410002;
+
+  /* Warning (not in M3 baseline, custom addition) */
+  --md-sys-color-warning: #a05200;
+  --md-sys-color-warning-container: #ffdcbe;
+  --md-sys-color-on-warning-container: #2a1700;
+
+  /* Success (custom) */
+  --md-sys-color-success: #146c2e;
+  --md-sys-color-success-container: #c2f0c5;
+  --md-sys-color-on-success-container: #00210a;
+
+  /* Background & surface tonal layers */
+  --md-sys-color-background: #faf9fd;
+  --md-sys-color-on-background: #1a1c1e;
+  --md-sys-color-surface: #faf9fd;
+  --md-sys-color-on-surface: #1a1c1e;
+  --md-sys-color-surface-variant: #dee3eb;
+  --md-sys-color-on-surface-variant: #42474e;
+
+  --md-sys-color-surface-dim: #dad9dd;
+  --md-sys-color-surface-bright: #faf9fd;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f4f3f7;
+  --md-sys-color-surface-container: #eeedf1;
+  --md-sys-color-surface-container-high: #e8e7eb;
+  --md-sys-color-surface-container-highest: #e2e2e6;
+
+  /* Outline */
+  --md-sys-color-outline: #72787e;
+  --md-sys-color-outline-variant: #c2c7ce;
+
+  /* State layer opacity (M3 spec) */
+  --md-state-hover: 0.08;
+  --md-state-focus: 0.12;
+  --md-state-pressed: 0.12;
+  --md-state-dragged: 0.16;
+
+  /* Elevation shadows (M3 levels 1–5) */
+  --md-elev-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px 1px rgba(15, 23, 42, 0.04);
+  --md-elev-2: 0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 6px 2px rgba(15, 23, 42, 0.08);
+  --md-elev-3: 0 1px 3px rgba(15, 23, 42, 0.08), 0 4px 8px 3px rgba(15, 23, 42, 0.10);
+  --md-elev-4: 0 2px 3px rgba(15, 23, 42, 0.08), 0 6px 10px 4px rgba(15, 23, 42, 0.10);
+  --md-elev-5: 0 4px 4px rgba(15, 23, 42, 0.10), 0 8px 12px 6px rgba(15, 23, 42, 0.12);
+
+  /* Shape (corner radius) */
+  --md-shape-xs: 4px;
+  --md-shape-sm: 8px;
+  --md-shape-md: 12px;
+  --md-shape-lg: 16px;
+  --md-shape-xl: 28px;
+  --md-shape-full: 9999px;
+
+  /* Motion */
+  --md-motion-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-motion-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-motion-decelerated: cubic-bezier(0, 0, 0, 1);
+}

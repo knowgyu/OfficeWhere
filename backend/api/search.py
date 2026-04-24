@@ -8,14 +8,40 @@ from ..models.schemas import (
     ReindexResponse,
 )
 from ..core.indexer import search, reindex_all
-from ..database import get_setting, set_setting
+from ..database import get_all_files, get_setting, set_setting
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.post("", response_model=SearchResponse)
 def search_files(req: SearchRequest):
-    results = search(req.query, limit=req.limit)
+    normalized_query = req.query.strip().lower()
+    name_matches = []
+    if normalized_query:
+        for file_info in get_all_files():
+            haystack = f"{file_info['name']} {file_info['path']}".lower()
+            if normalized_query in haystack:
+                name_matches.append(
+                    {
+                        "file_id": file_info["id"],
+                        "name": file_info["name"],
+                        "path": file_info["path"],
+                        "file_type": file_info["file_type"],
+                        "location": "파일명 / 경로",
+                        "snippet": file_info["name"],
+                    }
+                )
+
+    seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
+    content_results = []
+    for item in search(req.query, limit=req.limit):
+        key = (item["file_id"], item["location"], item["snippet"])
+        if key in seen:
+            continue
+        seen.add(key)
+        content_results.append(item)
+
+    results = (name_matches + content_results)[: req.limit]
     return SearchResponse(
         query=req.query,
         total=len(results),

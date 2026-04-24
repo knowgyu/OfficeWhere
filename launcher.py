@@ -8,6 +8,8 @@ import socket
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 
 PORT = 8765
@@ -25,6 +27,14 @@ def is_port_in_use(port: int) -> bool:
             return False
 
 
+def is_office_data_joiner_running() -> bool:
+    try:
+        with urllib.request.urlopen(f"{URL}/api/files", timeout=1.5) as response:
+            return response.status == 200
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
 def run_server():
     """uvicorn 서버 실행 (별도 스레드용)"""
     import uvicorn
@@ -38,8 +48,12 @@ def run_server():
 
 def main():
     if is_port_in_use(PORT):
-        print(f"[office-data-joiner] 이미 실행 중입니다. 브라우저를 엽니다: {URL}")
-        webbrowser.open(URL)
+        if is_office_data_joiner_running():
+            print(f"[office-data-joiner] 이미 실행 중입니다. 브라우저를 엽니다: {URL}")
+            webbrowser.open(URL)
+            return
+        print(f"[office-data-joiner] 포트 {PORT}가 다른 프로그램에서 사용 중입니다.")
+        print("[office-data-joiner] 해당 프로그램을 종료한 뒤 다시 실행해 주세요.")
         return
 
     print(f"[office-data-joiner] 서버를 시작합니다... (포트: {PORT})")

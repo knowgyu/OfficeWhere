@@ -1,26 +1,43 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { api, SearchResult, SchedulerSettings } from '../api/client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+import { api, SchedulerSettings, SearchResult } from '../api/client'
+import {
+  Badge,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  FileTypeBadge,
+  Icon,
+  IconButton,
+  Radio,
+  Spinner,
+  TextField,
+  useSnackbar,
+} from '../ui'
 
 function SnippetText({ snippet }: { snippet: string }) {
   const parts = snippet.split('**')
   return (
-    <span className="text-sm text-gray-700">
+    <span className="type-body-md text-[var(--md-sys-color-on-surface)] leading-relaxed">
       {parts.map((part, i) =>
         i % 2 === 1 ? (
-          <mark key={i} className="bg-yellow-200 text-gray-900 rounded px-0.5">
+          <mark
+            key={i}
+            className="bg-[var(--md-sys-color-tertiary-container)] text-[var(--md-sys-color-on-tertiary-container)] rounded-xs px-1 py-[1px]"
+          >
             {part}
           </mark>
         ) : (
           <span key={i}>{part}</span>
-        )
+        ),
       )}
     </span>
   )
 }
 
-type GroupedResults = Record<string, SearchResult[]>
-
 export default function FileSearch() {
+  const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -30,53 +47,56 @@ export default function FileSearch() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsDraft, setSettingsDraft] = useState<SchedulerSettings | null>(null)
   const [reindexing, setReindexing] = useState(false)
-  const [reindexMsg, setReindexMsg] = useState('')
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    api.search.getSettings().then((r) => {
-      setSettings(r.data)
-      setSettingsDraft(r.data)
+    api.search.getSettings().then((response) => {
+      setSettings(response.data)
+      setSettingsDraft(response.data)
     })
   }, [])
 
-  const doSearch = useCallback(async (q: string) => {
-    if (!q.trim()) {
-      setResults([])
-      setSearched(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const r = await api.search.query({ query: q, limit: 200 })
-      setResults(r.data.results)
-      setSearched(true)
-    } catch {
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const doSearch = useCallback(
+    async (q: string) => {
+      if (!q.trim()) {
+        setResults([])
+        setSearched(false)
+        return
+      }
+      setLoading(true)
+      try {
+        const response = await api.search.query({ query: q, limit: 200 })
+        setResults(response.data.results)
+        setSearched(true)
+      } catch {
+        setResults([])
+        snackbar.error('검색에 실패했습니다.')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [snackbar],
+  )
 
-  const handleQueryChange = (val: string) => {
-    setQuery(val)
+  const handleQueryChange = (value: string) => {
+    setQuery(value)
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => doSearch(val), 300)
+    debounceRef.current = setTimeout(() => doSearch(value), 300)
   }
 
   const handleReindex = async () => {
     setReindexing(true)
-    setReindexMsg('')
     try {
-      const r = await api.search.reindex()
-      const { success, failed } = r.data
-      setReindexMsg(`완료: ${success}개 성공, ${failed}개 실패`)
-      const s = await api.search.getSettings()
-      setSettings(s.data)
-      setSettingsDraft(s.data)
+      const response = await api.search.reindex()
+      snackbar.success(
+        `재인덱싱 완료 — 성공 ${response.data.success} · 실패 ${response.data.failed}`,
+      )
+      const next = await api.search.getSettings()
+      setSettings(next.data)
+      setSettingsDraft(next.data)
     } catch {
-      setReindexMsg('재인덱싱 실패')
+      snackbar.error('재인덱싱에 실패했습니다.')
     } finally {
       setReindexing(false)
     }
@@ -85,171 +105,250 @@ export default function FileSearch() {
   const handleSaveSettings = async () => {
     if (!settingsDraft) return
     try {
-      const r = await api.search.updateSettings(settingsDraft)
-      setSettings(r.data)
+      const response = await api.search.updateSettings(settingsDraft)
+      setSettings(response.data)
       setSettingsOpen(false)
+      snackbar.success('인덱싱 스케줄이 저장되었습니다.')
     } catch {
-      alert('설정 저장 실패')
+      snackbar.error('설정 저장에 실패했습니다.')
     }
   }
 
-  const grouped: GroupedResults = {}
-  for (const result of results) {
-    const key = result.name
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push(result)
+  const handleOpenFile = async (fileId: number, fileName: string) => {
+    try {
+      await api.files.open(fileId)
+      snackbar.info(`"${fileName}" 열기 요청을 보냈습니다.`)
+    } catch {
+      snackbar.error('파일을 열지 못했습니다. 파일 경로가 바뀌었는지 확인해 주세요.')
+    }
   }
 
+  const grouped = useMemo(() => {
+    const map = new Map<string, SearchResult[]>()
+    for (const result of results) {
+      const list = map.get(result.name) ?? []
+      list.push(result)
+      map.set(result.name, list)
+    }
+    return Array.from(map.entries())
+  }, [results])
+
+  const hasResults = !loading && results.length > 0
+  const lastReindex = settings?.last_reindex_at
+    ? new Date(settings.last_reindex_at).toLocaleString('ko-KR')
+    : null
+
   return (
-    <div className="space-y-4">
-      {/* Search bar + controls */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex gap-2 items-center">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => handleQueryChange(e.target.value)}
-            placeholder="검색어를 입력하세요 (예: DFBA 챗봇, 예산, 홍길동)"
-            className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-          />
-          <button
-            onClick={() => doSearch(query)}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-          >
-            검색
-          </button>
-          <button
-            onClick={handleReindex}
-            disabled={reindexing}
-            className="px-3 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
-          >
-            {reindexing ? '인덱싱 중...' : '재인덱싱'}
-          </button>
-          <button
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-            title="인덱싱 스케줄 설정"
-          >
-            ⚙
-          </button>
+    <div className="space-y-6">
+      <Card variant="elevated" className="p-5 space-y-4">
+        <div className="flex flex-col md:flex-row gap-3 md:items-center">
+          <div className="flex-1">
+            <TextField
+              leadingIcon="search"
+              placeholder="파일 안의 단어를 검색 (예: 클라우드 비용, 승인 일자)"
+              value={query}
+              onChange={(event) => handleQueryChange(event.target.value)}
+              trailing={
+                query ? (
+                  <IconButton
+                    icon="close"
+                    label="검색어 지우기"
+                    size="sm"
+                    onClick={() => {
+                      setQuery('')
+                      setResults([])
+                      setSearched(false)
+                    }}
+                  />
+                ) : null
+              }
+            />
+          </div>
+          <div className="flex gap-2 items-center">
+            <Button
+              variant="filled"
+              leadingIcon="search"
+              onClick={() => doSearch(query)}
+              disabled={!query.trim() || loading}
+            >
+              검색
+            </Button>
+            <Button
+              variant="tonal"
+              leadingIcon="refresh"
+              onClick={handleReindex}
+              loading={reindexing}
+            >
+              재인덱싱
+            </Button>
+            <IconButton
+              icon={settingsOpen ? 'tune' : 'tune'}
+              label="인덱싱 스케줄"
+              variant="outlined"
+              onClick={() => setSettingsOpen((open) => !open)}
+              selected={settingsOpen}
+            />
+          </div>
         </div>
 
-        {reindexMsg && (
-          <p className="mt-2 text-xs text-gray-500">{reindexMsg}</p>
-        )}
+        <div className="flex items-center gap-4 flex-wrap type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          <span className="inline-flex items-center gap-1.5">
+            <Icon name="bolt" size={16} /> FTS5 전문 검색 · 평균 응답 0.5초 미만
+          </span>
+          {lastReindex && (
+            <span className="inline-flex items-center gap-1.5">
+              <Icon name="schedule" size={16} /> 마지막 인덱싱 {lastReindex}
+            </span>
+          )}
+        </div>
+      </Card>
 
-        {settings?.last_reindex_at && (
-          <p className="mt-1 text-xs text-gray-400">
-            마지막 인덱싱: {new Date(settings.last_reindex_at).toLocaleString('ko-KR')}
-          </p>
-        )}
-      </div>
-
-      {/* Scheduler settings panel */}
       {settingsOpen && settingsDraft && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-700">인덱싱 스케줄 설정</h3>
-          <div className="flex gap-4 text-sm">
-            {(['manual', 'interval', 'daily'] as const).map((m) => (
-              <label key={m} className="flex items-center gap-1 cursor-pointer">
-                <input
-                  type="radio"
-                  name="mode"
-                  value={m}
-                  checked={settingsDraft.mode === m}
-                  onChange={() => setSettingsDraft({ ...settingsDraft, mode: m })}
-                />
-                {m === 'manual' ? '수동' : m === 'interval' ? '주기 반복' : '매일 정시'}
-              </label>
-            ))}
+        <Card variant="elevated" className="p-5 space-y-4 animate-slide-up">
+          <div>
+            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">인덱싱 스케줄</p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              변경된 파일만 증분 인덱싱합니다.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Radio
+              name="reindex-mode"
+              checked={settingsDraft.mode === 'manual'}
+              onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'manual' })}
+              label="수동 (Off)"
+              description="필요할 때 '재인덱싱' 버튼으로 실행합니다."
+            />
+            <Radio
+              name="reindex-mode"
+              checked={settingsDraft.mode === 'interval'}
+              onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'interval' })}
+              label="주기 반복"
+              description="지정한 시간마다 백그라운드에서 실행합니다."
+            />
+            <Radio
+              name="reindex-mode"
+              checked={settingsDraft.mode === 'daily'}
+              onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'daily' })}
+              label="매일 정시"
+              description="매일 지정한 시각에 실행합니다."
+            />
           </div>
 
           {settingsDraft.mode === 'interval' && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-600">매</span>
-              <input
+            <div className="flex items-center gap-2">
+              <TextField
+                label="반복 주기"
                 type="number"
                 min={1}
+                max={72}
                 value={settingsDraft.interval_hours}
-                onChange={(e) =>
-                  setSettingsDraft({ ...settingsDraft, interval_hours: Number(e.target.value) })
+                onChange={(event) =>
+                  setSettingsDraft({
+                    ...settingsDraft,
+                    interval_hours: Number(event.target.value),
+                  })
                 }
-                className="w-20 border border-gray-300 rounded px-2 py-1"
+                className="w-32"
+                fullWidth={false}
+                helper="단위: 시간"
               />
-              <span className="text-gray-600">시간마다</span>
             </div>
           )}
 
           {settingsDraft.mode === 'daily' && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-gray-600">매일</span>
-              <input
-                type="time"
-                value={settingsDraft.daily_time}
-                onChange={(e) =>
-                  setSettingsDraft({ ...settingsDraft, daily_time: e.target.value })
-                }
-                className="border border-gray-300 rounded px-2 py-1"
-              />
-              <span className="text-gray-600">에 실행</span>
-            </div>
+            <TextField
+              label="실행 시각"
+              type="time"
+              value={settingsDraft.daily_time}
+              onChange={(event) =>
+                setSettingsDraft({ ...settingsDraft, daily_time: event.target.value })
+              }
+              className="w-40"
+              fullWidth={false}
+            />
           )}
 
-          <div className="flex gap-2">
-            <button
-              onClick={handleSaveSettings}
-              className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-            >
-              저장
-            </button>
-            <button
-              onClick={() => setSettingsOpen(false)}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
-            >
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="text" onClick={() => setSettingsOpen(false)}>
               취소
-            </button>
+            </Button>
+            <Button variant="filled" leadingIcon="save" onClick={handleSaveSettings}>
+              저장
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Results */}
       {loading && (
-        <div className="text-center py-10 text-gray-400 text-sm">검색 중...</div>
+        <div className="flex items-center justify-center gap-3 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+          <Spinner size={20} />
+          <span>검색 중…</span>
+        </div>
       )}
 
       {!loading && searched && results.length === 0 && (
-        <div className="text-center py-10 text-gray-400 text-sm">
-          '{query}'에 대한 검색 결과가 없습니다.
-        </div>
+        <EmptyState
+          icon="search_off"
+          title={`"${query}"에 대한 결과가 없습니다.`}
+          description="오탈자를 확인하거나 더 짧은 키워드로 다시 시도해 보세요."
+        />
       )}
 
       {!loading && !searched && !query && (
-        <div className="text-center py-10 text-gray-300 text-sm">
-          검색어를 입력하면 등록된 파일에서 내용을 찾습니다.
-        </div>
+        <EmptyState
+          icon="manage_search"
+          title="파일명과 문서 내용을 한 번에 검색"
+          description="설정에서 대상 폴더를 지정해두면 Finder처럼 찾고, 결과를 눌러 원본 파일을 바로 열 수 있습니다."
+        />
       )}
 
-      {!loading && results.length > 0 && (
+      {hasResults && (
         <div className="space-y-3">
-          <p className="text-xs text-gray-500">{results.length}개 결과</p>
-          {Object.entries(grouped).map(([fileName, items]) => (
-            <div key={fileName} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-              <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
-                <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
-                  {items[0].file_type}
+          <div className="flex items-center gap-2 flex-wrap">
+            <Chip label={`${results.length}건`} tone="primary" as="span" icon="filter_list" />
+            <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {grouped.length}개 파일에서 매칭됨
+            </span>
+          </div>
+          {grouped.map(([fileName, items]) => (
+            <Card key={fileName} variant="outlined" className="overflow-hidden">
+              <header className="px-5 py-3 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)]">
+                <FileTypeBadge fileType={items[0].file_type} />
+                <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
+                  {fileName}
                 </span>
-                <span className="text-sm font-medium text-gray-800">{fileName}</span>
-                <span className="ml-auto text-xs text-gray-400">{items.length}건</span>
-              </div>
-              <ul className="divide-y divide-gray-100">
-                {items.map((item, i) => (
-                  <li key={i} className="px-4 py-3 hover:bg-gray-50">
-                    <div className="text-xs text-blue-600 mb-1">{item.location}</div>
-                    <SnippetText snippet={item.snippet} />
+                <Badge tone="neutral">{items.length}건</Badge>
+                <Button
+                  variant="text"
+                  size="sm"
+                  leadingIcon="open_in_new"
+                  onClick={() => handleOpenFile(items[0].file_id, fileName)}
+                >
+                  열기
+                </Button>
+              </header>
+              <ul>
+                {items.map((item, index) => (
+                  <li
+                    key={index}
+                    className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleOpenFile(item.file_id, item.name)}
+                      className="block w-full text-left"
+                    >
+                      <p className="type-label-md text-[var(--md-sys-color-primary)] mb-1 inline-flex items-center gap-1.5">
+                        <Icon name="my_location" size={14} />
+                        {item.location}
+                      </p>
+                      <SnippetText snippet={item.snippet} />
+                    </button>
                   </li>
                 ))}
               </ul>
-            </div>
+            </Card>
           ))}
         </div>
       )}

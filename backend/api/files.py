@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import List
 
@@ -155,6 +157,7 @@ def list_files():
             column_count=row["column_count"],
             parser_config=row.get("parser_config", {}),
             created_at=row["created_at"],
+            file_mtime=row.get("file_mtime"),
         )
         for row in rows
     ]
@@ -188,6 +191,29 @@ def remove_file(file_id: int):
         raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
     delete_file(file_id)
     return {"message": "파일 등록이 해제되었습니다."}
+
+
+@router.post("/{file_id}/open")
+def open_registered_file(file_id: int):
+    file_row = get_file_by_id(file_id)
+    if not file_row:
+        raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
+
+    path = file_row["path"]
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"파일이 삭제되었거나 경로가 변경되었습니다: {path}")
+
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"파일을 열지 못했습니다: {exc}")
+
+    return {"message": "파일 열기 요청을 보냈습니다."}
 
 
 @router.get("/{file_id}/suggest-key")

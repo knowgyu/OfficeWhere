@@ -20,6 +20,7 @@ class FileInfo(BaseModel):
     column_count: int
     parser_config: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[str] = None
+    file_mtime: Optional[float] = None
 
 
 class FileRegisterResponse(BaseModel):
@@ -233,3 +234,47 @@ class ReindexResponse(BaseModel):
     success: int
     failed: int
     skipped: int
+
+
+class WatchedFolder(BaseModel):
+    path: str
+    recursive: bool = True
+
+
+class LibrarySettings(BaseModel):
+    watched_folders: List[WatchedFolder] = Field(default_factory=list)
+    auto_rescan_mode: str = "interval"
+    auto_rescan_interval_hours: float = 24.0
+    auto_rescan_daily_time: str = "03:00"
+    last_rescan_at: Optional[str] = None
+
+
+class LibraryRescanResult(BaseModel):
+    path: str
+    name: str
+    success: bool
+    action: str
+    file_id: Optional[int] = None
+    error: Optional[str] = None
+
+
+class LibraryRescanResponse(BaseModel):
+    registered: int
+    updated: int
+    skipped: int
+    failed: int
+    results: List[LibraryRescanResult]
+
+
+class LibraryFileGroup(BaseModel):
+    id: str
+    file_type: str
+    canonical_name: str
+    title: str
+    confidence: str = "filename"
+    files: List[FileInfo]
+    recommended_action: str
+
+
+class LibraryGroupsResponse(BaseModel):
+    groups: List[LibraryFileGroup]

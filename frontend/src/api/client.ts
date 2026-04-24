@@ -24,6 +24,7 @@ export interface FileInfo {
   key_column: string
   column_count: number
   created_at?: string
+  file_mtime?: number | null
   parser_config?: ParserConfig | null
   compare_capabilities?: string[]
 }
@@ -284,6 +285,50 @@ export interface ReindexResponse {
   success: number
   failed: number
   skipped: number
+}
+
+export interface WatchedFolder {
+  path: string
+  recursive: boolean
+}
+
+export interface LibrarySettings {
+  watched_folders: WatchedFolder[]
+  auto_rescan_mode: 'manual' | 'interval' | 'daily'
+  auto_rescan_interval_hours: number
+  auto_rescan_daily_time: string
+  last_rescan_at?: string | null
+}
+
+export interface LibraryRescanResult {
+  path: string
+  name: string
+  success: boolean
+  action: 'registered' | 'updated' | 'skipped' | 'failed'
+  file_id?: number
+  error?: string
+}
+
+export interface LibraryRescanResponse {
+  registered: number
+  updated: number
+  skipped: number
+  failed: number
+  results: LibraryRescanResult[]
+}
+
+export interface LibraryFileGroup {
+  id: string
+  file_type: string
+  canonical_name: string
+  title: string
+  confidence: string
+  files: FileInfo[]
+  recommended_action: 'excel_integrate' | 'compare_latest'
+}
+
+export interface LibraryGroupsResponse {
+  groups: LibraryFileGroup[]
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -626,6 +671,21 @@ function normalizeExcelConflictEntries(value: unknown): ExcelConflictEntry[] {
   })
 }
 
+function normalizeExcelFileRefs(value: unknown, column: string, fallbackValue: string): ExcelConflictEntry[] {
+  if (!Array.isArray(value)) return []
+
+  return value.map((entry, index) => {
+    const record = isRecord(entry) ? entry : {}
+    return {
+      fileId: toNumberValue(record.file_id ?? record.fileId, index),
+      fileName: toStringValue(record.file_name ?? record.fileName) || `파일 ${index + 1}`,
+      columns: column ? [column] : [],
+      values: fallbackValue ? [fallbackValue] : [],
+      rowCount: 0,
+    }
+  })
+}
+
 function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
   if (!Array.isArray(value)) return []
 
@@ -639,9 +699,13 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
           || rawType === 'missing column'
           ? 'missing_column'
           : 'value_conflict'
-    const conflicts = normalizeExcelConflictEntries(record.conflicts ?? record.entries)
-    const key = toStringValue(record.key_normalized ?? record.key ?? record.key_value)
     const columnGroup = toStringValue(record.column_group ?? record.column ?? record.column_name)
+    const conflicts = [
+      ...normalizeExcelConflictEntries(record.conflicts ?? record.entries ?? record.values),
+      ...normalizeExcelFileRefs(record.present_in, columnGroup, '있음'),
+      ...normalizeExcelFileRefs(record.missing_in, columnGroup, '누락'),
+    ]
+    const key = toStringValue(record.key_normalized ?? record.key ?? record.key_value)
 
     return {
       id: toStringValue(record.id) || `excel-issue-${index}`,
@@ -668,35 +732,122 @@ function normalizeWordDiffs(value: unknown): WordDiffCard[] {
   return value.map((entry, index) => {
     const record = isRecord(entry) ? entry : {}
     const rawType = toStringValue(record.type ?? record.diff_type).toLowerCase()
+    const beforeBlocks = Array.isArray(record.before) ? record.before : []
+    const afterBlocks = Array.isArray(record.after) ? record.after : []
     const type: WordDiffCard['type'] =
-      rawType === 'insert' || rawType === 'delete' || rawType === 'replace' ? rawType : 'replace'
+      rawType === 'insert' || rawType === 'delete' || rawType === 'replace'
+        ? rawType
+        : toStringValue(record.change_type) === 'insert'
+          ? 'insert'
+          : toStringValue(record.change_type) === 'delete'
+            ? 'delete'
+            : 'replace'
+    const firstBefore = isRecord(beforeBlocks[0]) ? beforeBlocks[0] : {}
+    const firstAfter = isRecord(afterBlocks[0]) ? afterBlocks[0] : {}
 
     return {
       id: toStringValue(record.id) || `word-diff-${index}`,
       type,
       blockType:
         toStringValue(record.block_type) ||
+        toStringValue(firstBefore.block_type) ||
+        toStringValue(firstAfter.block_type) ||
         toStringValue(record.item_type) ||
         toStringValue(record.kind) ||
         'block',
       location:
         toStringValue(record.location) ||
+        toStringValue(firstBefore.location) ||
+        toStringValue(firstAfter.location) ||
         toStringValue(record.path) ||
         toStringValue(record.index) ||
         `#${index + 1}`,
       beforeText:
         toStringValue(record.before_text) ||
         toStringValue(record.old_text) ||
-        toStringValue(record.left_text),
+        toStringValue(record.left_text) ||
+        beforeBlocks.map((block) => toStringValue(isRecord(block) ? block.text : block)).join('\n'),
       afterText:
         toStringValue(record.after_text) ||
         toStringValue(record.new_text) ||
-        toStringValue(record.right_text),
+        toStringValue(record.right_text) ||
+        afterBlocks.map((block) => toStringValue(isRecord(block) ? block.text : block)).join('\n'),
     }
   })
 }
 
 function normalizePptSlides(payload: Record<string, unknown>): PptSlideCard[] {
+  if (Array.isArray(payload.changes)) {
+    return payload.changes.flatMap((entry, index): PptSlideCard[] => {
+      const record = isRecord(entry) ? entry : {}
+      const changeType = toStringValue(record.change_type)
+      const slideNumber = toNumberValue(record.slide_number_before ?? record.slide_number_after, index + 1)
+      const matchedSlideNumber = toNumberValue(record.slide_number_after, slideNumber)
+      const title =
+        toStringValue(record.title_after) ||
+        toStringValue(record.title_before) ||
+        `슬라이드 ${slideNumber}`
+
+      if (changeType === 'slide_insert' || changeType === 'slide_delete') {
+        return [
+          {
+            id: `ppt-slide-${index}`,
+            type: changeType === 'slide_insert' ? 'inserted_slide' as const : 'removed_slide' as const,
+            slideNumber,
+            matchedSlideNumber,
+            title,
+            itemType: 'slide',
+            beforeText: toStringValue(record.title_before),
+            afterText: toStringValue(record.title_after),
+            description:
+              changeType === 'slide_insert'
+                ? '새 슬라이드가 추가되었습니다.'
+                : '기존 슬라이드가 제거되었습니다.',
+          },
+        ]
+      }
+
+      const itemChanges = Array.isArray(record.item_changes) ? record.item_changes : []
+      if (itemChanges.length === 0) {
+        return [
+          {
+            id: `ppt-slide-${index}`,
+            type: 'matched_slide_change' as const,
+            slideNumber,
+            matchedSlideNumber,
+            title,
+            itemType: 'title',
+            beforeText: toStringValue(record.title_before),
+            afterText: toStringValue(record.title_after),
+            description: '슬라이드 제목이 변경되었습니다.',
+          },
+        ]
+      }
+
+      return itemChanges.map((change, changeIndex) => {
+        const itemRecord = isRecord(change) ? change : {}
+        const beforeBlocks = Array.isArray(itemRecord.before) ? itemRecord.before : []
+        const afterBlocks = Array.isArray(itemRecord.after) ? itemRecord.after : []
+        const firstBefore = isRecord(beforeBlocks[0]) ? beforeBlocks[0] : {}
+        const firstAfter = isRecord(afterBlocks[0]) ? afterBlocks[0] : {}
+        return {
+          id: `ppt-slide-${index}-${changeIndex}`,
+          type: 'matched_slide_change' as const,
+          slideNumber,
+          matchedSlideNumber,
+          title,
+          itemType:
+            toStringValue(firstBefore.item_type) ||
+            toStringValue(firstAfter.item_type) ||
+            'item',
+          beforeText: beforeBlocks.map((block) => toStringValue(isRecord(block) ? block.text : block)).join('\n'),
+          afterText: afterBlocks.map((block) => toStringValue(isRecord(block) ? block.text : block)).join('\n'),
+          description: '매칭된 슬라이드에서 항목 변경이 발견되었습니다.',
+        }
+      })
+    })
+  }
+
   const inserted = Array.isArray(payload.inserted_slides) ? payload.inserted_slides : []
   const removed = Array.isArray(payload.removed_slides) ? payload.removed_slides : []
   const changed =
@@ -780,24 +931,27 @@ export function normalizeCheckResponse(payload: unknown): CheckResponse {
   const mode = getCompareMode(record.mode, record.file_type)
 
   if (mode === 'word') {
+    const source = isRecord(record.word) ? record.word : record
     return {
       mode: 'word',
-      diffs: normalizeWordDiffs(record.diffs ?? record.issues ?? record.cards),
+      diffs: normalizeWordDiffs(source.changes ?? source.diffs ?? source.issues ?? source.cards),
     }
   }
 
   if (mode === 'ppt') {
+    const source = isRecord(record.ppt) ? record.ppt : record
     return {
       mode: 'ppt',
-      slides: normalizePptSlides(record),
+      slides: normalizePptSlides(source),
     }
   }
 
+  const source = isRecord(record.excel) ? record.excel : record
   return {
     mode: 'excel',
-    totalKeys: toNumberValue(record.total_keys ?? record.totalKeys, 0),
-    matchedKeys: toNumberValue(record.matched_keys ?? record.matchedKeys, 0),
-    issues: normalizeExcelIssues(record.issues),
+    totalKeys: toNumberValue(source.total_keys ?? source.totalKeys, 0),
+    matchedKeys: toNumberValue(source.matched_keys ?? source.matchedKeys, 0),
+    issues: normalizeExcelIssues(source.issues),
   }
 }
 
@@ -820,6 +974,7 @@ export const api = {
       axios.post<FolderScanResponse>(`${BASE}/api/files/scan-folder`, data),
     bulkRegister: (data: BulkRegisterRequest) =>
       axios.post<BulkRegisterResponse>(`${BASE}/api/files/bulk-register`, data),
+    open: (id: number) => axios.post(`${BASE}/api/files/${id}/open`),
   },
   query: {
     join: (data: JoinRequest) => axios.post<JoinResponse>(`${BASE}/api/query/join`, data),
@@ -836,6 +991,13 @@ export const api = {
     getSettings: () => axios.get<SchedulerSettings>(`${BASE}/api/search/settings`),
     updateSettings: (data: SchedulerSettings) =>
       axios.put<SchedulerSettings>(`${BASE}/api/search/settings`, data),
+  },
+  library: {
+    getSettings: () => axios.get<LibrarySettings>(`${BASE}/api/library/settings`),
+    updateSettings: (data: LibrarySettings) =>
+      axios.put<LibrarySettings>(`${BASE}/api/library/settings`, data),
+    rescan: () => axios.post<LibraryRescanResponse>(`${BASE}/api/library/rescan`),
+    groups: () => axios.get<LibraryGroupsResponse>(`${BASE}/api/library/groups`),
   },
 }
 

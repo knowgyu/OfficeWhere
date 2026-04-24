@@ -1,33 +1,67 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import {
-  api,
   CheckResponse,
   ExcelCheckIssue,
   FileInfo,
+  LibraryFileGroup,
   PptSlideCard,
   WordDiffCard,
+  api,
   getCompareMode,
-  getFileTypeLabel,
   normalizeCheckResponse,
 } from '../api/client'
+import {
+  Badge,
+  Button,
+  Card,
+  CardSection,
+  Checkbox,
+  Chip,
+  EmptyState,
+  FileTypeBadge,
+  Icon,
+  StatCard,
+  useSnackbar,
+} from '../ui'
+
+const MODE_GUIDE: Record<string, string> = {
+  excel: 'Excel은 다중 선택 가능. value conflict · missing key · missing column을 탐지합니다.',
+  word: 'Word는 2개 파일만 비교. insert / delete / replace diff 카드가 표시됩니다.',
+  ppt: 'PPT는 2개 파일만 비교. 슬라이드 추가/삭제 및 항목 변경을 카드로 표시합니다.',
+  none: 'Excel은 다중 파일 비교, Word/PPT는 2개 파일 비교가 가능합니다.',
+}
 
 export default function ConsistencyCheck() {
+  const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [groups, setGroups] = useState<LibraryFileGroup[]>([])
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
 
   useEffect(() => {
-    api.files.list().then((res) => setFiles(res.data)).catch(() => {})
+    api.files
+      .list()
+      .then((response) => setFiles(response.data))
+      .catch(() => {
+        /* silent */
+      })
+    api.library
+      .groups()
+      .then((response) => setGroups(response.data.groups))
+      .catch(() => {
+        /* silent */
+      })
   }, [])
 
   const selectedFiles = useMemo(
     () => files.filter((file) => selectedIds.has(file.id)),
-    [files, selectedIds]
+    [files, selectedIds],
   )
-  const selectedMode = selectedFiles[0] ? getCompareMode(undefined, selectedFiles[0].file_type) : null
+  const selectedMode = selectedFiles[0]
+    ? getCompareMode(undefined, selectedFiles[0].file_type)
+    : null
 
   const toggleFile = (file: FileInfo) => {
     const next = new Set(selectedIds)
@@ -38,215 +72,264 @@ export default function ConsistencyCheck() {
       next.delete(file.id)
       setSelectedIds(next)
       setResult(null)
-      setError('')
       return
     }
 
     if (selectedMode && fileMode !== selectedMode) {
-      setError('정합성 검사는 같은 파일 타입만 함께 선택할 수 있습니다.')
+      snackbar.warn('정합성 검사는 같은 파일 타입만 함께 선택할 수 있습니다.')
       return
     }
-
     if ((fileMode === 'word' || fileMode === 'ppt') && next.size >= 2) {
-      setError(`${fileMode === 'word' ? 'Word' : 'PPT'} 비교는 2개 파일만 선택할 수 있습니다.`)
+      snackbar.warn(`${fileMode === 'word' ? 'Word' : 'PPT'} 비교는 2개 파일까지만 선택할 수 있습니다.`)
       return
     }
 
     next.add(file.id)
     setSelectedIds(next)
     setResult(null)
-    setError('')
   }
 
   const validateSelection = (): string | null => {
-    if (selectedFiles.length < 2) {
-      return '정합성 검사는 최소 2개 파일을 선택해야 합니다.'
-    }
-
+    if (selectedFiles.length < 2) return '최소 2개 파일을 선택해 주세요.'
     const modes = new Set(selectedFiles.map((file) => getCompareMode(undefined, file.file_type)))
-    if (modes.size > 1) {
-      return '파일 타입이 섞이면 검사할 수 없습니다. 같은 타입만 선택해 주세요.'
-    }
-
+    if (modes.size > 1) return '파일 타입이 섞이면 검사할 수 없습니다.'
     const mode = selectedMode
-    if (!mode) {
-      return '검사할 파일을 선택해 주세요.'
-    }
+    if (!mode) return '검사할 파일을 선택해 주세요.'
     if ((mode === 'word' || mode === 'ppt') && selectedFiles.length !== 2) {
-      return `${mode === 'word' ? 'Word' : 'PPT'} 비교는 정확히 2개 파일만 허용됩니다.`
+      return `${mode === 'word' ? 'Word' : 'PPT'} 비교는 정확히 2개 파일이 필요합니다.`
     }
-
     return null
   }
 
   const handleCheck = async () => {
     const validationError = validateSelection()
     if (validationError) {
-      setError(validationError)
+      snackbar.warn(validationError)
       return
     }
-
     setLoading(true)
-    setError('')
     setResult(null)
     try {
-      const res = await api.check.run({ file_ids: Array.from(selectedIds) })
-      setResult(normalizeCheckResponse(res.data))
-    } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+      const response = await api.check.run({ file_ids: Array.from(selectedIds) })
+      const normalized = normalizeCheckResponse(response.data)
+      setResult(normalized)
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         '정합성 검사에 실패했습니다.'
-      setError(msg)
+      snackbar.error(detail)
     } finally {
       setLoading(false)
     }
   }
 
-  const modeGuide =
-    selectedMode === 'excel'
-      ? 'Excel은 다중 선택이 가능하며 value conflict, missing key, missing column을 확인합니다.'
-      : selectedMode === 'word'
-        ? 'Word는 2개 파일만 비교하며 insert/delete/replace diff를 보여줍니다.'
-        : selectedMode === 'ppt'
-          ? 'PPT는 2개 파일만 비교하며 슬라이드 추가/삭제와 항목 변경을 보여줍니다.'
-          : 'Excel은 다중 선택 가능, Word/PPT는 2개 파일만 비교 가능합니다.'
+  const selectGroup = (group: LibraryFileGroup) => {
+    const ids =
+      group.file_type === 'Excel'
+        ? group.files.map((file) => file.id)
+        : group.files.slice(0, 2).map((file) => file.id)
+    setSelectedIds(new Set(ids))
+    setResult(null)
+  }
+
+  if (files.length === 0) {
+    return (
+      <Card variant="outlined">
+        <EmptyState
+          icon="fact_check"
+          title="먼저 파일을 등록해 주세요"
+          description="정합성 검사는 등록된 파일 사이의 차이를 탐지합니다."
+        />
+      </Card>
+    )
+  }
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-gray-800">정합성 검사</h2>
-
-      {files.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-gray-400 text-sm">
-          먼저 "파일 관리" 탭에서 파일을 등록해 주세요.
-        </div>
-      ) : (
-        <>
-          <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
-            <div className="flex items-start justify-between gap-4 flex-wrap">
-              <div>
-                <h3 className="text-sm font-medium text-gray-700">검사할 파일 선택</h3>
-                <p className="text-xs text-gray-500 mt-1">{modeGuide}</p>
-              </div>
-              <div className="flex gap-2 flex-wrap text-xs">
-                <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                  선택 {selectedFiles.length}개
-                </span>
-                {selectedMode && (
-                  <span className="px-2 py-1 rounded-full bg-gray-50 text-gray-700 border border-gray-200">
-                    현재 모드 {selectedMode.toUpperCase()}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-              {files.map((file) => {
-                const checked = selectedIds.has(file.id)
-                const fileMode = getCompareMode(undefined, file.file_type)
-                const disabled =
-                  !checked &&
-                  Boolean(
-                    (selectedMode && fileMode !== selectedMode) ||
-                      ((selectedMode === 'word' || selectedMode === 'ppt') && selectedIds.size >= 2)
-                  )
-
-                return (
-                  <label
-                    key={file.id}
-                    className={`flex items-center gap-3 px-3 py-2.5 border rounded-lg transition-colors ${
-                      disabled
-                        ? 'border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed'
-                        : checked
-                          ? 'border-blue-300 bg-blue-50 cursor-pointer'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 cursor-pointer'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={disabled}
-                      onChange={() => toggleFile(file)}
-                      className="w-4 h-4 accent-blue-600"
-                    />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-gray-800 truncate">{file.name}</p>
-                        <span className="px-2 py-0.5 rounded-full bg-white border border-gray-200 text-xs text-gray-600">
-                          {getFileTypeLabel(file.file_type)}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {fileMode === 'excel'
-                          ? `key ${file.key_column || '미지정'} · 다중 비교`
-                          : `${fileMode === 'word' ? '문서 diff' : '슬라이드 diff'} · 2개 비교`}
-                      </p>
+      {groups.length > 0 && (
+        <Card variant="elevated">
+          <CardSection
+            title="자동 감지된 유사 파일 묶음"
+            description="파일명에서 날짜/버전/최종 같은 토큰을 제거해 같은 문서의 버전 후보를 먼저 보여줍니다."
+            trailing={<Chip label={`${groups.length}개 묶음`} tone="primary" icon="auto_awesome" as="span" />}
+          >
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {groups.map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  onClick={() => selectGroup(group)}
+                  className="state-host relative text-left rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 hover:border-[var(--md-sys-color-primary)] transition-colors"
+                >
+                  <span className="state-layer" />
+                  <div className="relative space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <FileTypeBadge fileType={group.file_type} />
+                      <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                        {group.canonical_name}
+                      </span>
+                      <Badge tone="neutral">{group.files.length}개 파일</Badge>
                     </div>
-                  </label>
-                )
-              })}
+                    <div className="space-y-1">
+                      {group.files.slice(0, 3).map((file) => (
+                        <p
+                          key={file.id}
+                          className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate"
+                          title={file.path}
+                        >
+                          {file.name}
+                        </p>
+                      ))}
+                    </div>
+                    <p className="type-label-md text-[var(--md-sys-color-primary)]">
+                      {group.file_type === 'Excel'
+                        ? '이 묶음 전체를 Excel 정합성 검사 대상으로 선택'
+                        : '최신 2개 파일을 비교 대상으로 선택'}
+                    </p>
+                  </div>
+                </button>
+              ))}
             </div>
+          </CardSection>
+        </Card>
+      )}
 
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={handleCheck}
-                disabled={loading || selectedFiles.length < 2}
-                className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {loading ? '검사 중...' : '검사 실행'}
-              </button>
-              <span className="text-xs text-gray-500">{modeGuide}</span>
+      <Card variant="elevated">
+        <CardSection
+          title="검사할 파일 선택"
+          description={MODE_GUIDE[selectedMode ?? 'none']}
+          trailing={
+            <div className="flex gap-2 flex-wrap">
+              <Chip
+                label={`선택 ${selectedFiles.length}개`}
+                tone="primary"
+                icon="task_alt"
+                as="span"
+              />
+              {selectedMode && (
+                <Chip
+                  label={`모드 · ${selectedMode.toUpperCase()}`}
+                  tone="secondary"
+                  as="span"
+                />
+              )}
             </div>
+          }
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+            {files.map((file) => {
+              const checked = selectedIds.has(file.id)
+              const fileMode = getCompareMode(undefined, file.file_type)
+              const disabled =
+                !checked &&
+                Boolean(
+                  (selectedMode && fileMode !== selectedMode) ||
+                    ((selectedMode === 'word' || selectedMode === 'ppt') && selectedIds.size >= 2),
+                )
+              return (
+                <label
+                  key={file.id}
+                  className={`flex items-start gap-3 px-3 py-3 rounded-md border transition-colors ${
+                    disabled
+                      ? 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] opacity-50 cursor-not-allowed'
+                      : checked
+                        ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/30 cursor-pointer'
+                        : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-low)] cursor-pointer'
+                  }`}
+                >
+                  <Checkbox
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => toggleFile(file)}
+                    aria-label={file.name}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
+                        {file.name}
+                      </p>
+                      <FileTypeBadge fileType={file.file_type} />
+                    </div>
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
+                      {fileMode === 'excel'
+                        ? `key ${file.key_column || '미지정'} · 다중 비교`
+                        : `${fileMode === 'word' ? '문서 diff' : '슬라이드 diff'} · 2개 비교`}
+                    </p>
+                  </div>
+                </label>
+              )
+            })}
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded flex items-start justify-between gap-3">
-              <span>{error}</span>
-              <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">
-                ✕
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-3 flex-wrap pt-2">
+            <Button
+              variant="filled"
+              leadingIcon="play_arrow"
+              onClick={handleCheck}
+              loading={loading}
+              disabled={selectedFiles.length < 2}
+            >
+              검사 실행
+            </Button>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {MODE_GUIDE[selectedMode ?? 'none']}
+            </p>
+          </div>
+        </CardSection>
+      </Card>
 
-          {result && result.mode === 'excel' && <ExcelCheckResult result={result} />}
-          {result && result.mode === 'word' && <WordCheckResult diffs={result.diffs} />}
-          {result && result.mode === 'ppt' && <PptCheckResult slides={result.slides} />}
-        </>
-      )}
+      {result?.mode === 'excel' && <ExcelCheckResult result={result} />}
+      {result?.mode === 'word' && <WordCheckResult diffs={result.diffs} />}
+      {result?.mode === 'ppt' && <PptCheckResult slides={result.slides} />}
     </div>
   )
 }
 
-function ExcelCheckResult({
-  result,
-}: {
-  result: Extract<CheckResponse, { mode: 'excel' }>
-}) {
+function ExcelCheckResult({ result }: { result: Extract<CheckResponse, { mode: 'excel' }> }) {
   const valueConflicts = result.issues.filter((issue) => issue.type === 'value_conflict')
   const missingKeys = result.issues.filter((issue) => issue.type === 'missing_key')
   const missingColumns = result.issues.filter((issue) => issue.type === 'missing_column')
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
-        <SummaryCard label="전체 key" value={String(result.totalKeys)} accent="gray" />
-        <SummaryCard label="공통 key" value={String(result.matchedKeys)} accent="green" />
-        <SummaryCard label="value conflict" value={String(valueConflicts.length)} accent="red" />
-        <SummaryCard label="missing key" value={String(missingKeys.length)} accent="amber" />
-        <SummaryCard label="missing column" value={String(missingColumns.length)} accent="amber" />
+        <StatCard label="전체 key" value={result.totalKeys} icon="tag" />
+        <StatCard label="공통 key" value={result.matchedKeys} icon="check_circle" tone="success" />
+        <StatCard
+          label="value conflict"
+          value={valueConflicts.length}
+          icon="report_problem"
+          tone={valueConflicts.length > 0 ? 'danger' : 'neutral'}
+        />
+        <StatCard
+          label="missing key"
+          value={missingKeys.length}
+          icon="pending"
+          tone={missingKeys.length > 0 ? 'warning' : 'neutral'}
+        />
+        <StatCard
+          label="missing column"
+          value={missingColumns.length}
+          icon="view_column_off"
+          tone={missingColumns.length > 0 ? 'warning' : 'neutral'}
+        />
       </div>
 
       <ExcelIssueSection
         title="Value Conflict"
-        description="같은 key에서 같은 컬럼 그룹의 값이 서로 다릅니다."
+        icon="report_problem"
+        description="같은 key에서 같은 컬럼 그룹의 값이 다릅니다."
         issues={valueConflicts}
       />
       <ExcelIssueSection
         title="Missing Key"
-        description="일부 파일에 key가 없어서 데이터가 누락됩니다."
+        icon="pending"
+        description="일부 파일에 key가 없어 데이터가 누락됩니다."
         issues={missingKeys}
       />
       <ExcelIssueSection
         title="Missing Column"
+        icon="view_column_off"
         description="일부 파일에 컬럼 그룹이 존재하지 않습니다."
         issues={missingColumns}
       />
@@ -257,70 +340,93 @@ function ExcelCheckResult({
 function ExcelIssueSection({
   title,
   description,
+  icon,
   issues,
 }: {
   title: string
   description: string
+  icon: string
   issues: ExcelCheckIssue[]
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
-        <h3 className="text-sm font-medium text-gray-700">{title}</h3>
-        <p className="text-xs text-gray-500 mt-1">{description}</p>
-      </div>
+    <Card variant="outlined" className="overflow-hidden">
+      <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)] flex items-center gap-2">
+        <Icon
+          name={icon}
+          size={20}
+          className="text-[var(--md-sys-color-on-surface-variant)]"
+        />
+        <div className="min-w-0">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{title}</p>
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{description}</p>
+        </div>
+        <Badge tone={issues.length > 0 ? 'warning' : 'neutral'} className="ml-auto">
+          {issues.length}건
+        </Badge>
+      </header>
 
       {issues.length === 0 ? (
-        <div className="px-5 py-6 text-sm text-gray-400">해당 이슈가 없습니다.</div>
+        <p className="px-6 py-6 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          해당 이슈가 없습니다.
+        </p>
       ) : (
-        <div className="divide-y divide-gray-100">
+        <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
           {issues.map((issue) => (
-            <div key={issue.id} className="px-5 py-4 space-y-3">
+            <li key={issue.id} className="px-6 py-4 space-y-3">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium text-gray-800">{issue.key || '(빈 key)'}</span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs ${
-                        issue.severity === 'conflict'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-amber-100 text-amber-700'
-                      }`}
-                    >
-                      {issue.severity}
+                    <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                      {issue.key || '(빈 key)'}
                     </span>
+                    <Badge tone={issue.severity === 'conflict' ? 'danger' : 'warning'}>
+                      {issue.severity}
+                    </Badge>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    컬럼 그룹: <strong>{issue.columnGroup || '-'}</strong>
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
+                    컬럼 그룹 · <strong>{issue.columnGroup || '-'}</strong>
                   </p>
                   {issue.keyVariants.length > 0 && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      key 변형: {issue.keyVariants.join(', ')}
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
+                      key 변형 · {issue.keyVariants.join(', ')}
                     </p>
                   )}
                 </div>
-                <p className="text-sm text-gray-600">{issue.message}</p>
+                <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)] max-w-md">
+                  {issue.message}
+                </p>
               </div>
 
-              <div className="overflow-x-auto border border-gray-200 rounded">
+              <div className="overflow-x-auto rounded-md border border-[var(--md-sys-color-outline-variant)]">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-[var(--md-sys-color-surface-container-low)]">
                     <tr>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-600">파일</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-600">컬럼</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-600">행 수</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-600">값</th>
+                      {['파일', '컬럼', '행 수', '값'].map((header) => (
+                        <th
+                          key={header}
+                          className="px-3 py-2 text-left type-label-md text-[var(--md-sys-color-on-surface-variant)]"
+                        >
+                          {header}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 bg-white">
+                  <tbody className="divide-y divide-[var(--md-sys-color-outline-variant)]">
                     {issue.conflicts.map((conflict) => (
-                      <tr key={`${issue.id}-${conflict.fileId}`}>
-                        <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{conflict.fileName}</td>
-                        <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                      <tr
+                        key={`${issue.id}-${conflict.fileId}`}
+                        className="bg-[var(--md-sys-color-surface-container-lowest)]"
+                      >
+                        <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
+                          {conflict.fileName}
+                        </td>
+                        <td className="px-3 py-2 text-[var(--md-sys-color-on-surface-variant)] whitespace-nowrap">
                           {conflict.columns.join(', ') || '-'}
                         </td>
-                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{conflict.rowCount}</td>
-                        <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                        <td className="px-3 py-2 text-[var(--md-sys-color-on-surface-variant)] whitespace-nowrap">
+                          {conflict.rowCount}
+                        </td>
+                        <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap font-mono">
                           {conflict.values.join(' | ') || '(빈 값)'}
                         </td>
                       </tr>
@@ -328,11 +434,11 @@ function ExcelIssueSection({
                   </tbody>
                 </table>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -342,50 +448,54 @@ function WordCheckResult({ diffs }: { diffs: WordDiffCard[] }) {
   const replaceCount = diffs.filter((diff) => diff.type === 'replace').length
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <SummaryCard label="전체 변경" value={String(diffs.length)} accent="gray" />
-        <SummaryCard label="insert" value={String(insertCount)} accent="green" />
-        <SummaryCard label="delete" value={String(deleteCount)} accent="red" />
-        <SummaryCard label="replace" value={String(replaceCount)} accent="amber" />
+        <StatCard label="전체 변경" value={diffs.length} icon="edit_note" />
+        <StatCard label="insert" value={insertCount} icon="add_circle" tone="success" />
+        <StatCard label="delete" value={deleteCount} icon="do_not_disturb_on" tone="danger" />
+        <StatCard label="replace" value={replaceCount} icon="change_circle" tone="warning" />
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
-          <h3 className="text-sm font-medium text-gray-700">Word Diff 카드</h3>
-        </div>
-
+      <Card variant="outlined" className="overflow-hidden">
+        <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">Word 변경 카드</p>
+        </header>
         {diffs.length === 0 ? (
-          <div className="px-5 py-6 text-sm text-gray-400">문서 변경점이 없습니다.</div>
+          <p className="px-6 py-8 type-body-sm text-[var(--md-sys-color-on-surface-variant)] text-center">
+            문서 변경점이 없습니다.
+          </p>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
             {diffs.map((diff) => (
-              <div key={diff.id} className="px-5 py-4">
+              <li key={diff.id} className="px-6 py-4 space-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs ${
+                  <Badge
+                    tone={
                       diff.type === 'insert'
-                        ? 'bg-green-100 text-green-700'
+                        ? 'success'
                         : diff.type === 'delete'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-amber-100 text-amber-700'
-                    }`}
+                          ? 'danger'
+                          : 'warning'
+                    }
                   >
                     {diff.type}
+                  </Badge>
+                  <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                    {diff.location}
                   </span>
-                  <span className="text-sm font-medium text-gray-800">{diff.location}</span>
-                  <span className="text-xs text-gray-500">{diff.blockType}</span>
+                  <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    {diff.blockType}
+                  </span>
                 </div>
-
-                <div className="mt-3 grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  <DiffPanel title="Before" content={diff.beforeText} tone="red" />
-                  <DiffPanel title="After" content={diff.afterText} tone="green" />
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                  <DiffPanel title="Before" content={diff.beforeText} tone="danger" />
+                  <DiffPanel title="After" content={diff.afterText} tone="success" />
                 </div>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-      </div>
+      </Card>
     </div>
   )
 }
@@ -396,83 +506,66 @@ function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
   const changed = slides.filter((slide) => slide.type === 'matched_slide_change').length
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <SummaryCard label="전체 변경" value={String(slides.length)} accent="gray" />
-        <SummaryCard label="inserted slide" value={String(inserted)} accent="green" />
-        <SummaryCard label="removed slide" value={String(removed)} accent="red" />
-        <SummaryCard label="matched change" value={String(changed)} accent="amber" />
+        <StatCard label="전체 변경" value={slides.length} icon="slideshow" />
+        <StatCard label="inserted slide" value={inserted} icon="add_to_photos" tone="success" />
+        <StatCard label="removed slide" value={removed} icon="delete_sweep" tone="danger" />
+        <StatCard
+          label="matched change"
+          value={changed}
+          icon="compare_arrows"
+          tone="warning"
+        />
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
-          <h3 className="text-sm font-medium text-gray-700">PPT 변경 카드</h3>
-        </div>
-
+      <Card variant="outlined" className="overflow-hidden">
+        <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">PPT 변경 카드</p>
+        </header>
         {slides.length === 0 ? (
-          <div className="px-5 py-6 text-sm text-gray-400">슬라이드 변경점이 없습니다.</div>
+          <p className="px-6 py-8 type-body-sm text-[var(--md-sys-color-on-surface-variant)] text-center">
+            슬라이드 변경점이 없습니다.
+          </p>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
             {slides.map((slide) => (
-              <div key={slide.id} className="px-5 py-4 space-y-3">
+              <li key={slide.id} className="px-6 py-4 space-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs ${
+                  <Badge
+                    tone={
                       slide.type === 'inserted_slide'
-                        ? 'bg-green-100 text-green-700'
+                        ? 'success'
                         : slide.type === 'removed_slide'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-amber-100 text-amber-700'
-                    }`}
+                          ? 'danger'
+                          : 'warning'
+                    }
                   >
-                    {slide.type}
-                  </span>
-                  <span className="text-sm font-medium text-gray-800">
+                    {slide.type.replace('_', ' ')}
+                  </Badge>
+                  <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
                     Slide {slide.slideNumber}
                     {slide.matchedSlideNumber ? ` ↔ ${slide.matchedSlideNumber}` : ''}
                   </span>
-                  <span className="text-xs text-gray-500">{slide.title}</span>
+                  <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    {slide.title}
+                  </span>
                 </div>
-
-                <p className="text-sm text-gray-600">{slide.description}</p>
-
+                <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+                  {slide.description}
+                </p>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  <DiffPanel title="Before" content={slide.beforeText} tone="red" />
-                  <DiffPanel title="After" content={slide.afterText} tone="green" />
+                  <DiffPanel title="Before" content={slide.beforeText} tone="danger" />
+                  <DiffPanel title="After" content={slide.afterText} tone="success" />
                 </div>
-
-                <p className="text-xs text-gray-400">항목 유형: {slide.itemType || 'slide'}</p>
-              </div>
+                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                  항목 유형 · {slide.itemType || 'slide'}
+                </p>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-      </div>
-    </div>
-  )
-}
-
-function SummaryCard({
-  label,
-  value,
-  accent,
-}: {
-  label: string
-  value: string
-  accent: 'gray' | 'green' | 'red' | 'amber'
-}) {
-  const accentClass =
-    accent === 'green'
-      ? 'border-green-200 text-green-600'
-      : accent === 'red'
-        ? 'border-red-200 text-red-600'
-        : accent === 'amber'
-          ? 'border-amber-200 text-amber-600'
-          : 'border-gray-200 text-gray-800'
-
-  return (
-    <div className={`bg-white border rounded-lg px-4 py-3 text-center ${accentClass}`}>
-      <p className="text-2xl font-bold">{value}</p>
-      <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+      </Card>
     </div>
   )
 }
@@ -484,16 +577,18 @@ function DiffPanel({
 }: {
   title: string
   content: string
-  tone: 'red' | 'green'
+  tone: 'danger' | 'success'
 }) {
+  const bg =
+    tone === 'danger'
+      ? 'bg-[var(--md-sys-color-error-container)]/50 border-[var(--md-sys-color-error-container)]'
+      : 'bg-[var(--md-sys-color-success-container)]/50 border-[var(--md-sys-color-success-container)]'
   return (
-    <div
-      className={`rounded-lg border p-3 ${
-        tone === 'red' ? 'border-red-100 bg-red-50/60' : 'border-green-100 bg-green-50/60'
-      }`}
-    >
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
-      <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap break-words">
+    <div className={`rounded-md border p-3 ${bg}`}>
+      <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
+        {title}
+      </p>
+      <p className="type-body-md text-[var(--md-sys-color-on-surface)] mt-2 whitespace-pre-wrap break-words">
         {content || '(내용 없음)'}
       </p>
     </div>
