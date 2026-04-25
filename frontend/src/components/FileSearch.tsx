@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, SchedulerSettings, SearchResult } from '../api/client'
+import { api, SchedulerSettings, SearchResult, SearchScope } from '../api/client'
 import {
   Badge,
   Button,
@@ -11,6 +11,7 @@ import {
   Icon,
   IconButton,
   Radio,
+  SegmentedButton,
   Spinner,
   TextField,
   useSnackbar,
@@ -51,6 +52,7 @@ export default function FileSearch() {
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>([])
+  const [searchScope, setSearchScope] = useState<SearchScope>('filename_content')
 
   const [settings, setSettings] = useState<SchedulerSettings | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -67,7 +69,7 @@ export default function FileSearch() {
   }, [])
 
   const doSearch = useCallback(
-    async (q: string, fileTypes = selectedFileTypes) => {
+    async (q: string, fileTypes = selectedFileTypes, scope = searchScope) => {
       if (!q.trim()) {
         setResults([])
         setSearched(false)
@@ -79,6 +81,7 @@ export default function FileSearch() {
           query: q,
           limit: 200,
           file_types: fileTypes.length > 0 ? fileTypes : undefined,
+          search_scope: scope,
         })
         setResults(response.data.results)
         setSearched(true)
@@ -89,7 +92,7 @@ export default function FileSearch() {
         setLoading(false)
       }
     },
-    [selectedFileTypes, snackbar],
+    [selectedFileTypes, searchScope, snackbar],
   )
 
   const handleQueryChange = (value: string) => {
@@ -103,7 +106,12 @@ export default function FileSearch() {
       ? selectedFileTypes.filter((item) => item !== value)
       : [...selectedFileTypes, value]
     setSelectedFileTypes(next)
-    if (query.trim()) void doSearch(query, next)
+    if (query.trim()) void doSearch(query, next, searchScope)
+  }
+
+  const handleSearchScopeChange = (next: SearchScope) => {
+    setSearchScope(next)
+    if (query.trim()) void doSearch(query, selectedFileTypes, next)
   }
 
   const handleReindex = async () => {
@@ -197,7 +205,7 @@ export default function FileSearch() {
             <Button
               variant="filled"
               leadingIcon="search"
-              onClick={() => doSearch(query)}
+              onClick={() => doSearch(query, selectedFileTypes, searchScope)}
               disabled={!query.trim() || loading}
             >
               검색
@@ -214,7 +222,7 @@ export default function FileSearch() {
 
         <div className="flex items-center gap-4 flex-wrap type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
           <span className="inline-flex items-center gap-1.5">
-            <Icon name="bolt" size={16} /> 파일명과 본문을 함께 검색
+            <Icon name="bolt" size={16} /> {searchScope === 'filename' ? '파일명만 검색' : '파일명과 본문을 함께 검색'}
           </span>
           {lastReindex && (
             <span className="inline-flex items-center gap-1.5">
@@ -223,7 +231,26 @@ export default function FileSearch() {
           )}
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">검색 범위</span>
+            <div>
+              <SegmentedButton<SearchScope>
+                aria-label="검색 범위"
+                value={searchScope}
+                onChange={handleSearchScopeChange}
+                options={[
+                  { value: 'filename_content', label: '파일명 + 본문', icon: 'article' },
+                  { value: 'filename', label: '파일명만', icon: 'drive_file_rename_outline' },
+                ]}
+              />
+            </div>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {searchScope === 'filename'
+                ? '파일 이름에 검색어가 포함된 문서만 찾습니다.'
+                : '파일 이름과 색인된 문서 본문을 함께 찾습니다.'}
+            </p>
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">문서 형식</span>
             {FILE_TYPE_FILTERS.map((filter) => (
@@ -336,15 +363,15 @@ export default function FileSearch() {
         <EmptyState
           icon="search_off"
           title={`"${query}"에 대한 결과가 없습니다.`}
-          description="오탈자를 확인하거나 더 짧은 키워드로 다시 시도해 보세요."
+          description={searchScope === 'filename' ? '파일명만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.' : '오탈자를 확인하거나 더 짧은 키워드로 다시 시도해 보세요.'}
         />
       )}
 
       {!loading && !searched && !query && (
         <EmptyState
           icon="manage_search"
-          title="파일명과 문서 내용을 한 번에 검색"
-          description="먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT, 텍스트 파일 안의 단어까지 검색할 수 있습니다."
+          title={searchScope === 'filename' ? '파일명으로 빠르게 검색' : '파일명과 문서 내용을 한 번에 검색'}
+          description={searchScope === 'filename' ? '파일명만 찾거나 검색 범위를 파일명+본문으로 바꿔 문서 안의 단어까지 검색할 수 있습니다.' : '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT, 텍스트 파일 안의 단어까지 검색할 수 있습니다.'}
         />
       )}
 

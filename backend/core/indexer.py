@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -144,8 +145,9 @@ def reindex_all() -> Dict[str, int]:
         try:
             index_file(file_info["id"], path, parser_config=file_info.get("parser_config"))
             return "success"
-        except Exception as exc:
-            logger.warning("index_file failed for %s: %s", path, exc)
+        except Exception:
+            diagnostic_id = uuid.uuid4().hex[:8]
+            logger.exception("index_file failed diagnostic_id=%s path=%s", diagnostic_id, path)
             return "failed"
 
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
@@ -167,8 +169,9 @@ def _do_reindex_incremental():
             if stored_mtime is not None and abs(current_mtime - stored_mtime) < 1.0:
                 continue
             index_file(file_info["id"], path, parser_config=file_info.get("parser_config"))
-        except Exception as exc:
-            logger.warning("incremental index failed for %s: %s", path, exc)
+        except Exception:
+            diagnostic_id = uuid.uuid4().hex[:8]
+            logger.exception("incremental index failed diagnostic_id=%s path=%s", diagnostic_id, path)
 
     set_setting("last_reindex_at", datetime.now().isoformat())
 
@@ -211,8 +214,9 @@ def _scheduler_loop():
                         if last_dt.date() >= now.date():
                             continue
                     _do_reindex_incremental()
-        except Exception as exc:
-            logger.warning("scheduler error: %s", exc)
+        except Exception:
+            diagnostic_id = uuid.uuid4().hex[:8]
+            logger.exception("scheduler error diagnostic_id=%s", diagnostic_id)
 
 
 def start_scheduler():

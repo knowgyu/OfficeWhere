@@ -2,7 +2,7 @@
 
 OfficeWhere는 Excel, Word, PowerPoint, Markdown, 텍스트 파일을 한 곳에 등록해 검색·비교·통합할 수 있는 데스크톱 도구입니다.
 
-- **문서 검색**: 파일명/경로/본문을 검색하고 Word 단락, PPT 슬라이드, Excel 행·열, 텍스트 줄 위치를 보여줍니다.
+- **문서 검색**: 파일명+본문 또는 파일명만 범위를 선택해 검색하고 Word 단락, PPT 슬라이드, Excel 행·열, 텍스트 줄 위치를 보여줍니다.
 - **Excel 통합**: 여러 Excel 파일을 key 컬럼 기준으로 LEFT / OUTER / INNER 방식으로 합칩니다.
 - **버전 비교 / 정합성 검사**: Excel 값 차이, Word 문단·표 변경, PPT 슬라이드·항목 변경을 확인합니다.
 - **라이브러리 관리**: 대상 폴더를 등록하고 지원 문서를 증분 색인합니다.
@@ -25,7 +25,7 @@ OfficeWhere는 Excel, Word, PowerPoint, Markdown, 텍스트 파일을 한 곳에
 2. **대상 추가** 후 **자동 등록 / 재스캔**을 실행합니다.
 3. 진행 중에는 앱 하단 중앙에 재스캔 상태, 진행률, 현재 처리 파일, 정지 버튼이 표시됩니다.
 4. **문서 검색** 탭에서 키워드를 입력합니다.
-5. 필요하면 Word/DOCX, PPT/PPTX, Markdown/MD, Text/TXT 필터를 다중 선택합니다. 아무것도 선택하지 않으면 전체 검색입니다.
+5. 필요하면 검색 범위를 **파일명+본문**(기본) 또는 **파일명만**으로 바꾸고, Word/DOCX, PPT/PPTX, Markdown/MD, Text/TXT 필터를 다중 선택합니다. 아무것도 선택하지 않으면 전체 형식 검색입니다.
 
 ### 2. Excel 파일 통합
 
@@ -170,6 +170,14 @@ Electron 앱으로 실행할 때 데이터베이스는 OS 앱 데이터 디렉�
 백엔드를 직접 실행하고 `--data-dir` / `ODJ_DATA_DIR`를 지정하지 않은 경우에는 `~/.officewhere/data.db`를 사용합니다.
 
 파일을 이동하거나 삭제하면 해당 파일은 다시 등록해야 합니다. portable zip을 삭제해도 위 앱 데이터 디렉터리는 OS에 남을 수 있습니다.
+
+Electron 앱의 **파일 관리 → 앱 데이터 관리**에서는 앱이 계산한 후보 ID만 main process로 전달해 다음 앱 소유 데이터만 삭제할 수 있습니다. 삭제 전 후보 경로와 “원본 문서는 삭제하지 않음” 안내를 확인하고, 삭제 후 앱을 재시작합니다.
+
+- Electron `userData/backend-data` DB·색인 데이터
+- Electron logs / crash dump / Chromium cache·localStorage·sessionStorage
+- 직접 backend 실행 시 남은 `~/.officewhere`
+
+사용자가 등록한 원본 문서 폴더, watched folder, `%APPDATA%`/Application Support 같은 상위 OS 앱 데이터 루트는 삭제 대상이 아닙니다.
 
 ## 문제 해결
 

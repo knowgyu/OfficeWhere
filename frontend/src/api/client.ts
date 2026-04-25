@@ -1,5 +1,23 @@
 import axios from 'axios'
 
+export interface AppDataCandidate {
+  id: string
+  label: string
+  path: string
+  exists: boolean
+  sizeBytes?: number
+  description: string
+  dangerous?: boolean
+}
+
+export interface ClearAppDataResult {
+  success: boolean
+  deleted: string[]
+  failed: { id: string; path: string; error: string }[]
+  backendStopped: boolean
+  restartScheduled: boolean
+}
+
 declare global {
   interface OfficeDataJoinerBridge {
     getBackendBaseUrl?: () => Promise<string>
@@ -7,6 +25,8 @@ declare global {
     pickFile?: () => Promise<{ cancelled: boolean; path: string; error?: string }>
     getAppVersion?: () => Promise<string>
     getLogPath?: () => Promise<string>
+    getAppDataPaths?: () => Promise<AppDataCandidate[]>
+    clearAppData?: (candidateIds: string[], relaunch?: boolean) => Promise<ClearAppDataResult>
   }
 
   interface Window {
@@ -307,10 +327,13 @@ export interface SearchResult {
   snippet: string
 }
 
+export type SearchScope = 'filename_content' | 'filename'
+
 export interface SearchRequest {
   query: string
   limit?: number
   file_types?: string[]
+  search_scope?: SearchScope
 }
 
 export interface SearchResponse {
@@ -352,6 +375,11 @@ export interface LibraryRescanResult {
   action: 'registered' | 'updated' | 'skipped' | 'failed' | 'cancelled'
   file_id?: number
   error?: string
+  diagnostic_id?: string
+  error_code?: string
+  error_stage?: string
+  error_type?: string
+  error_hint?: string
 }
 
 export interface LibraryRescanResponse {
@@ -1120,6 +1148,18 @@ export const api = {
     getSettings: async () => axios.get<SchedulerSettings>(await apiPath('/api/search/settings')),
     updateSettings: (data: SchedulerSettings) =>
       apiPath('/api/search/settings').then((url) => axios.put<SchedulerSettings>(url, data)),
+  },
+  app: {
+    getDataPaths: async () => {
+      const electron = electronApi()
+      if (!electron?.getAppDataPaths) desktopError('Electron 앱에서만 앱 데이터 경로를 확인할 수 있습니다.')
+      return { data: await electron.getAppDataPaths() }
+    },
+    clearData: async (candidateIds: string[], relaunch = true) => {
+      const electron = electronApi()
+      if (!electron?.clearAppData) desktopError('Electron 앱에서만 앱 데이터를 삭제할 수 있습니다.')
+      return { data: await electron.clearAppData(candidateIds, relaunch) }
+    },
   },
   library: {
     getSettings: async () => axios.get<LibrarySettings>(await apiPath('/api/library/settings')),

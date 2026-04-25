@@ -8,6 +8,18 @@ from pptx import Presentation
 from .normalizer import normalize_value
 
 
+def _coerce_position(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(str(value)))
+        except (TypeError, ValueError):
+            return 0
+
+
 def _slide_title(slide) -> str:
     if slide.shapes.title and slide.shapes.title.text:
         return slide.shapes.title.text.strip()
@@ -27,8 +39,8 @@ def extract_ppt_slides(path: str) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         sortable_items: List[tuple[int, int, Dict[str, Any]]] = []
         for shape_idx, shape in enumerate(slide.shapes, start=1):
-            top = int(getattr(shape, "top", 0))
-            left = int(getattr(shape, "left", 0))
+            top = _coerce_position(getattr(shape, "top", 0))
+            left = _coerce_position(getattr(shape, "left", 0))
             if getattr(shape, "has_text_frame", False):
                 text = shape.text_frame.text.strip()
                 if text:

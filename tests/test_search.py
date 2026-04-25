@@ -146,3 +146,50 @@ def test_search_api_filters_filename_and_content(tmp_path):
 
     assert response.total == 1
     assert response.results[0].file_type == "Text"
+
+
+def test_search_api_default_scope_includes_filename_and_content(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    filename_id = register_file(str(tmp_path / "scope-key.docx"), "scope-key.docx", "Word", "", 0)
+    content_id = register_file(str(tmp_path / "content.docx"), "content.docx", "Word", "", 0)
+    save_file_chunks(filename_id, [{"location": "본문", "content": "다른 내용"}])
+    save_file_chunks(content_id, [{"location": "본문", "content": "scope-key 본문"}])
+
+    response = search_files(SearchRequest(query="scope-key"))
+
+    assert response.total == 2
+    assert {item.file_id for item in response.results} == {filename_id, content_id}
+
+
+def test_search_api_filename_scope_excludes_content_only_matches(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    filename_id = register_file(str(tmp_path / "onlyname.docx"), "onlyname.docx", "Word", "", 0)
+    content_id = register_file(str(tmp_path / "body.docx"), "body.docx", "Word", "", 0)
+    save_file_chunks(filename_id, [{"location": "본문", "content": "다른 내용"}])
+    save_file_chunks(content_id, [{"location": "본문", "content": "onlyname 본문"}])
+
+    response = search_files(SearchRequest(query="onlyname", search_scope="filename"))
+
+    assert response.total == 1
+    assert response.results[0].file_id == filename_id
+    assert response.results[0].location == "파일명"
+
+
+def test_search_api_filename_scope_respects_file_type_filter(tmp_path):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    register_file(str(tmp_path / "scope.docx"), "scope.docx", "Word", "", 0)
+    text_id = register_file(str(tmp_path / "scope.txt"), "scope.txt", "Text", "", 0)
+
+    response = search_files(SearchRequest(query="scope", file_types=["txt"], search_scope="filename"))
+
+    assert response.total == 1
+    assert response.results[0].file_id == text_id
+    assert response.results[0].file_type == "Text"

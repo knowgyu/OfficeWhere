@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -207,6 +207,7 @@ class SearchRequest(BaseModel):
     query: str
     limit: int = 100
     file_types: List[str] = Field(default_factory=list)
+    search_scope: Literal["filename_content", "filename"] = "filename_content"
 
 
 class SearchResult(BaseModel):
@@ -257,6 +258,11 @@ class LibraryRescanResult(BaseModel):
     action: str
     file_id: Optional[int] = None
     error: Optional[str] = None
+    diagnostic_id: Optional[str] = None
+    error_code: Optional[str] = None
+    error_stage: Optional[str] = None
+    error_type: Optional[str] = None
+    error_hint: Optional[str] = None
 
 
 class LibraryRescanResponse(BaseModel):

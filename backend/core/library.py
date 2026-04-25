@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
 import threading
 import time
+import uuid
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -36,6 +38,7 @@ from ..runtime import get_worker_count
 SETTINGS_KEY = "library_settings"
 LAST_RESCAN_KEY = "library_last_rescan_at"
 MAX_WORKERS = get_worker_count()
+logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[Dict[str, Any]], None]
 
 _rescan_status_lock = threading.Lock()
@@ -183,6 +186,85 @@ def _cancelled_result(path: str) -> LibraryRescanResult:
     )
 
 
+def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
+    message = str(exc)
+    lower = message.lower()
+    suffix = Path(path).suffix.lower()
+    error_type = exc.__class__.__name__
+
+    if "parser_config" in message and ("row 범위" in message or "column 범위" in message):
+        return {
+            "error_code": "parser_config_out_of_range",
+            "error_stage": "parser_config",
+            "error_type": error_type,
+            "error_hint": "저장된 Excel 표 범위가 현재 시트 크기를 벗어났습니다. 파일 관리에서 표 범위를 다시 선택한 뒤 등록/재스캔해 주세요.",
+        }
+    if "parser_config" in message and ("정수" in message or "invalid" in lower):
+        return {
+            "error_code": "parser_config_invalid_number",
+            "error_stage": "parser_config",
+            "error_type": error_type,
+            "error_hint": "저장된 Excel 표 범위 설정에 숫자가 아닌 값이 있습니다. 파일 관리에서 표 범위를 다시 선택해 주세요.",
+        }
+    if isinstance(exc, IndexError) or "list index out of range" in lower:
+        return {
+            "error_code": "unsupported_or_corrupt_file",
+            "error_stage": "office_parser",
+            "error_type": error_type,
+            "error_hint": "파일 내부 구조를 파서가 읽지 못했습니다. Office에서 파일을 열어 다시 저장하거나 손상/암호화 여부를 확인해 주세요.",
+        }
+    if "invalid literal" in lower and "int" in lower:
+        return {
+            "error_code": "parser_config_invalid_number" if suffix in {".xls", ".xlsx"} else "office_parser_error",
+            "error_stage": "parser_config" if suffix in {".xls", ".xlsx"} else "office_parser",
+            "error_type": error_type,
+            "error_hint": "문서 파서가 숫자 필드를 처리하지 못했습니다. 파일을 다시 저장한 뒤 재스캔하고, 반복되면 진단 ID와 함께 로그를 확인해 주세요.",
+        }
+    if error_type in {"ValueError", "TypeError", "KeyError"}:
+        return {
+            "error_code": "office_parser_error",
+            "error_stage": "office_parser",
+            "error_type": error_type,
+            "error_hint": "문서 파서가 파일 내용을 처리하지 못했습니다. 파일을 다시 저장하거나 지원 형식인지 확인해 주세요.",
+        }
+    return {
+        "error_code": "unknown",
+        "error_stage": "unknown",
+        "error_type": error_type,
+        "error_hint": "원인을 단정할 수 없습니다. 진단 ID와 backend 로그의 traceback을 함께 확인해 주세요.",
+    }
+
+
+def _failed_result(
+    path: str,
+    name: str,
+    action: str,
+    exc: Exception,
+    *,
+    file_id: Optional[int] = None,
+    log_message: str = "library indexing failure",
+) -> LibraryRescanResult:
+    diagnostic_id = uuid.uuid4().hex[:8]
+    diagnostic = classify_index_error(exc, path)
+    logger.exception(
+        "%s diagnostic_id=%s path=%s error_code=%s",
+        log_message,
+        diagnostic_id,
+        path,
+        diagnostic["error_code"],
+    )
+    return LibraryRescanResult(
+        path=path,
+        name=name,
+        success=False,
+        action=action,
+        file_id=file_id,
+        error=str(exc),
+        diagnostic_id=diagnostic_id,
+        **diagnostic,
+    )
+
+
 def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> LibraryRescanResponse:
     settings = load_library_settings()
     if not settings.watched_folders:
@@ -227,13 +309,14 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                     break
                 found_paths[path] = Path(path).name
         except Exception as exc:
+            scan_path = os.path.normpath(folder.path)
             scan_errors.append(
-                LibraryRescanResult(
-                    path=os.path.normpath(folder.path),
-                    name=Path(folder.path).name or folder.path,
-                    success=False,
-                    action="failed",
-                    error=str(exc),
+                _failed_result(
+                    scan_path,
+                    Path(folder.path).name or folder.path,
+                    "failed",
+                    exc,
+                    log_message="library folder scan failed",
                 )
             )
         if progress_callback:
@@ -299,13 +382,13 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                 file_id=file_id,
             )
         except Exception as exc:
-            return LibraryRescanResult(
-                path=path,
-                name=name,
-                success=False,
-                action="failed",
+            return _failed_result(
+                path,
+                name,
+                "failed",
+                exc,
                 file_id=existing["id"] if existing else None,
-                error=str(exc),
+                log_message="library file indexing failed",
             )
 
     sorted_paths = sorted(found_paths)
@@ -364,12 +447,12 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                     try:
                         result = future.result()
                     except Exception as exc:
-                        result = LibraryRescanResult(
-                            path=path,
-                            name=Path(path).name,
-                            success=False,
-                            action="failed",
-                            error=str(exc),
+                        result = _failed_result(
+                            path,
+                            Path(path).name,
+                            "failed",
+                            exc,
+                            log_message="library worker future failed",
                         )
                     results.append(result)
                     processed += 1
@@ -409,12 +492,12 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                             results.append(future.result())
                         except Exception as exc:
                             results.append(
-                                LibraryRescanResult(
-                                    path=path,
-                                    name=Path(path).name,
-                                    success=False,
-                                    action="failed",
-                                    error=str(exc),
+                                _failed_result(
+                                    path,
+                                    Path(path).name,
+                                    "failed",
+                                    exc,
+                                    log_message="library worker future failed during cancel",
                                 )
                             )
                         processed += 1
@@ -462,6 +545,7 @@ def _run_rescan_job() -> None:
             }
         )
     except Exception as exc:
+        logger.exception("library rescan job failed")
         _update_rescan_status(
             {
                 "running": False,

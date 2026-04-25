@@ -38,38 +38,52 @@ def normalize_file_type_filters(values: list[str]) -> list[str]:
     return normalized
 
 
+def _filename_matches(query: str, file_types: list[str]) -> list[dict]:
+    normalized_query = query.strip().lower()
+    if not normalized_query:
+        return []
+
+    active_filter = set(file_types)
+    matches: list[dict] = []
+    for file_info in get_all_files():
+        if active_filter and file_info["file_type"] not in active_filter:
+            continue
+        if normalized_query in file_info["name"].lower():
+            matches.append(
+                {
+                    "file_id": file_info["id"],
+                    "name": file_info["name"],
+                    "path": file_info["path"],
+                    "file_type": file_info["file_type"],
+                    "location": "파일명",
+                    "snippet": file_info["name"],
+                }
+            )
+    return matches
+
+
+def _content_matches(query: str, limit: int, file_types: list[str]) -> list[dict]:
+    return search(query, limit=limit, file_types=file_types)
+
+
 @router.post("", response_model=SearchResponse)
 def search_files(req: SearchRequest):
-    normalized_query = req.query.strip().lower()
     file_types = normalize_file_type_filters(req.file_types)
-    active_filter = set(file_types)
-    name_matches = []
-    if normalized_query:
-        for file_info in get_all_files():
-            if active_filter and file_info["file_type"] not in active_filter:
+    name_matches = _filename_matches(req.query, file_types)
+
+    if req.search_scope == "filename":
+        results = name_matches[: req.limit]
+    else:
+        seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
+        content_results = []
+        for item in _content_matches(req.query, limit=req.limit, file_types=file_types):
+            key = (item["file_id"], item["location"], item["snippet"])
+            if key in seen:
                 continue
-            if normalized_query in file_info["name"].lower():
-                name_matches.append(
-                    {
-                        "file_id": file_info["id"],
-                        "name": file_info["name"],
-                        "path": file_info["path"],
-                        "file_type": file_info["file_type"],
-                        "location": "파일명",
-                        "snippet": file_info["name"],
-                    }
-                )
+            seen.add(key)
+            content_results.append(item)
+        results = (name_matches + content_results)[: req.limit]
 
-    seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
-    content_results = []
-    for item in search(req.query, limit=req.limit, file_types=file_types):
-        key = (item["file_id"], item["location"], item["snippet"])
-        if key in seen:
-            continue
-        seen.add(key)
-        content_results.append(item)
-
-    results = (name_matches + content_results)[: req.limit]
     return SearchResponse(
         query=req.query,
         total=len(results),

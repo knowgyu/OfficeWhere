@@ -96,7 +96,6 @@ OfficeWhere는 업무·수업·연구 과정에서 흩어진 Office 문서를 �
 
 - 파일 시스템 watcher 또는 색인 캐시를 추가해 폴더 순회 자체를 더 줄이기
 - 재스캔 취소 시 “취소로 처리하지 않은 파일 수”를 별도 집계하고, 이미 파싱/색인 중인 작업 때문에 정지가 늦어지는 체감 개선
-- portable zip 삭제 후에도 OS 앱 데이터 디렉터리에 남는 DB/로그를 사용자가 쉽게 삭제할 수 있도록 “데이터 폴더 열기 / 앱 데이터 삭제” 안내 또는 기능 추가
 - 실제 사용자 문서로 Word/PPT diff 품질 UAT
 - Windows fresh machine에서 setup/build/release zip smoke test 반복
 - 다국어 UI, 테마, 튜토리얼 같은 제품 완성도 개선

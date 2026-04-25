@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 import {
   api,
+  AppDataCandidate,
+  ClearAppDataResult,
   FileInfo,
   FileInspectResponse,
   LibraryRescanResponse,
@@ -22,6 +24,7 @@ import {
   Button,
   Card,
   CardSection,
+  Checkbox,
   Chip,
   Dialog,
   EmptyState,
@@ -69,6 +72,18 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
   return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${cancelled} · 실패 ${source.failed}`
 }
 
+function formatBytes(bytes?: number) {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index += 1
+  }
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
+}
+
 export default function FileManager() {
   const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
@@ -105,6 +120,14 @@ export default function FileManager() {
     completionKey: rescanCompletionKey,
     startRescan,
   } = useLibraryRescan()
+  const [appDataPaths, setAppDataPaths] = useState<AppDataCandidate[]>([])
+  const [appDataLoading, setAppDataLoading] = useState(false)
+  const [selectedAppDataIds, setSelectedAppDataIds] = useState<string[]>([])
+  const [clearAppDataOpen, setClearAppDataOpen] = useState(false)
+  const [clearAppDataResult, setClearAppDataResult] = useState<ClearAppDataResult | null>(null)
+  const appDataAvailable =
+    typeof window !== 'undefined' &&
+    Boolean(window.officeDataJoiner?.getAppDataPaths && window.officeDataJoiner?.clearAppData)
 
   const fetchFiles = async () => {
     setLoading(true)
@@ -118,9 +141,29 @@ export default function FileManager() {
     }
   }
 
+  const fetchAppDataPaths = async () => {
+    if (!appDataAvailable) return
+    setAppDataLoading(true)
+    try {
+      const response = await api.app.getDataPaths()
+      setAppDataPaths(response.data)
+      setSelectedAppDataIds((current) => {
+        if (current.length > 0) return current.filter((id) => response.data.some((item) => item.id === id))
+        return response.data
+          .filter((item) => item.exists && !item.dangerous && !item.id.startsWith('chromium-'))
+          .map((item) => item.id)
+      })
+    } catch {
+      snackbar.error('앱 데이터 경로를 불러오지 못했습니다.')
+    } finally {
+      setAppDataLoading(false)
+    }
+  }
+
   useEffect(() => {
     fetchFiles()
     void fetchLibrarySettings()
+    void fetchAppDataPaths()
   }, [])
 
   useEffect(() => {
@@ -225,6 +268,35 @@ export default function FileManager() {
     await startRescan('manual')
   }
 
+  const toggleAppDataCandidate = (id: string) => {
+    setSelectedAppDataIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+    )
+  }
+
+  const handleClearAppData = async () => {
+    if (selectedAppDataIds.length === 0) {
+      snackbar.warn('삭제할 앱 데이터 항목을 선택해 주세요.')
+      return
+    }
+    setAppDataLoading(true)
+    try {
+      const response = await api.app.clearData(selectedAppDataIds, true)
+      setClearAppDataResult(response.data)
+      if (response.data.success) {
+        snackbar.success('앱 데이터를 삭제했습니다. 앱을 재시작합니다.')
+      } else {
+        snackbar.error('일부 앱 데이터 삭제에 실패했습니다.')
+      }
+      setClearAppDataOpen(false)
+      if (!response.data.restartScheduled) void fetchAppDataPaths()
+    } catch {
+      snackbar.error('앱 데이터 삭제 요청에 실패했습니다.')
+    } finally {
+      setAppDataLoading(false)
+    }
+  }
+
   const resetInspection = () => {
     setInspectedFile(null)
     setSelectedCandidateId('')
@@ -270,6 +342,7 @@ export default function FileManager() {
   const hasPendingNewFolder =
     Boolean(normalizedFolderDraft) &&
     !librarySettings.watched_folders.some((folder) => folder.path === normalizedFolderDraft)
+  const selectedAppDataPaths = appDataPaths.filter((item) => selectedAppDataIds.includes(item.id))
 
   const handleInspectPath = async () => {
     if (!filePath.trim()) {
@@ -517,19 +590,30 @@ export default function FileManager() {
                   </div>
                 )}
                 {!rescanning && rescanSummary && rescanSummary.failed > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {rescanSummary.results
-                      .filter((item) => !item.success)
-                      .slice(0, 3)
-                      .map((item) => (
-                        <p
-                          key={item.path}
-                          className="type-body-sm text-[var(--md-sys-color-error)] break-all"
-                        >
-                          {item.name}: {item.error}
-                        </p>
-                      ))}
-                  </div>
+                  <details className="mt-2 space-y-2">
+                    <summary className="type-label-lg text-[var(--md-sys-color-error)] cursor-pointer">
+                      실패 항목 자세히 보기 ({rescanSummary.failed}개)
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {rescanSummary.results
+                        .filter((item) => !item.success)
+                        .map((item) => (
+                          <div
+                            key={item.path}
+                            className="rounded-sm bg-[var(--md-sys-color-error-container)] text-[var(--md-sys-color-on-error-container)] p-3"
+                          >
+                            <p className="type-title-sm break-all">
+                              {item.name}: {item.error_hint || item.error}
+                            </p>
+                            <p className="type-body-sm break-all opacity-80">
+                              {item.error_code || 'unknown'}
+                              {item.diagnostic_id ? ` · 진단 ID ${item.diagnostic_id}` : ''}
+                              {item.error ? ` · 상세: ${item.error}` : ''}
+                            </p>
+                          </div>
+                        ))}
+                    </div>
+                  </details>
                 )}
               </div>
             </div>
@@ -590,6 +674,96 @@ export default function FileManager() {
               </div>
             </div>
           </div>
+        </CardSection>
+      </Card>
+
+      <Card variant="elevated">
+        <CardSection
+          title="앱 데이터 관리"
+          description="Electron userData, backend-data, 로그, Chromium cache/localStorage, legacy ~/.officewhere 등 앱 소유 데이터만 삭제합니다. 원본 문서와 대상 폴더는 삭제하지 않습니다."
+          trailing={
+            appDataAvailable ? (
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant="tonal"
+                  leadingIcon="refresh"
+                  onClick={() => void fetchAppDataPaths()}
+                  loading={appDataLoading}
+                >
+                  경로 새로고침
+                </Button>
+                <Button
+                  variant="filled"
+                  leadingIcon="delete_sweep"
+                  className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
+                  onClick={() => setClearAppDataOpen(true)}
+                  disabled={selectedAppDataIds.length === 0 || appDataLoading}
+                >
+                  선택 삭제
+                </Button>
+              </div>
+            ) : null
+          }
+        >
+          {!appDataAvailable ? (
+            <EmptyState
+              icon="desktop_windows"
+              title="Electron 앱에서만 사용할 수 있습니다"
+              description="브라우저/개발 서버 모드에서는 앱 userData 경로를 안전하게 확인할 수 없어 삭제 기능을 비활성화합니다."
+              compact
+            />
+          ) : appDataPaths.length === 0 ? (
+            <EmptyState
+              icon="folder_managed"
+              title="앱 데이터 경로를 불러오세요"
+              description="경로 새로고침을 누르면 삭제 가능한 앱 소유 데이터 후보를 확인합니다."
+              compact
+            />
+          ) : (
+            <div className="space-y-2">
+              {appDataPaths.map((candidate) => (
+                <div
+                  key={candidate.id}
+                  className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-4 py-3 flex items-start gap-3"
+                >
+                  <Checkbox
+                    checked={selectedAppDataIds.includes(candidate.id)}
+                    onChange={() => toggleAppDataCandidate(candidate.id)}
+                    disabled={!candidate.exists || appDataLoading}
+                    label=""
+                  />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{candidate.label}</p>
+                      <Badge tone={candidate.exists ? 'success' : 'neutral'}>
+                        {candidate.exists ? formatBytes(candidate.sizeBytes) : '없음'}
+                      </Badge>
+                      {candidate.dangerous && <Badge tone="warning">전체 초기화</Badge>}
+                    </div>
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                      {candidate.description}
+                    </p>
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] break-all">
+                      {candidate.path}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {clearAppDataResult && (
+            <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-2">
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">최근 삭제 결과</p>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                backend 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개
+              </p>
+              {clearAppDataResult.failed.map((item) => (
+                <p key={`${item.id}-${item.path}`} className="type-body-sm text-[var(--md-sys-color-error)] break-all">
+                  {item.path}: {item.error}
+                </p>
+              ))}
+            </div>
+          )}
         </CardSection>
       </Card>
 
@@ -750,6 +924,47 @@ export default function FileManager() {
           </ul>
         )}
       </Card>
+
+      <Dialog
+        open={clearAppDataOpen}
+        onClose={() => setClearAppDataOpen(false)}
+        size="lg"
+        icon="warning"
+        title="앱 데이터 삭제 확인"
+        description="이 작업은 되돌릴 수 없습니다. 원본 문서와 대상 폴더 파일은 삭제하지 않습니다."
+        actions={
+          <>
+            <Button variant="text" onClick={() => setClearAppDataOpen(false)}>
+              취소
+            </Button>
+            <Button
+              variant="filled"
+              leadingIcon="delete_forever"
+              className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
+              onClick={handleClearAppData}
+              loading={appDataLoading}
+            >
+              삭제 후 재시작
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
+            선택한 앱 소유 데이터만 삭제합니다. 등록된 대상 폴더의 실제 문서 파일, 사용자의 작업 폴더, appData 루트는 삭제 대상이 아닙니다.
+          </p>
+          <div className="space-y-2">
+            {selectedAppDataPaths.map((candidate) => (
+              <div key={candidate.id} className="rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-3">
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{candidate.label}</p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] break-all">
+                  {candidate.path}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog
         open={!!previewFile}

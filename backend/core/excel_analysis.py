@@ -225,6 +225,26 @@ def _default_parser_config(path: str) -> ParserConfig:
     }
 
 
+def _coerce_config_index(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a valid parser_config index")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        raise ValueError(f"non-integer parser_config index: {value}")
+
+    text = str(value).strip()
+    try:
+        return int(text)
+    except ValueError:
+        numeric = float(text)
+        if numeric.is_integer():
+            return int(numeric)
+        raise ValueError(f"non-integer parser_config index: {value}")
+
+
 def normalize_excel_parser_config(path: str, parser_config: Optional[ParserConfig]) -> ParserConfig:
     config = dict(parser_config or {})
     if not config:
@@ -243,10 +263,10 @@ def normalize_excel_parser_config(path: str, parser_config: Optional[ParserConfi
     col_count = max(len(df.columns), 1)
 
     try:
-        header_row = int(config["header_row"])
-        start_col = int(config["start_col"])
-        end_col = int(config["end_col"])
-        end_row = int(config["end_row"])
+        header_row = _coerce_config_index(config["header_row"])
+        start_col = _coerce_config_index(config["start_col"])
+        end_col = _coerce_config_index(config["end_col"])
+        end_row = _coerce_config_index(config["end_row"])
     except KeyError as exc:
         raise ValueError(f"parser_config.{exc.args[0]} 이 필요합니다.") from exc
     except (TypeError, ValueError) as exc:
