@@ -1,6 +1,5 @@
 import re
 from typing import List, Optional, Tuple
-from rapidfuzz import fuzz
 
 SIMILARITY_THRESHOLD = 85
 
@@ -45,6 +44,8 @@ def values_equal(a: str, b: str) -> bool:
 
 def are_keys_similar(key1: str, key2: str) -> bool:
     """두 key가 유사한지 확인 (rapidfuzz ratio >= 85)"""
+    from rapidfuzz import fuzz
+
     norm1 = normalize_key(key1)
     norm2 = normalize_key(key2)
     if norm1 == norm2:
@@ -55,6 +56,8 @@ def are_keys_similar(key1: str, key2: str) -> bool:
 
 def are_columns_similar(col1: str, col2: str) -> bool:
     """두 컬럼명이 유사한지 확인 (동일 threshold 사용)"""
+    from rapidfuzz import fuzz
+
     norm1 = normalize_key(col1)
     norm2 = normalize_key(col2)
     if norm1 == norm2:

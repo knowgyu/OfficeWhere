@@ -3,8 +3,6 @@ from __future__ import annotations
 from difflib import SequenceMatcher
 from typing import Any, Dict, List
 
-from pptx import Presentation
-
 from .normalizer import normalize_value
 
 
@@ -32,6 +30,8 @@ def _slide_title(slide) -> str:
 
 
 def extract_ppt_slides(path: str) -> List[Dict[str, Any]]:
+    from pptx import Presentation
+
     presentation = Presentation(path)
     slides: List[Dict[str, Any]] = []
 

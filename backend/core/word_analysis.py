@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from docx import Document
-from docx.document import Document as DocumentObject
-from docx.oxml.table import CT_Tbl
-from docx.oxml.text.paragraph import CT_P
-from docx.table import Table
-from docx.text.paragraph import Paragraph
-
 from .normalizer import normalize_value
 
 
-def _iter_document_blocks(document: DocumentObject):
+def _iter_document_blocks(document):
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
     for child in document.element.body.iterchildren():
         if isinstance(child, CT_P):
             yield Paragraph(child, document)
@@ -21,6 +19,9 @@ def _iter_document_blocks(document: DocumentObject):
 
 
 def extract_word_blocks(path: str) -> List[Dict[str, Any]]:
+    from docx import Document
+    from docx.text.paragraph import Paragraph
+
     document = Document(path)
     blocks: List[Dict[str, Any]] = []
     paragraph_idx = 0
