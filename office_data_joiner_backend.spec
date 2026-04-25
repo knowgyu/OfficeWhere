@@ -45,7 +45,6 @@ a = Analysis(
         'anyio',
         'anyio._backends._asyncio',
         'anyio._backends._trio',
-        'aiosqlite',
         # Windows multiprocessing and Korean filenames
         'multiprocessing',
         'multiprocessing.spawn',

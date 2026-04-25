@@ -27,6 +27,15 @@ def get_db_path() -> str:
     return str(DB_PATH)
 
 
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-32000")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA mmap_size=134217728")
+    return conn
+
+
 def _ensure_registered_files_columns(cursor: sqlite3.Cursor):
     cursor.execute("PRAGMA table_info(registered_files)")
     existing_columns = {row[1] for row in cursor.fetchall()}
@@ -51,7 +60,7 @@ def _decode_parser_config(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def init_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
 
@@ -130,7 +139,7 @@ def register_file(
     column_count: int,
     parser_config: Optional[Dict[str, Any]] = None,
 ) -> int:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     cursor = conn.cursor()
     now = datetime.now().isoformat()
     parser_config_json = json.dumps(parser_config or {}, ensure_ascii=False)
@@ -165,7 +174,7 @@ def register_file(
 
 
 def get_all_files() -> List[Dict[str, Any]]:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM registered_files ORDER BY created_at DESC")
@@ -175,7 +184,7 @@ def get_all_files() -> List[Dict[str, Any]]:
 
 
 def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM registered_files WHERE id=?", (file_id,))
@@ -185,7 +194,7 @@ def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
 
 
 def delete_file(file_id: int) -> bool:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM file_chunks WHERE file_id=?", (file_id,))
     cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
@@ -196,7 +205,7 @@ def delete_file(file_id: int) -> bool:
 
 
 def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
     cursor.executemany(
@@ -208,7 +217,7 @@ def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
 
 
 def update_file_mtime(file_id: int, mtime: float):
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("UPDATE registered_files SET file_mtime = ? WHERE id = ?", (mtime, file_id))
     conn.commit()
@@ -220,7 +229,7 @@ def search_chunks(
     limit: int = 100,
     file_types: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, Any]]:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     filters = [file_type for file_type in (file_types or []) if file_type]
@@ -250,7 +259,7 @@ def search_chunks(
 
 
 def get_setting(key: str, default: str = "") -> str:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
     row = cursor.fetchone()
@@ -259,7 +268,7 @@ def get_setting(key: str, default: str = "") -> str:
 
 
 def set_setting(key: str, value: str):
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn = _connect()
     cursor = conn.cursor()
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
