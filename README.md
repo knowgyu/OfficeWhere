@@ -1,197 +1,114 @@
 # OfficeWhere
 
-OfficeWhere는 Excel, Word, PowerPoint, Markdown, 텍스트 파일을 한 곳에 등록해 검색·비교·통합할 수 있는 데스크톱 도구입니다.
+흩어져 있는 Excel, Word, PowerPoint, Markdown, 텍스트 파일을 한 폴더에 모아두고
+**검색하고, 합치고, 비교**할 수 있는 데스크톱 도구입니다.
 
-- **문서 검색**: 파일명+본문 또는 파일명만 범위를 선택해 검색하고 Word 단락, PPT 슬라이드, Excel 행·열, 텍스트 줄 위치를 보여줍니다.
-- **Excel 통합**: 여러 Excel 파일을 key 컬럼 기준으로 LEFT / OUTER / INNER 방식으로 합칩니다.
-- **버전 비교 / 정합성 검사**: Excel 값 차이, Word 문단·표 변경, PPT 슬라이드·항목 변경을 확인합니다.
-- **라이브러리 관리**: 대상 폴더를 등록하고 지원 문서를 증분 색인합니다.
-- **Windows 배포**: Electron 앱과 Python 백엔드를 함께 묶은 zip으로 배포합니다.
+폴더만 등록해 두면 OfficeWhere가 안에 있는 문서를 자동으로 색인해서,
+"그 자료가 어느 파일 몇 슬라이드에 있었지?" 같은 질문에 바로 답할 수 있습니다.
+
+## 주요 기능
+
+- **문서 검색**: 등록한 폴더 안의 모든 문서를 본문까지 검색합니다. 결과에는 Word 단락, PPT 슬라이드, Excel 행/열, 텍스트 줄 위치가 같이 표시됩니다.
+- **Excel 통합**: 여러 Excel 파일을 공통 key 컬럼으로 묶어 LEFT / OUTER / INNER JOIN으로 합치고, 결과를 다시 Excel로 내보냅니다.
+- **버전 비교 / 정합성 검사**: 같은 문서의 수정본들을 비교해 Excel 셀 값 차이, Word 문단·표 변경, PPT 슬라이드·항목 변경을 한눈에 확인합니다.
+- **라이브러리 관리**: 자료 폴더를 등록해두면 새 파일이 추가될 때마다 증분 색인합니다.
 
 ## 지원 파일
 
-| 형식 | 검색 | 비교/검사 | 통합 |
+| 형식 | 검색 | 비교/정합성 검사 | Excel 통합 |
 | --- | --- | --- | --- |
-| `.xlsx`, `.xls` | 파일명/내용 | key 기준 값·컬럼 차이 | 지원 |
-| `.docx` | 문단/표 | 문단·표 행 diff | 미지원 |
-| `.pptx` | 슬라이드/표 | 슬라이드 추가·삭제 및 내부 diff | 미지원 |
-| `.md`, `.txt` | 단락/줄 | 미지원 | 미지원 |
+| `.xlsx`, `.xls` | 파일명 + 셀 내용 | key 컬럼 기준 값·컬럼 차이 | 지원 |
+| `.docx` | 파일명 + 문단 + 표 | 문단·표 행 diff | 미지원 |
+| `.pptx` | 파일명 + 슬라이드 + 표 | 슬라이드 추가·삭제, 내부 변경 diff | 미지원 |
+| `.md`, `.txt` | 파일명 + 단락/줄 | 미지원 | 미지원 |
 
-## 주요 사용 흐름
+## 이런 분께 추천
 
-### 1. 폴더 등록 후 검색
+### "작년에 받은 그 단가표가 어느 파일에 있었더라?"
 
-1. **설정 / 라이브러리**에서 대상 폴더를 선택합니다.
-2. **대상 추가** 후 **자동 등록 / 재스캔**을 실행합니다.
-3. 진행 중에는 앱 하단 중앙에 재스캔 상태, 진행률, 현재 처리 파일, 정지 버튼이 표시됩니다.
-4. **문서 검색** 탭에서 키워드를 입력합니다.
-5. 필요하면 검색 범위를 **파일명+본문**(기본) 또는 **파일명만**으로 바꾸고, Word/DOCX, PPT/PPTX, Markdown/MD, Text/TXT 필터를 다중 선택합니다. 아무것도 선택하지 않으면 전체 형식 검색입니다.
+자료 폴더(예: `D:\업무\2025`)를 등록해 두고 **문서 검색** 탭에서 `"단가"`를 입력하면,
+폴더 안의 Excel 시트, Word 문단, PPT 슬라이드까지 본문 단위로 결과가 뜹니다.
+파일을 하나씩 열어 Ctrl+F로 찾을 필요가 없습니다.
 
-### 2. Excel 파일 통합
+> 예) `2025_상반기_원가표.xlsx · Sheet1 · 12행 3열` 처럼
+> 어느 파일의 어느 위치인지까지 표시되어 클릭 한 번으로 원본을 엽니다.
 
-1. Excel 파일을 등록하고 key 컬럼을 확인합니다.
-2. **Excel 통합**에서 파일과 컬럼을 선택합니다.
-3. JOIN 방식을 선택한 뒤 미리보기 또는 Excel 다운로드를 실행합니다.
+### "거래처 50개 발주서를 한 장으로 합쳐야 해요"
 
-### 3. 수정본 비교
+거래처별로 따로 받은 50개 Excel 파일을 모두 등록한 뒤
+**Excel 통합** 탭에서 `거래처코드` 컬럼을 key로 지정하면,
+50개 파일이 한 장의 통합 시트로 합쳐지고 그대로 `.xlsx`로 다운로드됩니다.
 
-1. 비교할 Word/PPT/Excel 파일을 등록합니다.
-2. **버전 묶음 / 정합성**에서 유사 파일 묶음을 확인합니다.
-3. Word/PPT는 2개 파일 비교, Excel은 여러 파일 정합성 검사를 실행합니다.
+> 예) `발주서_A상사.xlsx`, `발주서_B상사.xlsx` … 50개 파일 →
+> `거래처코드` 기준 OUTER JOIN → 누락 항목까지 한 장에 정리.
 
-## 개발 환경 설정
+### "이번 주 보고서, 지난주 버전이랑 뭐가 바뀌었지?"
 
-Python 3.10 이상과 Node.js LTS가 필요합니다.
+`주간보고_v3.pptx`, `주간보고_v4.pptx`를 등록하면 OfficeWhere가
+자동으로 같은 계열 파일을 묶어줍니다. **버전 묶음 / 정합성** 탭에서 클릭하면
+추가/삭제된 슬라이드, 같은 슬라이드 안에서 바뀐 텍스트가 표시됩니다.
+
+> Word 수정본 비교(`계약서_초안.docx` vs `계약서_검토본.docx`),
+> Excel 정합성 검사(여러 지점이 보낸 같은 양식의 일·월간 보고)도 같은 방식으로 동작합니다.
+
+### "여러 사람이 입력한 같은 양식, 값이 일관적인지 확인하고 싶어요"
+
+지점 10곳에서 보내온 같은 양식 Excel 파일을 한꺼번에 등록하고
+**Excel 정합성 검사**를 돌리면, 같은 key를 가진 행들에서
+값이 다른 셀만 골라 보여줍니다.
+
+> 예) 사번 `E1023`의 부서명이 A지점 파일에선 "영업1팀",
+> B지점 파일에선 "영업1본부"로 다르게 적힌 행만 추출.
+
+## 다운로드해서 사용하기
+
+가장 쉬운 방법은 [Releases](../../releases) 페이지에서 최신
+`officewhere-vX.Y.Z-windows-x64.zip`을 받아 압축을 푼 뒤
+`OfficeWhere.exe`를 실행하는 것입니다. 별도 설치 과정은 없습니다.
+
+## 직접 빌드하기
+
+소스에서 직접 빌드하려면 다음이 필요합니다.
+
+- Python 3.10 이상
+- Node.js LTS
 
 ### Windows
 
 ```bat
 setup.bat
-```
-
-### macOS / Linux
-
-```bash
-chmod +x setup.sh
-./setup.sh
-```
-
-수동 설정이 필요하면 다음 순서로 진행합니다.
-
-```bash
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements-dev.txt
-
-cd frontend
-npm ci
-```
-
-## 개발 서버 실행
-
-백엔드:
-
-```bash
-source venv/bin/activate        # Windows: venv\Scripts\activate
-python backend_server.py --host 127.0.0.1 --port 8765
-```
-
-프론트엔드:
-
-```bash
-cd frontend
-npm run dev
-```
-
-브라우저에서 `http://localhost:5173`을 엽니다.
-
-Electron shell:
-
-```bash
-cd frontend
-npm run electron:dev
-```
-
-Vite 개발 서버를 Electron 창에 붙이려면 다음처럼 실행합니다.
-
-```bash
-ELECTRON_RENDERER_URL=http://localhost:5173 npm run electron:dev
-```
-
-## 빌드
-
-### Windows 배포 zip
-
-```bat
 build.bat
 ```
 
-빌드 단계:
+빌드 결과는 `frontend/release/` 아래 `.zip`으로 생성됩니다. 압축을 풀고 `OfficeWhere.exe`를 실행하면 됩니다.
 
-1. React/Vite renderer build
-2. Electron main/preload TypeScript build
-3. PyInstaller backend executable build
-4. `electron-builder` Windows x64 zip 생성
-
-최종 사용자는 Release zip을 압축 해제한 뒤 `OfficeWhere.exe`를 실행하면 됩니다.
-
-### macOS / Linux 검증 빌드
+### macOS / Linux (검증용)
 
 ```bash
-chmod +x build.sh
+chmod +x setup.sh build.sh
+./setup.sh
 ./build.sh
 ```
 
-Linux/macOS의 `build.sh`는 로컬 검증용입니다. Windows 배포 zip은 Windows 또는 GitHub Actions에서 생성합니다.
+`build.sh`는 로컬 검증용이며, 정식 Windows 배포 zip은 `build.bat`으로 생성합니다.
 
-## 검증
+## 성능 메모
 
-```bash
-source venv/bin/activate
-pytest -q
-
-cd frontend
-npm run build
-npm run build:electron
-```
-
-추가 수동 검증용 데모 문서:
-
-```bash
-python scripts/generate_demo_cases.py
-python scripts/run_demo_checks.py
-python scripts/run_perf_checks.py
-```
-
-## GitHub Release
-
-`.github/workflows/release.yml`은 태그가 push되면 Windows runner에서 앱을 빌드하고 Release asset을 업로드합니다.
-
-```bash
-git tag v0.1.4
-git push origin main v0.1.4
-```
-
-생성 asset:
-
-- `officewhere-vX.Y.Z-windows-x64.zip`
-- `officewhere-vX.Y.Z-windows-x64.sha256.txt`
+Excel 파일은 헤더 탐지 시 전체 시트를 먼저 메모리에 올리지 않고, read-only workbook 스트리밍으로 필요한 범위만 읽습니다. pandas는 앱 시작 시 바로 로드하지 않고 Excel 통합/내보내기처럼 실제 DataFrame 처리가 필요할 때 지연 로드합니다.
 
 ## 데이터 저장 위치
 
-OfficeWhere는 원본 문서를 DB에 복사하지 않고 파일 경로, 메타데이터, 검색 색인만 저장합니다.
+OfficeWhere는 원본 문서를 복사하지 않고 **파일 경로, 메타데이터, 검색 색인만** 저장합니다.
+원본 파일은 항상 원래 위치에 그대로 있습니다.
 
-Electron 앱으로 실행할 때 데이터베이스는 OS 앱 데이터 디렉터리 아래에 저장됩니다.
+데이터베이스는 OS 앱 데이터 디렉터리 아래에 저장됩니다.
 
 - Windows: `%APPDATA%\OfficeWhere\backend-data\data.db`
 - macOS: `~/Library/Application Support/OfficeWhere/backend-data/data.db`
 - Linux: `~/.config/OfficeWhere/backend-data/data.db`
 
-백엔드를 직접 실행하고 `--data-dir` / `ODJ_DATA_DIR`를 지정하지 않은 경우에는 `~/.officewhere/data.db`를 사용합니다.
+원본 파일을 이동하거나 삭제하면 해당 파일은 다시 등록해야 합니다.
 
-파일을 이동하거나 삭제하면 해당 파일은 다시 등록해야 합니다. portable zip을 삭제해도 위 앱 데이터 디렉터리는 OS에 남을 수 있습니다.
-
-Electron 앱의 **파일 관리 → 앱 데이터 관리**에서는 앱이 계산한 후보 ID만 main process로 전달해 다음 앱 소유 데이터만 삭제할 수 있습니다. 삭제 전 후보 경로와 “원본 문서는 삭제하지 않음” 안내를 확인하고, 삭제 후 앱을 재시작합니다.
-
-- Electron `userData/backend-data` DB·색인 데이터
-- Electron logs / crash dump / Chromium cache·localStorage·sessionStorage
-- 직접 backend 실행 시 남은 `~/.officewhere`
-
-사용자가 등록한 원본 문서 폴더, watched folder, `%APPDATA%`/Application Support 같은 상위 OS 앱 데이터 루트는 삭제 대상이 아닙니다.
-
-## 문제 해결
-
-| 증상 | 확인할 내용 |
-| --- | --- |
-| 개발 서버가 열리지 않음 | 백엔드가 `127.0.0.1:8765`에서 실행 중인지 확인 |
-| 포트 충돌 | 다른 프로세스가 8765 포트를 사용하는지 확인 |
-| 파일 선택창이 보이지 않음 | OS 창 뒤에 가려졌는지 확인하거나 경로를 직접 입력 |
-| Windows 실행 차단 | 코드 서명이 없는 내부 배포 zip이면 SmartScreen 경고가 나타날 수 있음 |
-| 빌드 실패 | `setup.bat` 또는 `setup.sh` 완료 후 다시 빌드 |
-
-## 관련 문서
-
-- `PLAN.md`: 현재 제품 범위와 릴리스 계획
-- `ARCHITECTURE.md`: 백엔드/프론트엔드 구조와 주요 설계 결정
-- `docs/electron-migration.md`: Electron 패키징 메모
-- `examples/README.md`: 데모 문서 생성 및 검증 방법
+앱을 완전히 정리하고 싶다면 **파일 관리 → 앱 데이터 관리**에서
+앱이 만든 DB·색인·캐시만 골라 삭제할 수 있습니다.
+사용자가 등록했던 원본 문서 폴더는 삭제 대상이 아닙니다.

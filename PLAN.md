@@ -92,6 +92,14 @@ OfficeWhere는 업무·수업·연구 과정에서 흩어진 Office 문서를 �
 - Word/PPT는 key 기반 표 모델이 아니라 문서 diff 엔진으로 처리한다.
 - 등록 시 파일 타입별 parser 설정을 저장하고 실행 시 재사용한다.
 
+
+### 2026-04-25: Excel 읽기 경로 스트리밍 최적화
+
+- `.xlsx` 파일 구조 검사와 표 추출을 `openpyxl` read-only workbook + `iter_rows()` 기반으로 바꿔, 헤더 탐지를 위해 전체 시트를 pandas로 먼저 읽지 않게 했다.
+- 헤더는 업무 양식 전제에 맞춰 상단 30행 안에서 찾고, 큰 표는 샘플 스캔 후 실제 worksheet bound를 `end_row`로 유지해 행이 잘리지 않게 했다.
+- pandas top-level import를 제거해 FastAPI backend 시작 시 pandas가 즉시 로드되지 않도록 했다. pandas는 Excel DataFrame 생성, JOIN, export 실행 시점에만 지연 import된다.
+- 회귀 테스트를 추가해 backend import 시 pandas 미로드, read-only workbook 사용, bounded scan 이후 큰 표 end_row 보존을 확인한다.
+
 ## 후속 개선 후보
 
 - 파일 시스템 watcher 또는 색인 캐시를 추가해 폴더 순회 자체를 더 줄이기

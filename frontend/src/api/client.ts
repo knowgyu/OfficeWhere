@@ -31,12 +31,6 @@ declare global {
 
   interface Window {
     officeDataJoiner?: OfficeDataJoinerBridge
-    pywebview?: {
-      api?: {
-        pickFolder?: () => Promise<FolderPickResponse & { error?: string }>
-        pickFile?: () => Promise<FilePickResponse & { error?: string }>
-      }
-    }
   }
 }
 
@@ -432,9 +426,6 @@ export interface LibraryGroupsResponse {
 const electronApi = () =>
   typeof window !== 'undefined' ? window.officeDataJoiner : undefined
 
-const pywebviewApi = () =>
-  typeof window !== 'undefined' ? window.pywebview?.api : undefined
-
 function desktopError(message: string): never {
   throw { response: { data: { detail: message } } }
 }
@@ -455,12 +446,6 @@ async function pickFileWithBestAvailableDialog() {
     return { data: { cancelled: false, file: inspected.data } }
   }
 
-  const pywebview = pywebviewApi()
-  if (pywebview?.pickFile) {
-    const data = await pywebview.pickFile()
-    if (data.error) desktopError(data.error)
-    return { data }
-  }
   return axios.post<FilePickResponse>(await apiPath('/api/files/pick'))
 }
 
@@ -472,12 +457,6 @@ async function pickFolderWithBestAvailableDialog() {
     return { data }
   }
 
-  const pywebview = pywebviewApi()
-  if (pywebview?.pickFolder) {
-    const data = await pywebview.pickFolder()
-    if (data.error) desktopError(data.error)
-    return { data }
-  }
   return axios.post<FolderPickResponse>(await apiPath('/api/files/pick-folder'))
 }
 

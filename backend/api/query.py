@@ -1,7 +1,6 @@
 import io
 import os
 
-import pandas as pd
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -86,6 +85,8 @@ def export_join(req: JoinRequest):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"JOIN 처리 중 오류가 발생했습니다: {exc}")
+
+    import pandas as pd
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:

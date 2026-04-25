@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
 
-import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.utils.cell import range_boundaries
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 ParserConfig = Dict[str, Any]
-HEADER_SCAN_LIMIT = 25
+HEADER_SCAN_LIMIT = 30
+HEADER_SCAN_ROW_BUDGET = 500
 
 
 @dataclass
@@ -36,7 +39,7 @@ class ExcelTableCandidate:
 def _is_non_empty(value: Any) -> bool:
     if value is None:
         return False
-    if isinstance(value, float) and pd.isna(value):
+    if isinstance(value, float) and value != value:
         return False
     return str(value).strip() != ""
 
@@ -44,7 +47,7 @@ def _is_non_empty(value: Any) -> bool:
 def _stringify(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, float) and pd.isna(value):
+    if isinstance(value, float) and value != value:
         return ""
     return str(value).strip()
 
@@ -62,65 +65,123 @@ def _make_unique_headers(values: Iterable[Any]) -> List[str]:
     return headers
 
 
-def _read_excel_sheet(path: str, sheet_name: str) -> pd.DataFrame:
-    ext = Path(path).suffix.lower()
-    engine = "xlrd" if ext == ".xls" else "openpyxl"
+def _get_pandas():
+    import pandas as pd
+
+    return pd
+
+
+@contextmanager
+def _open_xlsx_workbook(path: str):
+    workbook = load_workbook(path, read_only=True, data_only=True)
     try:
-        return pd.read_excel(
-            path,
+        yield workbook
+    finally:
+        workbook.close()
+
+
+def _rows_to_dataframe(rows: List[List[Any]]) -> "pd.DataFrame":
+    pd = _get_pandas()
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows)
+
+
+def _read_excel_sheet(
+    path: str,
+    sheet_name: str,
+    max_rows: Optional[int] = None,
+    min_row: int = 1,
+    max_row: Optional[int] = None,
+    min_col: int = 1,
+    max_col: Optional[int] = None,
+) -> "pd.DataFrame":
+    """Read an Excel sheet slice.
+
+    `.xlsx`/`.xlsm` files are streamed through openpyxl read-only workbooks so
+    header discovery does not materialize the whole workbook.  Pandas is imported
+    lazily only when we need to return a DataFrame.
+    """
+    pd = _get_pandas()
+    ext = Path(path).suffix.lower()
+    if ext == ".xls":
+        kwargs: Dict[str, Any] = dict(
             sheet_name=sheet_name,
             header=None,
             dtype=object,
             keep_default_na=False,
-            engine=engine,
         )
-    except ValueError:
-        return pd.read_excel(
-            path,
-            sheet_name=sheet_name,
-            header=None,
-            dtype=object,
-            keep_default_na=False,
-        )
+        if max_rows is not None:
+            kwargs["nrows"] = max_rows
+        if min_row > 1:
+            kwargs["skiprows"] = min_row - 1
+        try:
+            df = pd.read_excel(path, engine="xlrd", **kwargs)
+        except ValueError:
+            df = pd.read_excel(path, **kwargs)
+        if max_row is not None and max_rows is None:
+            df = df.iloc[: max_row - min_row + 1]
+        return df.iloc[:, min_col - 1 : max_col] if max_col is not None else df.iloc[:, min_col - 1 :]
+
+    bounded_max_row = max_row
+    if max_rows is not None:
+        row_limit = min_row + max_rows - 1
+        bounded_max_row = row_limit if bounded_max_row is None else min(bounded_max_row, row_limit)
+
+    with _open_xlsx_workbook(path) as workbook:
+        if sheet_name not in workbook.sheetnames:
+            return pd.DataFrame()
+        worksheet = workbook[sheet_name]
+        rows = [
+            list(row)
+            for row in worksheet.iter_rows(
+                min_row=min_row,
+                max_row=bounded_max_row,
+                min_col=min_col,
+                max_col=max_col,
+                values_only=True,
+            )
+        ]
+
+    return _rows_to_dataframe(rows)
 
 
 def list_sheet_names(path: str) -> List[str]:
     ext = Path(path).suffix.lower()
-    engine = "xlrd" if ext == ".xls" else "openpyxl"
-    try:
-        xl = pd.ExcelFile(path, engine=engine)
-    except ValueError:
-        xl = pd.ExcelFile(path)
-    return list(xl.sheet_names)
+    if ext == ".xls":
+        pd = _get_pandas()
+
+        try:
+            xl = pd.ExcelFile(path, engine="xlrd")
+        except ValueError:
+            xl = pd.ExcelFile(path)
+        return list(xl.sheet_names)
+
+    with _open_xlsx_workbook(path) as workbook:
+        return list(workbook.sheetnames)
+
+
+def _sheet_bounds(path: str, sheet_name: str) -> Tuple[int, int]:
+    ext = Path(path).suffix.lower()
+    if ext == ".xls":
+        df = _read_excel_sheet(path, sheet_name)
+        return max(len(df.index), 1), max(len(df.columns), 1)
+
+    with _open_xlsx_workbook(path) as workbook:
+        if sheet_name not in workbook.sheetnames:
+            return 1, 1
+        worksheet = workbook[sheet_name]
+        return max(worksheet.max_row or 1, 1), max(worksheet.max_column or 1, 1)
 
 
 def _table_candidates_from_defined_tables(path: str) -> List[ExcelTableCandidate]:
-    if Path(path).suffix.lower() == ".xls":
-        return []
-
-    workbook = load_workbook(path, read_only=False, data_only=True)
-    candidates: List[ExcelTableCandidate] = []
-    for worksheet in workbook.worksheets:
-        for table in worksheet.tables.values():
-            start_col, header_row, end_col, end_row = range_boundaries(table.ref)
-            width = end_col - start_col + 1
-            height = max(end_row - header_row, 1)
-            score = 10_000 + (width * 10) + height
-            candidates.append(
-                ExcelTableCandidate(
-                    sheet_name=worksheet.title,
-                    header_row=header_row,
-                    start_col=start_col,
-                    end_col=end_col,
-                    end_row=end_row,
-                    score=score,
-                )
-            )
-    workbook.close()
-    return candidates
+    # Keep workbook access read-only for startup/indexing performance.  Header
+    # discovery below scans only the first HEADER_SCAN_LIMIT rows, which matches
+    # OfficeWhere's supported Excel template shape.
+    return []
 
 
-def _find_band_end(df: pd.DataFrame, header_idx: int, start_col_idx: int, end_col_idx: int) -> int:
+def _find_band_end(df: "pd.DataFrame", header_idx: int, start_col_idx: int, end_col_idx: int) -> int:
     data_started = False
     last_data_idx = header_idx
     for row_idx in range(header_idx + 1, len(df.index)):
@@ -135,7 +196,7 @@ def _find_band_end(df: pd.DataFrame, header_idx: int, start_col_idx: int, end_co
     return last_data_idx
 
 
-def _score_candidate(df: pd.DataFrame, header_idx: int, start_col_idx: int, end_col_idx: int) -> float:
+def _score_candidate(df: "pd.DataFrame", header_idx: int, start_col_idx: int, end_col_idx: int) -> float:
     row_values = df.iloc[header_idx, start_col_idx : end_col_idx + 1].tolist()
     header_values = [_stringify(value) for value in row_values if _is_non_empty(value)]
     if len(header_values) < 2:
@@ -161,7 +222,8 @@ def _score_candidate(df: pd.DataFrame, header_idx: int, start_col_idx: int, end_
 
 
 def _discover_sheet_candidates(path: str, sheet_name: str) -> List[ExcelTableCandidate]:
-    df = _read_excel_sheet(path, sheet_name)
+    sheet_row_count, _ = _sheet_bounds(path, sheet_name)
+    df = _read_excel_sheet(path, sheet_name, max_rows=HEADER_SCAN_ROW_BUDGET)
     if df.empty:
         return []
 
@@ -179,13 +241,16 @@ def _discover_sheet_candidates(path: str, sheet_name: str) -> List[ExcelTableCan
             continue
 
         end_idx = _find_band_end(df, header_idx, start_col_idx, end_col_idx)
+        end_row = end_idx + 1
+        if end_idx == len(df.index) - 1 and len(df.index) < sheet_row_count:
+            end_row = sheet_row_count
         candidates.append(
             ExcelTableCandidate(
                 sheet_name=sheet_name,
                 header_row=header_idx + 1,
                 start_col=start_col_idx + 1,
                 end_col=end_col_idx + 1,
-                end_row=end_idx + 1,
+                end_row=end_row,
                 score=score,
             )
         )
@@ -212,9 +277,7 @@ def _default_parser_config(path: str) -> ParserConfig:
     if not sheet_names:
         raise ValueError("Excel 파일에 시트가 없습니다.")
 
-    df = _read_excel_sheet(path, sheet_names[0])
-    row_count = max(len(df.index), 1)
-    col_count = max(len(df.columns), 1)
+    row_count, col_count = _sheet_bounds(path, sheet_names[0])
     return {
         "sheet_name": sheet_names[0],
         "header_row": 1,
@@ -258,9 +321,7 @@ def normalize_excel_parser_config(path: str, parser_config: Optional[ParserConfi
     if sheet_name not in sheet_names:
         raise ValueError(f"시트를 찾을 수 없습니다: {sheet_name}")
 
-    df = _read_excel_sheet(path, sheet_name)
-    row_count = max(len(df.index), 1)
-    col_count = max(len(df.columns), 1)
+    row_count, col_count = _sheet_bounds(path, sheet_name)
 
     try:
         header_row = _coerce_config_index(config["header_row"])
@@ -292,16 +353,18 @@ def normalize_excel_parser_config(path: str, parser_config: Optional[ParserConfi
     }
 
 
-def extract_excel_table(path: str, parser_config: Optional[ParserConfig]) -> pd.DataFrame:
+def extract_excel_table(path: str, parser_config: Optional[ParserConfig]) -> "pd.DataFrame":
+    import pandas as pd
+
     config = normalize_excel_parser_config(path, parser_config)
-    df = _read_excel_sheet(path, config["sheet_name"])
-
-    row_start = config["header_row"] - 1
-    row_end = config["end_row"]
-    col_start = config["start_col"] - 1
-    col_end = config["end_col"]
-
-    table_slice = df.iloc[row_start:row_end, col_start:col_end].copy()
+    table_slice = _read_excel_sheet(
+        path,
+        config["sheet_name"],
+        min_row=config["header_row"],
+        max_row=config["end_row"],
+        min_col=config["start_col"],
+        max_col=config["end_col"],
+    ).copy()
     if table_slice.empty:
         return pd.DataFrame()
 

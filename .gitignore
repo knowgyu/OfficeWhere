@@ -63,5 +63,15 @@ logs/
 CLAUDE.md
 AGENTS.md
 
+# Internal docs (not for end users)
+ARCHITECTURE.md
+PLAN.md
+
+# Generated demo inputs (regenerate via scripts/generate_demo_cases.py)
+examples/demo_cases/
+
+# Codex local marker
+.codex
+
 .omx/
 .pytest_cache/

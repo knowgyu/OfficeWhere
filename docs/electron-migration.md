@@ -66,7 +66,3 @@ build.bat
 rmdir /s /q "%LOCALAPPDATA%\electron-builder\Cache\winCodeSign"
 build.bat
 ```
-
-## Legacy 경로
-
-기존 `launcher.py`와 `office_data_joiner.spec`는 브라우저 기반 fallback 빌드용으로 남긴다. 기본 배포는 Electron zip이다.

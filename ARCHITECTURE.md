@@ -68,8 +68,11 @@ backend/
 ### Excel
 
 - 등록 시 표 후보 영역을 탐지한다.
+- `.xlsx` 계열은 `openpyxl.load_workbook(read_only=True, data_only=True)`로 열고 `iter_rows()`로 필요한 행 범위만 스트리밍한다.
+- 헤더 후보는 상단 30행(`HEADER_SCAN_LIMIT`) 안에서 찾고, 후보 점수 계산은 제한된 샘플 행(`HEADER_SCAN_ROW_BUDGET`)만 사용한다. 스캔이 샘플 끝까지 이어지는 경우 실제 worksheet row bound를 `end_row`로 보존해 큰 표가 잘리지 않게 한다.
 - 선택된 `sheet_name`, `header_row`, `start_col`, `end_col`, `end_row`를 저장한다.
-- JOIN과 정합성 검사 시 같은 설정으로 표를 다시 읽는다.
+- JOIN과 정합성 검사 시 같은 설정으로 표를 다시 읽되, 저장된 표 범위만 DataFrame으로 만든다.
+- pandas는 backend 시작/라우터 import 시점에 로드하지 않고, Excel 표 추출·JOIN·export가 실제 실행될 때 지연 import한다.
 - 정합성 검사는 값 차이, key 누락, 컬럼 누락을 반환한다.
 
 ### Word

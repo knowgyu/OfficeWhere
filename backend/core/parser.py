@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from .excel_analysis import extract_excel_table, inspect_excel_file
 from .ppt_analysis import inspect_ppt_file
@@ -28,14 +29,14 @@ def get_file_type(path: str) -> str:
     return mapping.get(ext, "Unknown")
 
 
-def parse_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+def parse_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> "pd.DataFrame":
     try:
         return extract_excel_table(path, parser_config)
     except Exception as exc:
         raise ValueError(f"Excel 파일 파싱 실패: {exc}") from exc
 
 
-def parse_file(path: str, parser_config: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+def parse_file(path: str, parser_config: Optional[Dict[str, Any]] = None) -> "pd.DataFrame":
     if not os.path.exists(path):
         raise FileNotFoundError(f"파일을 찾을 수 없습니다: {path}")
     ext = Path(path).suffix.lower()

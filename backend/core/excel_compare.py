@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Set
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from .excel_analysis import extract_excel_table
 from .normalizer import normalize_key, values_equal
 
 
+def _is_missing(value: Any) -> bool:
+    return isinstance(value, float) and value != value
+
+
 def _distinct_non_empty(values: List[Any]) -> List[str]:
     distinct: List[str] = []
     for value in values:
-        if pd.isna(value):
+        if _is_missing(value):
             continue
         text = str(value).strip()
         if not text:
@@ -41,7 +46,7 @@ def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
             )
 
         normalized_keys = df[key_column].astype(str).apply(normalize_key)
-        key_rows: Dict[str, pd.DataFrame] = {}
+        key_rows: Dict[str, "pd.DataFrame"] = {}
         for key in sorted(set(normalized_keys.tolist())):
             if not key:
                 continue

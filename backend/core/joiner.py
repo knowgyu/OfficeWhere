@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from .excel_analysis import extract_excel_table
 from .normalizer import normalize_key
 
 
-def join_files(file_specs: List[Dict[str, Any]], join_type: str = "outer") -> pd.DataFrame:
+def join_files(file_specs: List[Dict[str, Any]], join_type: str = "outer") -> "pd.DataFrame":
+    import pandas as pd
+
     if not file_specs:
         raise ValueError("JOIN할 파일이 선택되지 않았습니다.")
 
