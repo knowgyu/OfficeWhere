@@ -34,14 +34,20 @@ def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] 
     df = extract_excel_table(path, config)
     chunks: List[Dict[str, str]] = []
 
-    header_text = " ".join(column for column in df.columns if str(column).strip())
-    if header_text:
-        sheet_name = config["sheet_name"]
-        chunks.append({"location": f"{sheet_name} | 컬럼 헤더", "content": header_text})
-
     start_col = int(config["start_col"])
     header_row = int(config["header_row"])
     sheet_name = config["sheet_name"]
+    for column_index, column in enumerate(df.columns):
+        text = str(column).strip()
+        if text:
+            column_letter = _excel_column_letter(start_col + column_index)
+            chunks.append(
+                {
+                    "location": f"{sheet_name} 시트 | {header_row}행 {column_letter}열",
+                    "content": text,
+                }
+            )
+
     for dataframe_index, row in df.iterrows():
         excel_row = header_row + 1 + int(dataframe_index)
         for column_index, (column, value) in enumerate(row.items()):
@@ -50,7 +56,7 @@ def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] 
                 column_letter = _excel_column_letter(start_col + column_index)
                 chunks.append(
                     {
-                        "location": f"{sheet_name} | {excel_row}행 {column_letter}열",
+                        "location": f"{sheet_name} 시트 | {excel_row}행 {column_letter}열",
                         "content": text,
                     }
                 )

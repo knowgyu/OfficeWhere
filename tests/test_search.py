@@ -45,7 +45,20 @@ def test_search_returns_location(tmp_path):
 
     results = search("알파")
     assert len(results) > 0
-    assert results[0]["location"] == "Sheet1 | 2행 A열"
+    assert results[0]["location"] == "Sheet1 시트 | 2행 A열"
+
+
+def test_search_excel_header_uses_cell_location(tmp_path):
+    xlsx = str(tmp_path / "header.xlsx")
+    _make_excel(xlsx, {"항목": ["알파"], "담당자": ["홍길동"]})
+
+    file_id = register_file(xlsx, "header.xlsx", "xlsx", "항목", 2)
+    index_file(file_id, xlsx)
+
+    results = search("담당자")
+
+    assert len(results) > 0
+    assert results[0]["location"] == "Sheet1 시트 | 1행 B열"
 
 
 def test_search_no_results_for_missing_term(tmp_path):
