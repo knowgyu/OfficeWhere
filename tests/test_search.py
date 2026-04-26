@@ -5,7 +5,7 @@ import tempfile
 import pandas as pd
 import pytest
 
-from backend.core.indexer import index_file, search, _sanitize_fts_query
+from backend.core.indexer import index_file, inspect_and_chunk, search, _sanitize_fts_query
 from backend.database import init_db, register_file, delete_file, search_chunks
 
 
@@ -59,6 +59,50 @@ def test_search_excel_header_uses_cell_location(tmp_path):
 
     assert len(results) > 0
     assert results[0]["location"] == "Sheet1 시트 | 1행 B열"
+
+
+def test_index_excel_uses_used_range_when_parser_config_is_stale(tmp_path):
+    xlsx = str(tmp_path / "stale.xlsx")
+    _make_excel(xlsx, {"항목": ["알파"], "새열": ["범위밖키워드"]})
+    stale_parser_config = {
+        "sheet_name": "Sheet1",
+        "header_row": 1,
+        "start_col": 1,
+        "end_col": 99,
+        "end_row": 99,
+    }
+
+    file_id = register_file(
+        xlsx,
+        "stale.xlsx",
+        "Excel",
+        "항목",
+        1,
+        parser_config=stale_parser_config,
+    )
+    chunk_count = index_file(file_id, xlsx, parser_config=stale_parser_config)
+
+    assert chunk_count > 0
+    results = search("범위밖키워드")
+    assert len(results) == 1
+    assert results[0]["location"] == "Sheet1 시트 | 2행 B열"
+
+
+def test_inspect_and_chunk_recovers_stale_excel_parser_config(tmp_path):
+    xlsx = str(tmp_path / "recover.xlsx")
+    _make_excel(xlsx, {"항목": ["알파"], "새열": ["복구키워드"]})
+    stale_parser_config = {
+        "sheet_name": "Sheet1",
+        "header_row": 1,
+        "start_col": 1,
+        "end_col": 99,
+        "end_row": 99,
+    }
+
+    info, chunks = inspect_and_chunk(xlsx, parser_config=stale_parser_config)
+
+    assert info["parser_config"]["end_col"] == 2
+    assert any(chunk["content"] == "복구키워드" for chunk in chunks)
 
 
 def test_search_no_results_for_missing_term(tmp_path):

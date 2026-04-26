@@ -4,11 +4,13 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 from .excel_analysis import extract_excel_used_range
 from .excel_compare import _column_letter, _stringify_cell
-from .normalizer import normalize_key
+from .normalizer import normalize_key, values_equal
 
 
 FULL_GRID_CELL_LIMIT = 12_000
 TOP_LEFT_CELL_LIMIT = 12_000
+DISPLAY_ROW_MARGIN = 2
+DISPLAY_COL_MARGIN = 2
 LOCAL_ROW_BUFFER = 20
 LOCAL_COL_BUFFER = 20
 CLUSTER_ROW_GAP = 80
@@ -48,6 +50,16 @@ def _normalize_change_type(change_type: str) -> str:
         return "removed"
     if "add" in text or "insert" in text or "추가" in text:
         return "added"
+    return "changed"
+
+
+def _diff_change_type(before: str, after: str) -> str:
+    before_empty = not before.strip()
+    after_empty = not after.strip()
+    if before_empty and not after_empty:
+        return "added"
+    if not before_empty and after_empty:
+        return "removed"
     return "changed"
 
 
@@ -162,17 +174,33 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         raise ValueError("표로 보기는 최소 2개 Excel 파일이 필요합니다.")
 
     latest_info = file_infos[0]
-    latest_df, parser_config = extract_excel_used_range(latest_info["path"])
+    used_ranges = []
+    for info in file_infos:
+        dataframe, parser = extract_excel_used_range(info["path"])
+        used_ranges.append((info, dataframe, parser))
+    latest_df = used_ranges[0][1]
+    parser_config = used_ranges[0][2]
     key_column = ""
 
-    columns = [str(column) for column in latest_df.columns.tolist()]
+    used_row_count = max((len(df.index) for _info, df, _config in used_ranges), default=0)
+    used_column_count = max((len(df.columns) for _info, df, _config in used_ranges), default=0)
+    row_count = used_row_count + DISPLAY_ROW_MARGIN if used_row_count > 0 else 0
+    column_count = used_column_count + DISPLAY_COL_MARGIN if used_column_count > 0 else 0
+    columns = [_column_letter(index) for index in range(1, column_count + 1)]
     column_indexes = {column: index for index, column in enumerate(columns)}
     key_col_index = 0
-    latest_rows = list(latest_df.iterrows())
     key_to_row_index: Dict[str, int] = {
-        normalize_key(str(int(source_index) + 1)): display_index
-        for display_index, (source_index, _row) in enumerate(latest_rows)
+        normalize_key(str(row_index + 1)): row_index
+        for row_index in range(row_count)
     }
+
+    def value_at(dataframe: Any, row_index: int, column_index: int) -> str:
+        if row_index >= len(dataframe.index) or column_index >= len(dataframe.columns):
+            return ""
+        return _stringify_cell(dataframe.iat[row_index, column_index])
+
+    def latest_value(row_index: int, column_index: int) -> str:
+        return value_at(latest_df, row_index, column_index)
 
     histories_by_position: Dict[Position, List[Dict[str, Any]]] = {}
     highlight_by_position: Dict[Position, str] = {}
@@ -203,8 +231,42 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         if existing is None or _highlight_rank(change_type) > _highlight_rank(existing):
             highlight_by_position[position] = change_type
 
+    if row_count * column_count <= FULL_GRID_CELL_LIMIT:
+        for newer_index in range(0, len(used_ranges) - 1):
+            newer_info, newer_df, _newer_config = used_ranges[newer_index]
+            older_info, older_df, _older_config = used_ranges[newer_index + 1]
+            history_label = f"{older_info['name']} → {newer_info['name']}"
+
+            for row_index in range(row_count):
+                for column_index in range(column_count):
+                    before = value_at(older_df, row_index, column_index)
+                    after = value_at(newer_df, row_index, column_index)
+                    if values_equal(before, after):
+                        continue
+
+                    position = (row_index, column_index)
+                    change_type = _diff_change_type(before, after)
+                    existing_histories = histories_by_position.setdefault(position, [])
+                    if not any(history.get("label") == history_label for history in existing_histories):
+                        existing_histories.append(
+                            {
+                                "change_type": change_type,
+                                "from_file_id": older_info["id"],
+                                "from_file_name": older_info["name"],
+                                "to_file_id": newer_info["id"],
+                                "to_file_name": newer_info["name"],
+                                "before": before,
+                                "after": after,
+                                "label": history_label,
+                            }
+                        )
+
+                    existing = highlight_by_position.get(position)
+                    if existing is None or _highlight_rank(change_type) > _highlight_rank(existing):
+                        highlight_by_position[position] = change_type
+
     focus_positions = list(histories_by_position.keys())
-    ranges, partial = _choose_ranges(focus_positions, len(latest_rows), len(columns))
+    ranges, partial = _choose_ranges(focus_positions, row_count, column_count)
     sections = []
 
     for section_index, (row_start, row_end, col_start, col_end) in enumerate(ranges, start=1):
@@ -227,8 +289,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
 
         rows = []
         for row_index in range(row_start, row_end + 1):
-            source_index, row = latest_rows[row_index]
-            row_number = int(source_index) + 1
+            row_number = row_index + 1
             cells = []
             for column_index in column_range:
                 column_name = columns[column_index]
@@ -240,7 +301,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                         "column_index": column_index,
                         "column_letter": _column_letter(column_index + 1),
                         "column_name": column_name,
-                        "value": _stringify_cell(row[column_name]),
+                        "value": latest_value(row_index, column_index),
                         "highlight": highlight_by_position.get(position),
                         "histories": histories_by_position.get(position, []),
                     }
@@ -249,7 +310,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                 {
                     "row_index": row_index,
                     "row_number": row_number,
-                    "key_value": _stringify_cell(row[columns[key_col_index]]) if columns else "",
+                    "key_value": latest_value(row_index, key_col_index) if columns else "",
                     "cells": cells,
                 }
             )
@@ -263,9 +324,9 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         if partial and section_focus_count:
             title = f"변경 구간 {section_index} · 변경 셀 {section_focus_count}개 포함"
         description = (
-            "표가 작아 전체 범위를 표시합니다."
+            "표가 작아 전체 사용 범위와 여유 2행/열을 표시합니다."
             if not partial
-            else "큰 표라 변경 셀 주변 범위만 표시합니다. 기준 컬럼은 함께 보여줍니다."
+            else "변경 셀을 중심으로 필요한 범위만 표시합니다. 기준 컬럼은 함께 보여줍니다."
         )
         sections.append(
             {
@@ -287,8 +348,8 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
             "file_id": latest_info["id"],
             "file_name": latest_info["name"],
         },
-        "row_count": len(latest_rows),
-        "column_count": len(columns),
+        "row_count": row_count,
+        "column_count": column_count,
         "key_column": key_column,
         "sheet_name": str(parser_config["sheet_name"]),
         "partial": partial,

@@ -447,3 +447,39 @@ def inspect_excel_file(path: str, parser_config: Optional[ParserConfig] = None) 
         "columns": columns,
         "sample": sample,
     }
+
+
+def _is_parser_config_validation_error(exc: Exception) -> bool:
+    message = str(exc)
+    if "parser_config" not in message:
+        return False
+    return any(
+        marker in message
+        for marker in (
+            "범위",
+            "정수",
+            "필요",
+            "시트를 찾을 수 없습니다",
+            "non-integer",
+            "invalid",
+        )
+    )
+
+
+def inspect_excel_file_with_recovery(
+    path: str,
+    parser_config: Optional[ParserConfig] = None,
+) -> Dict[str, Any]:
+    """Inspect Excel integration metadata, recovering stale saved ranges.
+
+    `parser_config` is integration metadata, not a requirement for search or
+    version review.  When a saved config points outside the current sheet (or is
+    otherwise invalid), fall back to fresh table detection so rescans/previews do
+    not fail just because the old integration range became stale.
+    """
+    try:
+        return inspect_excel_file(path, parser_config=parser_config)
+    except ValueError as exc:
+        if parser_config and _is_parser_config_validation_error(exc):
+            return inspect_excel_file(path, parser_config=None)
+        raise

@@ -15,7 +15,7 @@ from ..database import (
     set_setting,
     update_file_mtime,
 )
-from .excel_analysis import extract_excel_table, inspect_excel_file
+from .excel_analysis import extract_excel_used_range, inspect_excel_file_with_recovery
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_file
 from .text_analysis import extract_text_blocks, inspect_text_file
@@ -28,50 +28,30 @@ _scheduler_thread: threading.Thread | None = None
 _MAX_WORKERS = get_worker_count()
 
 
-def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
-    inspection = inspect_excel_file(path, parser_config=parser_config)
-    config = inspection["parser_config"]
-    df = extract_excel_table(path, config)
+def _excel_used_range_chunks(path: str) -> List[Dict[str, str]]:
+    df, config = extract_excel_used_range(path)
     chunks: List[Dict[str, str]] = []
 
-    start_col = int(config["start_col"])
-    header_row = int(config["header_row"])
     sheet_name = config["sheet_name"]
-    for column_index, column in enumerate(df.columns):
-        text = str(column).strip()
-        if text:
-            column_letter = _excel_column_letter(start_col + column_index)
-            chunks.append(
-                {
-                    "location": f"{sheet_name} 시트 | {header_row}행 {column_letter}열",
-                    "content": text,
-                }
-            )
-
     for dataframe_index, row in df.iterrows():
-        excel_row = header_row + 1 + int(dataframe_index)
-        for column_index, (column, value) in enumerate(row.items()):
+        excel_row = int(dataframe_index) + 1
+        for column, value in row.items():
             text = str(value).strip()
             if text:
-                column_letter = _excel_column_letter(start_col + column_index)
                 chunks.append(
                     {
-                        "location": f"{sheet_name} 시트 | {excel_row}행 {column_letter}열",
+                        "location": f"{sheet_name} 시트 | {excel_row}행 {column}열",
                         "content": text,
                     }
                 )
 
+    return chunks
+
+
+def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
+    inspection = inspect_excel_file_with_recovery(path, parser_config=parser_config)
+    chunks = _excel_used_range_chunks(path)
     return inspection, chunks
-
-
-def _excel_column_letter(index: int) -> str:
-    if index < 1:
-        return ""
-    letters = ""
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        letters = chr(65 + remainder) + letters
-    return letters
 
 
 def _inspect_and_chunk_word(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
@@ -131,7 +111,7 @@ def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None)
 def index_file(file_id: int, path: str, parser_config: Optional[Dict[str, Any]] = None) -> int:
     ext = Path(path).suffix.lower()
     if ext in (".xlsx", ".xls"):
-        _, chunks = _inspect_and_chunk_excel(path, parser_config=parser_config)
+        chunks = _excel_used_range_chunks(path)
     elif ext == ".docx":
         _, chunks = _inspect_and_chunk_word(path)
     elif ext == ".pptx":

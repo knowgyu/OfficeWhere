@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     import pandas as pd
 
-from .excel_analysis import extract_excel_table, inspect_excel_file
+from .excel_analysis import extract_excel_table, inspect_excel_file_with_recovery
 from .ppt_analysis import inspect_ppt_file
 from .text_analysis import inspect_text_file
 from .word_analysis import inspect_word_file
@@ -53,7 +53,7 @@ def get_file_schema(path: str, parser_config: Optional[Dict[str, Any]] = None) -
 
     file_type = get_file_type(path)
     if file_type == "Excel":
-        return inspect_excel_file(path, parser_config=parser_config)
+        return inspect_excel_file_with_recovery(path, parser_config=parser_config)
     if file_type == "Word":
         return inspect_word_file(path)
     if file_type == "PowerPoint":

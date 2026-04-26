@@ -1,6 +1,12 @@
 from backend.core.library import save_library_settings
-from backend.database import init_db
+from backend.database import get_all_files, init_db, register_file
 from backend.models.schemas import LibrarySettings
+
+
+def _write_excel(path, data: dict):
+    import pandas as pd
+
+    pd.DataFrame(data).to_excel(path, index=False)
 
 
 def test_library_settings_interval_is_floored_and_minimum(tmp_path, monkeypatch):
@@ -97,3 +103,55 @@ def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch,
     assert result.error_code == "parser_config_out_of_range"
     assert result.error_hint
     assert result.diagnostic_id in caplog.text
+
+
+def test_rescan_excel_refreshes_parser_config_and_indexes_used_range(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from backend.core import library
+    from backend.core.indexer import search
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    target = tmp_path / "budget.xlsx"
+    _write_excel(target, {"ID": ["A"], "담당자": ["Kim"]})
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    first = library.rescan_library()
+    assert first.failed == 0
+    assert first.registered == 1
+    first_row = get_all_files()[0]
+    assert first_row["parser_config"]["end_col"] == 2
+
+    stale_parser_config = {
+        "sheet_name": "Sheet1",
+        "header_row": 1,
+        "start_col": 1,
+        "end_col": 99,
+        "end_row": 99,
+    }
+    register_file(str(target), target.name, "Excel", "ID", 99, parser_config=stale_parser_config)
+
+    repaired = library.rescan_library()
+
+    assert repaired.failed == 0
+    assert repaired.updated == 1
+    repaired_row = get_all_files()[0]
+    assert repaired_row["parser_config"]["end_col"] == 2
+
+    _write_excel(target, {"ID": ["A"], "담당자": ["Kim"], "새열": ["새값"]})
+    next_mtime = time.time() + 3
+    os.utime(target, (next_mtime, next_mtime))
+
+    second = library.rescan_library()
+
+    assert second.failed == 0
+    assert second.updated == 1
+    updated_row = get_all_files()[0]
+    assert updated_row["parser_config"]["end_col"] == 3
+    assert search("새값")[0]["location"] == "Sheet1 시트 | 2행 C열"

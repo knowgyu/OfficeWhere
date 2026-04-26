@@ -378,11 +378,11 @@ def test_excel_diff_grid_returns_full_small_latest_sheet_without_parser_config(t
     )
 
     assert result["partial"] is False
-    assert result["row_count"] == 3
-    assert result["column_count"] == 3
+    assert result["row_count"] == 5
+    assert result["column_count"] == 5
     section = result["sections"][0]
     assert section["row_start"] == 1
-    assert section["row_end"] == 3
+    assert section["row_end"] == 5
     highlighted = [
         cell
         for row in section["rows"]
@@ -395,6 +395,163 @@ def test_excel_diff_grid_returns_full_small_latest_sheet_without_parser_config(t
     assert highlighted[0]["row_number"] == 3
     assert highlighted[0]["value"] == "250"
     assert highlighted[0]["histories"][0]["before"] == "200"
+
+
+def test_excel_diff_grid_uses_largest_compared_range_for_removed_cells(tmp_path):
+    latest = tmp_path / "smaller-latest.xlsx"
+    previous = tmp_path / "larger-previous.xlsx"
+    _write_dataframe_excel(latest, {"ID": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
+    _write_dataframe_excel(
+        previous,
+        {
+            "ID": ["A", "B", "C", "D"],
+            "담당자": ["Kim", "Lee", "Park", "Choi"],
+            "예산": ["100", "200", "300", "400"],
+            "상태": ["진행", "완료", "보류", "종료"],
+            "비고": ["", "", "", "삭제될 값"],
+        },
+    )
+
+    result = build_excel_diff_grid(
+        [
+            {
+                "id": 2,
+                "path": str(latest),
+                "name": "smaller-latest.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": _make_parser_config(columns=3, rows=2),
+            },
+            {
+                "id": 1,
+                "path": str(previous),
+                "name": "larger-previous.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": _make_parser_config(columns=5, rows=4),
+            },
+        ],
+        [
+            {
+                "key": "5",
+                "column": "E",
+                "change_type": "removed",
+                "histories": [
+                    {
+                        "change_type": "removed",
+                        "from_file_id": 1,
+                        "from_file_name": "larger-previous.xlsx",
+                        "to_file_id": 2,
+                        "to_file_name": "smaller-latest.xlsx",
+                        "before": "삭제될 값",
+                        "after": "",
+                        "label": "larger-previous.xlsx → smaller-latest.xlsx",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert result["row_count"] == 7
+    assert result["column_count"] == 7
+    assert result["omitted_focus_count"] == 0
+    highlighted = [
+        cell
+        for row in result["sections"][0]["rows"]
+        for cell in row["cells"]
+        if cell["highlight"] == "removed" and cell["row_number"] == 5 and cell["column_letter"] == "E"
+    ]
+    assert len(highlighted) == 1
+    assert highlighted[0]["row_number"] == 5
+    assert highlighted[0]["column_letter"] == "E"
+    assert highlighted[0]["value"] == ""
+    assert highlighted[0]["histories"][0]["before"] == "삭제될 값"
+
+
+def test_excel_diff_grid_shows_small_compared_used_range_with_margin(tmp_path):
+    latest = tmp_path / "dirty-latest.xlsx"
+    previous = tmp_path / "dirty-previous.xlsx"
+    for path, value in [(latest, "변경 후"), (previous, "변경 전")]:
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Sheet1"
+        worksheet["A1"] = "ID"
+        worksheet["B1"] = "값"
+        worksheet["A2"] = "A"
+        worksheet["B2"] = value
+        # Even when the focus list is short/truncated, 표로 보기 should use the
+        # compared files' full used range plus a small visual margin.
+        if path == previous:
+            worksheet["AD50"] = "삭제될 먼 위치 값"
+        workbook.save(path)
+
+    result = build_excel_diff_grid(
+        [
+            {
+                "id": 2,
+                "path": str(latest),
+                "name": "dirty-latest.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": {},
+            },
+            {
+                "id": 1,
+                "path": str(previous),
+                "name": "dirty-previous.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": {},
+            },
+        ],
+        [
+            {
+                "key": "2",
+                "column": "B",
+                "change_type": "changed",
+                "histories": [
+                    {
+                        "change_type": "changed",
+                        "from_file_id": 1,
+                        "from_file_name": "dirty-previous.xlsx",
+                        "to_file_id": 2,
+                        "to_file_name": "dirty-latest.xlsx",
+                        "before": "변경 전",
+                        "after": "변경 후",
+                        "label": "dirty-previous.xlsx → dirty-latest.xlsx",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert result["row_count"] == 52
+    assert result["column_count"] == 32
+    assert result["partial"] is False
+    section = result["sections"][0]
+    assert section["row_start"] == 1
+    assert section["row_end"] == 52
+    assert section["col_start"] == 1
+    assert section["col_end"] == 32
+    highlighted = [
+        cell
+        for row in section["rows"]
+        for cell in row["cells"]
+        if cell["highlight"] == "changed"
+    ]
+    assert len(highlighted) == 1
+    assert highlighted[0]["row_number"] == 2
+    assert highlighted[0]["column_letter"] == "B"
+    assert highlighted[0]["value"] == "변경 후"
+    removed = [
+        cell
+        for row in section["rows"]
+        for cell in row["cells"]
+        if cell["highlight"] == "removed" and cell["row_number"] == 50 and cell["column_letter"] == "AD"
+    ]
+    assert len(removed) == 1
+    assert removed[0]["value"] == ""
+    assert removed[0]["histories"][0]["before"] == "삭제될 먼 위치 값"
 
 
 def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):

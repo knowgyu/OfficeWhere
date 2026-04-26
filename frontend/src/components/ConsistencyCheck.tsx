@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   CheckResponse,
@@ -137,7 +137,12 @@ const isEmptyExcelValue = (value: string) => {
 }
 
 const excelConflictText = (conflict?: ExcelCheckIssue['conflicts'][number]) =>
-  conflict?.values.join(' | ') || '(빈 값)'
+  conflict?.values.join(' | ') || ''
+
+const displayExcelGridValue = (value?: string | null) => {
+  const text = value ?? ''
+  return text === '(빈 값)' ? '' : text
+}
 
 function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridFocus[] {
   const focusMap = new Map<string, ExcelDiffGridFocus>()
@@ -182,8 +187,8 @@ function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridF
               from_file_name: transition.fromFile.name,
               to_file_id: transition.toFile.id,
               to_file_name: transition.toFile.name,
-              before: changeType === 'added' ? '(빈 값)' : value,
-              after: changeType === 'added' ? value : '(빈 값)',
+              before: changeType === 'added' ? '' : value,
+              after: changeType === 'added' ? value : '',
               label: `${transition.fromFile.name} → ${transition.toFile.name}`,
             })
           })
@@ -204,8 +209,8 @@ function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridF
                 from_file_name: transition.fromFile.name,
                 to_file_id: transition.toFile.id,
                 to_file_name: transition.toFile.name,
-                before: changeType === 'added' ? '(빈 값)' : value,
-                after: changeType === 'added' ? value : '(빈 값)',
+                before: changeType === 'added' ? '' : value,
+                after: changeType === 'added' ? value : '',
                 label: `${transition.fromFile.name} → ${transition.toFile.name}`,
               })
             })
@@ -1611,9 +1616,9 @@ function excelGridHighlightLabel(highlight: ExcelDiffHighlight | null) {
 
 function excelGridCellTitle(cell: ExcelDiffGridCell) {
   const location = `${cell.row_number}행 ${cell.column_letter}열`
-  if (cell.histories.length === 0) return `${location} · ${cell.value || '(빈 값)'}`
+  if (cell.histories.length === 0) return `${location} · ${displayExcelGridValue(cell.value)}`
   const first = cell.histories[0]
-  return `${location} · ${excelGridHighlightLabel(cell.highlight)} · ${first.before || '(빈 값)'} → ${first.after || '(빈 값)'}`
+  return `${location} · ${excelGridHighlightLabel(cell.highlight)} · ${displayExcelGridValue(first.before)} → ${displayExcelGridValue(first.after)}`
 }
 
 function ExcelDiffGridModal({
@@ -1634,7 +1639,7 @@ function ExcelDiffGridModal({
       onClick={onClose}
     >
       <div
-        className="flex h-[94vh] min-h-[560px] w-[98vw] max-w-none flex-col overflow-hidden rounded-xl bg-[var(--md-sys-color-surface)] shadow-2xl border border-[var(--md-sys-color-outline-variant)]"
+        className="flex h-[90vh] min-h-[560px] w-[94vw] max-w-[1400px] flex-col overflow-hidden rounded-xl bg-[var(--md-sys-color-surface)] shadow-2xl border border-[var(--md-sys-color-outline-variant)]"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] px-5 py-4">
@@ -1642,7 +1647,7 @@ function ExcelDiffGridModal({
             <div className="flex items-center gap-2 flex-wrap">
               <Icon name="table_chart" size={22} className="text-[var(--md-sys-color-primary)]" />
               <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 표로 보기</p>
-              <Badge tone="neutral">최신본 기준</Badge>
+              <Badge tone="neutral">전체 변경 범위 기준</Badge>
             </div>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate mt-1">
               {modal.detail.base_name}
@@ -1658,7 +1663,7 @@ function ExcelDiffGridModal({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 space-y-3">
           {modal.loading ? (
             <div className="flex items-center justify-center gap-2 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
               <Spinner size={20} /> Excel 표 범위를 계산하는 중…
@@ -1678,7 +1683,7 @@ function ExcelDiffGridModal({
                   onSelectCell={setSelectedCell}
                 />
               ))}
-              {selectedCell && <ExcelDiffGridCellDetail cell={selectedCell} />}
+              <ExcelDiffGridCellDetail cell={selectedCell} />
             </>
           ) : null}
         </div>
@@ -1691,7 +1696,7 @@ function ExcelDiffGridSummary({ data }: { data: ExcelDiffGridResponse }) {
   return (
     <div className="space-y-3">
       <div className="flex gap-2 flex-wrap">
-        <Chip label={`최신 파일 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
+        <Chip label={`최신 파일 값 기준 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
         <Chip label={`${data.sheet_name} 시트`} tone="neutral" as="span" />
         <Chip label={`${data.row_count}행 × ${data.column_count}열`} tone="neutral" as="span" />
         {data.key_column && <Chip label={`기준 컬럼 · ${data.key_column}`} tone="secondary" as="span" />}
@@ -1706,7 +1711,7 @@ function ExcelDiffGridSummary({ data }: { data: ExcelDiffGridResponse }) {
       {data.partial && (
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 type-body-sm text-amber-950">
           표가 커서 전체를 한 번에 표시하지 않고 변경 셀 주변 구간만 보여줍니다.
-          {data.omitted_focus_count > 0 && ` 최신 표에서 위치를 찾지 못한 변경 ${data.omitted_focus_count}건은 표에 표시하지 못했습니다.`}
+          {data.omitted_focus_count > 0 && ` 전체 변경 범위에서 위치를 찾지 못한 변경 ${data.omitted_focus_count}건은 표에 표시하지 못했습니다.`}
         </p>
       )}
     </div>
@@ -1722,10 +1727,21 @@ function ExcelDiffGridSectionView({
   selectedCell: ExcelDiffGridCell | null
   onSelectCell: (cell: ExcelDiffGridCell) => void
 }) {
-  const columnsByIndex = useMemo(
-    () => new Map(section.columns.map((column) => [column.index, column])),
-    [section.columns],
-  )
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.shiftKey) return
+      element.scrollLeft += event.deltaY
+      event.preventDefault()
+    }
+
+    element.addEventListener('wheel', handleWheel, { passive: false })
+    return () => element.removeEventListener('wheel', handleWheel)
+  }, [])
 
   return (
     <section className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden">
@@ -1736,30 +1752,21 @@ function ExcelDiffGridSectionView({
         </p>
       </div>
       <div
-        className="max-h-[68vh] overflow-auto overscroll-contain"
-        onWheel={(event) => {
-          if (!event.shiftKey) return
-          event.currentTarget.scrollLeft += event.deltaY
-          event.preventDefault()
-        }}
+        ref={scrollRef}
+        className="max-h-[52vh] overflow-auto overscroll-contain"
       >
-        <table className="min-w-max border-separate border-spacing-0 text-xs">
+        <table className="min-w-max table-fixed border-separate border-spacing-0 text-xs">
           <thead>
             <tr>
-              <th className="sticky left-0 top-0 z-30 min-w-[4rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm">
+              <th className="min-w-[4rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm">
                 행
               </th>
               {section.columns.map((column) => (
                 <th
                   key={column.index}
-                  className={`sticky top-0 z-20 min-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm ${
-                    column.is_key ? 'left-[4rem] z-30' : ''
-                  }`}
+                  className="w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm"
                 >
-                  <span className="font-mono">{column.letter}열</span>
-                  <span className="block text-[var(--md-sys-color-on-surface-variant)] truncate">
-                    {column.name}
-                  </span>
+                  <span className="font-mono">{column.letter}</span>
                 </th>
               ))}
             </tr>
@@ -1767,11 +1774,10 @@ function ExcelDiffGridSectionView({
           <tbody>
             {section.rows.map((row) => (
               <tr key={row.row_index}>
-                <th className="sticky left-0 z-10 border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 text-left font-mono">
+                <th className="border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 text-left font-mono">
                   {row.row_number}
                 </th>
                 {row.cells.map((cell) => {
-                  const columnMeta = columnsByIndex.get(cell.column_index)
                   const selected =
                     selectedCell?.row_index === cell.row_index &&
                     selectedCell?.column_index === cell.column_index
@@ -1779,19 +1785,12 @@ function ExcelDiffGridSectionView({
                     <td
                       key={`${cell.row_index}-${cell.column_index}`}
                       title={excelGridCellTitle(cell)}
-                      className={`max-w-[16rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-default ${excelGridHighlightClass(cell.highlight)} ${
+                      className={`w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-default ${excelGridHighlightClass(cell.highlight)} ${
                         selected ? 'outline outline-2 outline-[var(--md-sys-color-primary)] outline-offset-[-2px]' : ''
-                      } ${columnMeta?.is_key ? 'sticky left-[4rem] z-10' : ''}`}
+                      }`}
                       onClick={() => cell.histories.length > 0 && onSelectCell(cell)}
                     >
-                      <div className="flex items-center gap-1">
-                        {cell.highlight && (
-                          <span className="material-symbols-rounded text-[14px]" aria-hidden>
-                            fiber_manual_record
-                          </span>
-                        )}
-                        <span className="truncate">{cell.value || '(빈 값)'}</span>
-                      </div>
+                      <div className="truncate">{displayExcelGridValue(cell.value)}</div>
                     </td>
                   )
                 })}
@@ -1804,7 +1803,18 @@ function ExcelDiffGridSectionView({
   )
 }
 
-function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell }) {
+function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell | null }) {
+  if (!cell) {
+    return (
+      <aside className="border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
+        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경 셀 상세</p>
+        <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          노란색/초록색/빨간색 셀을 누르면 원래 값과 변경 후 값을 여기서 확인할 수 있습니다.
+        </p>
+      </aside>
+    )
+  }
+
   return (
     <aside className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
@@ -1812,11 +1822,11 @@ function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell }) {
           {excelGridHighlightLabel(cell.highlight)}
         </Badge>
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-          {cell.row_number}행 {cell.column_letter}열 · {cell.column_name}
+          {cell.row_number}행 {cell.column_letter}열
         </p>
       </div>
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-        현재 최신본 값: <span className="font-mono text-[var(--md-sys-color-on-surface)]">{cell.value || '(빈 값)'}</span>
+        현재 최신본 값: <span className="font-mono text-[var(--md-sys-color-on-surface)]">{displayExcelGridValue(cell.value)}</span>
       </p>
       <div className="space-y-2">
         {cell.histories.map((history, index) => (
@@ -1827,9 +1837,20 @@ function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell }) {
             <p className="type-label-md text-[var(--md-sys-color-on-surface)]">
               {history.label || `${history.from_file_name ?? '이전 파일'} → ${history.to_file_name ?? '다음 파일'}`}
             </p>
-            <p className="mt-1 type-body-sm font-mono text-[var(--md-sys-color-on-surface-variant)]">
-              {history.before || '(빈 값)'} → {history.after || '(빈 값)'}
-            </p>
+            <div className="mt-2 space-y-1.5">
+              <div className="grid grid-cols-[4.5rem,minmax(0,1fr)] items-start gap-2">
+                <span className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">수정 전</span>
+                <span className="min-w-0 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-mono type-body-sm text-red-950 whitespace-pre-wrap break-words">
+                  {displayExcelGridValue(history.before)}
+                </span>
+              </div>
+              <div className="grid grid-cols-[4.5rem,minmax(0,1fr)] items-start gap-2">
+                <span className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">수정 후</span>
+                <span className="min-w-0 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono type-body-sm text-emerald-950 whitespace-pre-wrap break-words">
+                  {displayExcelGridValue(history.after)}
+                </span>
+              </div>
+            </div>
           </div>
         ))}
       </div>

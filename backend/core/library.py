@@ -38,6 +38,7 @@ from ..models.schemas import (
 from .indexer import inspect_and_chunk
 from .parser import SUPPORTED_EXTENSIONS
 from .normalizer import suggest_key_column
+from .excel_analysis import normalize_excel_parser_config
 from ..runtime import get_worker_count
 
 SETTINGS_KEY = "library_settings"
@@ -308,6 +309,20 @@ def _cancelled_result(path: str) -> LibraryRescanResult:
     )
 
 
+def _is_excel_path(path: str) -> bool:
+    return Path(path).suffix.lower() in {".xls", ".xlsx"}
+
+
+def _saved_excel_config_is_valid(path: str, parser_config: Optional[Dict[str, Any]]) -> bool:
+    if not parser_config:
+        return False
+    try:
+        normalize_excel_parser_config(path, parser_config)
+        return True
+    except ValueError:
+        return False
+
+
 def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
     message = str(exc)
     lower = message.lower()
@@ -470,18 +485,23 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
             current_mtime = os.path.getmtime(path)
             if existing and existing.get("file_mtime") is not None:
                 if abs(float(existing["file_mtime"]) - current_mtime) < 1.0:
-                    return LibraryRescanResult(
-                        path=path,
-                        name=name,
-                        success=True,
-                        action="skipped",
-                        file_id=existing["id"],
-                    )
+                    if not _is_excel_path(path) or _saved_excel_config_is_valid(path, existing.get("parser_config")):
+                        return LibraryRescanResult(
+                            path=path,
+                            name=name,
+                            success=True,
+                            action="skipped",
+                            file_id=existing["id"],
+                        )
 
             if _cancel_event.is_set():
                 return _cancelled_result(path)
 
-            info, chunks = inspect_and_chunk(path, parser_config=existing.get("parser_config") if existing else None)
+            if _is_excel_path(path):
+                parser_config = None
+            else:
+                parser_config = existing.get("parser_config") if existing else None
+            info, chunks = inspect_and_chunk(path, parser_config=parser_config)
             key_column = suggest_key_column(info["columns"]) if info["file_type"] == "Excel" else ""
             if info["file_type"] == "Excel" and not key_column:
                 raise ValueError("Excel 자동 등록에 사용할 key 컬럼을 찾지 못했습니다.")
