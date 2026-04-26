@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type WheelEvent } from 'react'
 
 import {
   CheckResponse,
@@ -33,10 +33,20 @@ import {
 const CHECK_FILE_PAGE_SIZE = 60
 const GROUP_PAGE_SIZE = 50
 const GROUP_DETAIL_FILE_LIMIT = 200
+const VERSION_VIEW_SIZE_KEY = 'officewhere:version-view-size'
 
 type GroupFilter = 'all' | LibraryGroupKind
 type ContentStatus = LibraryGroupSummary['content_status']
 type HistoryTransitionStatus = 'pending' | 'loading' | 'done' | 'error'
+type VersionViewSize = 'normal' | 'large' | 'xlarge'
+
+const VERSION_VIEW_SIZE_LABELS: Record<VersionViewSize, string> = {
+  normal: '기본',
+  large: '크게',
+  xlarge: '더 크게',
+}
+
+const VERSION_VIEW_SIZE_ORDER: VersionViewSize[] = ['normal', 'large', 'xlarge']
 
 interface HistoryTransition {
   id: string
@@ -163,6 +173,13 @@ export default function ConsistencyCheck() {
   const [historyState, setHistoryState] = useState<HistoryDiffState | null>(null)
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  const [viewSize, setViewSize] = useState<VersionViewSize>(() => {
+    if (typeof window === 'undefined') return 'normal'
+    const stored = window.localStorage.getItem(VERSION_VIEW_SIZE_KEY)
+    return VERSION_VIEW_SIZE_ORDER.includes(stored as VersionViewSize)
+      ? (stored as VersionViewSize)
+      : 'normal'
+  })
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setFilesLoading(true)
@@ -211,6 +228,30 @@ export default function ConsistencyCheck() {
   useEffect(() => {
     void fetchFiles(0, '')
     void fetchGroups(0, 'all')
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(VERSION_VIEW_SIZE_KEY, viewSize)
+  }, [viewSize])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      const key = event.key
+      if (!['+', '=', '-', '_', '0'].includes(key)) return
+      event.preventDefault()
+      setViewSize((current) => {
+        if (key === '0') return 'normal'
+        const currentIndex = VERSION_VIEW_SIZE_ORDER.indexOf(current)
+        const nextIndex = key === '-' || key === '_'
+          ? Math.max(0, currentIndex - 1)
+          : Math.min(VERSION_VIEW_SIZE_ORDER.length - 1, currentIndex + 1)
+        return VERSION_VIEW_SIZE_ORDER[nextIndex]
+      })
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   const knownFilesById = useMemo(() => {
@@ -460,6 +501,23 @@ export default function ConsistencyCheck() {
     void fetchGroups(0, nextFilter)
   }
 
+  const changeViewSize = (direction: -1 | 1) => {
+    setViewSize((current) => {
+      const currentIndex = VERSION_VIEW_SIZE_ORDER.indexOf(current)
+      const nextIndex = Math.min(
+        VERSION_VIEW_SIZE_ORDER.length - 1,
+        Math.max(0, currentIndex + direction),
+      )
+      return VERSION_VIEW_SIZE_ORDER[nextIndex]
+    })
+  }
+
+  const handleVersionWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    changeViewSize(event.deltaY < 0 ? 1 : -1)
+  }
+
   const goToGroupPage = (nextOffset: number) => {
     const boundedOffset = Math.max(0, nextOffset)
     setActiveGroupDetail(null)
@@ -498,7 +556,29 @@ export default function ConsistencyCheck() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 version-view-${viewSize}`} onWheel={handleVersionWheel}>
+      <Card variant="outlined" className="p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">보기 크기</p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              버전 관리 글자가 작으면 크게 바꿔 보세요. Ctrl + / Ctrl - / Ctrl + 휠도 이 화면에서 동작합니다.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {VERSION_VIEW_SIZE_ORDER.map((size) => (
+              <Chip
+                key={size}
+                label={VERSION_VIEW_SIZE_LABELS[size]}
+                kind="filter"
+                selected={viewSize === size}
+                onClick={() => setViewSize(size)}
+              />
+            ))}
+          </div>
+        </div>
+      </Card>
+
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard
           label="버전 관리"
@@ -1075,6 +1155,7 @@ function ExcelCheckResult({
   const valueConflicts = result.issues.filter((issue) => issue.type === 'value_conflict')
   const missingKeys = result.issues.filter((issue) => issue.type === 'missing_key')
   const missingColumns = result.issues.filter((issue) => issue.type === 'missing_column')
+  const structuralIssues = [...missingKeys, ...missingColumns]
 
   if (compact && result.issues.length === 0) {
     return (
@@ -1087,7 +1168,7 @@ function ExcelCheckResult({
   return (
     <div className="space-y-5">
       {!compact && (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatCard label="전체 항목" value={result.totalKeys} icon="tag" />
           <StatCard
             label="값 다름"
@@ -1096,16 +1177,10 @@ function ExcelCheckResult({
             tone={valueConflicts.length > 0 ? 'danger' : 'neutral'}
           />
           <StatCard
-            label="행 차이"
-            value={missingKeys.length}
-            icon="pending"
-            tone={missingKeys.length > 0 ? 'warning' : 'neutral'}
-          />
-          <StatCard
-            label="열 차이"
-            value={missingColumns.length}
-            icon="view_column"
-            tone={missingColumns.length > 0 ? 'warning' : 'neutral'}
+            label="표 구조 차이"
+            value={structuralIssues.length}
+            icon="splitscreen"
+            tone={structuralIssues.length > 0 ? 'warning' : 'neutral'}
           />
         </div>
       )}
@@ -1118,20 +1193,12 @@ function ExcelCheckResult({
           issues={valueConflicts}
         />
       )}
-      {(!compact || missingKeys.length > 0) && (
+      {(!compact || structuralIssues.length > 0) && (
         <ExcelIssueSection
-          title="행 추가/삭제"
-          icon="pending"
-          description="한쪽 파일에만 있는 행입니다. 행 내용은 좌우로 스크롤해서 볼 수 있습니다."
-          issues={missingKeys}
-        />
-      )}
-      {(!compact || missingColumns.length > 0) && (
-        <ExcelIssueSection
-          title="열 추가/삭제"
-          icon="view_column"
-          description="한쪽 파일에만 있는 열입니다."
-          issues={missingColumns}
+          title="표 구조 차이"
+          icon="splitscreen"
+          description="한쪽에만 있는 행/열입니다. 새 기능 추가라기보다 표 모양이 달라졌다는 신호로 보고 원본을 확인하면 됩니다."
+          issues={structuralIssues}
         />
       )}
     </div>
@@ -1380,6 +1447,9 @@ function WordCheckResult({
       <Card variant="outlined" className="overflow-hidden">
         <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
           <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">Word 변경 내용</p>
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
+            쪽 번호는 문서에 저장된 페이지 나눔 정보를 기준으로 표시합니다.
+          </p>
         </header>
         {diffs.length === 0 ? (
           <p className="px-6 py-8 type-body-sm text-[var(--md-sys-color-on-surface-variant)] text-center">
@@ -1402,13 +1472,13 @@ function WordCheckResult({
                     {DIFF_TYPE_KO[diff.type]}
                   </Badge>
                   <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                    {diff.location}
-                  </span>
-                  <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                    {blockTypeLabel(diff.blockType)}
+                    {diff.pageLabel}
                   </span>
                 </div>
-                <GitDiffPanel diff={diff} />
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                  <DiffPanel title="기존 내용" content={diff.beforeText} tone="danger" />
+                  <DiffPanel title="변경 후 내용" content={diff.afterText} tone="success" />
+                </div>
               </li>
             ))}
           </ul>
@@ -1494,49 +1564,6 @@ function PptCheckResult({
           </ul>
         )}
       </Card>
-    </div>
-  )
-}
-
-function GitDiffPanel({ diff }: { diff: WordDiffCard }) {
-  const rows: Array<{ prefix: '+' | '-'; text: string; tone: 'success' | 'danger' }> = []
-  if (diff.type !== 'insert' && diff.beforeText) {
-    rows.push({ prefix: '-', text: diff.beforeText, tone: 'danger' })
-  }
-  if (diff.type !== 'delete' && diff.afterText) {
-    rows.push({ prefix: '+', text: diff.afterText, tone: 'success' })
-  }
-
-  if (rows.length === 0) {
-    rows.push({ prefix: '+', text: '(내용 없음)', tone: 'success' })
-  }
-
-  return (
-    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] overflow-hidden bg-[var(--md-sys-color-surface-container-lowest)] font-mono text-sm">
-      {rows.map((row, index) => {
-        const bgColor =
-          row.tone === 'danger'
-            ? 'var(--md-sys-color-error-container)'
-            : 'var(--md-sys-color-success-container)'
-        const textColor =
-          row.tone === 'danger'
-            ? 'var(--md-sys-color-on-error-container)'
-            : 'var(--md-sys-color-on-success-container)'
-        return (
-          <div
-            key={`${row.prefix}-${index}`}
-            className="px-3 py-2 whitespace-pre-wrap break-words border-l-4"
-            style={{
-              backgroundColor: bgColor,
-              color: textColor,
-              borderLeftColor: row.tone === 'danger' ? 'var(--md-sys-color-error)' : 'var(--md-sys-color-success)',
-            }}
-          >
-            <span className="font-bold mr-2">{row.prefix}</span>
-            {row.text}
-          </div>
-        )
-      })}
     </div>
   )
 }

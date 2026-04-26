@@ -123,6 +123,7 @@ class DiffBlock(BaseModel):
     block_type: Optional[str] = None
     item_type: Optional[str] = None
     location: str
+    page_number: Optional[int] = None
     text: str
 
 

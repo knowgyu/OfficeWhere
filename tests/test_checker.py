@@ -76,6 +76,14 @@ def _write_word(path: Path, paragraph_text: str, table_value: str):
     document.save(path)
 
 
+def _write_word_with_second_page_change(path: Path, second_page_text: str):
+    document = Document()
+    document.add_paragraph("첫 페이지 공통")
+    document.add_page_break()
+    document.add_paragraph(second_page_text)
+    document.save(path)
+
+
 def _add_textbox(slide, left: float, top: float, text: str):
     textbox = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(4), Inches(1))
     textbox.text_frame.text = text
@@ -238,6 +246,24 @@ def test_word_diff_reports_paragraph_and_table_changes(tmp_path):
         for block in change["before"]
     }
     assert {"paragraph", "table_row"} <= before_types
+
+
+def test_word_diff_reports_best_effort_page_numbers(tmp_path):
+    left = tmp_path / "left-page.docx"
+    right = tmp_path / "right-page.docx"
+    _write_word_with_second_page_change(left, "두 번째 페이지 원본")
+    _write_word_with_second_page_change(right, "두 번째 페이지 수정")
+
+    result = run_consistency_check(
+        [
+            {"id": 1, "path": str(left), "name": "left-page.docx", "file_type": "Word", "key_column": "", "parser_config": {}},
+            {"id": 2, "path": str(right), "name": "right-page.docx", "file_type": "Word", "key_column": "", "parser_config": {}},
+        ]
+    )
+
+    change = next(change for change in result["word"]["changes"] if change["change_type"] == "replace")
+    assert change["before"][0]["page_number"] == 2
+    assert change["after"][0]["page_number"] == 2
 
 
 def test_ppt_diff_reports_slide_insert_and_update(tmp_path):

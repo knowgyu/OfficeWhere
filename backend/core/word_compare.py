@@ -31,6 +31,7 @@ def compare_word_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
                     {
                         "block_type": block["block_type"],
                         "location": block["location"],
+                        "page_number": block.get("page_number"),
                         "text": block["text"],
                     }
                     for block in left_blocks[i1:i2]
@@ -39,6 +40,7 @@ def compare_word_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
                     {
                         "block_type": block["block_type"],
                         "location": block["location"],
+                        "page_number": block.get("page_number"),
                         "text": block["text"],
                     }
                     for block in right_blocks[j1:j2]

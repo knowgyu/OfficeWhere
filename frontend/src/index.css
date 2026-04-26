@@ -164,6 +164,52 @@
     font-weight: 500;
     letter-spacing: 0.04em;
   }
+
+  .version-view-large .type-title-sm {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  .version-view-large .type-body-md,
+  .version-view-large .text-sm {
+    font-size: 0.9375rem;
+    line-height: 1.45rem;
+  }
+  .version-view-large .type-body-sm,
+  .version-view-large .type-label-lg {
+    font-size: 0.875rem;
+    line-height: 1.35rem;
+  }
+  .version-view-large .type-label-md {
+    font-size: 0.8125rem;
+    line-height: 1.15rem;
+  }
+  .version-view-large .type-label-sm {
+    font-size: 0.75rem;
+    line-height: 1.05rem;
+  }
+
+  .version-view-xlarge .type-title-sm {
+    font-size: 1.125rem;
+    line-height: 1.625rem;
+  }
+  .version-view-xlarge .type-body-md,
+  .version-view-xlarge .text-sm {
+    font-size: 1rem;
+    line-height: 1.55rem;
+  }
+  .version-view-xlarge .type-body-sm,
+  .version-view-xlarge .type-label-lg {
+    font-size: 0.9375rem;
+    line-height: 1.45rem;
+  }
+  .version-view-xlarge .type-label-md {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  .version-view-xlarge .type-label-sm {
+    font-size: 0.8125rem;
+    line-height: 1.15rem;
+  }
 }
 
 /* Reusable state-layer. Parent must be `position: relative`. */

@@ -26,11 +26,12 @@ Use this checklist before publishing a release tag.
 - [ ] Text and Markdown files do not appear in version-management groups.
 - [ ] Opening a group loads a timeline/detail view and calculates only that group’s adjacent version changes on demand.
 - [ ] While version changes are calculated, progress is visible as completed/total comparisons.
-- [ ] Word changes render in solid red deletion / green addition diff backgrounds.
-- [ ] Excel search and value changes show worksheet coordinates such as `5행 E열`.
+- [ ] Word changes show page labels and side-by-side “기존 내용” / “변경 후 내용” panels.
+- [ ] Excel search and value changes show worksheet coordinates such as `예산현황 시트 | 5행 E열`.
 - [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.
 - [ ] If a group exceeds the latest-file detail limit, the UI explains only the displayed/latest files were analyzed.
 - [ ] Content-evidence wording avoids internal terms such as “fingerprint”.
+- [ ] Version Management view-size controls enlarge text without breaking the main card layout.
 
 ## Data safety
 - [ ] App-data safe reset copy says original documents are not deleted.

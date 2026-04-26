@@ -256,6 +256,7 @@ export interface WordDiffCard {
   type: 'insert' | 'delete' | 'replace'
   blockType: string
   location: string
+  pageLabel: string
   beforeText: string
   afterText: string
 }
@@ -559,6 +560,9 @@ const toNumberValue = (value: unknown, fallback = 0): number => {
 }
 
 const uniqueStrings = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean)))
+
+const uniqueNumbers = (values: number[]): number[] =>
+  Array.from(new Set(values.filter((value) => Number.isFinite(value) && value > 0)))
 
 const toNumberArray = (value: unknown): number[] => {
   const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]
@@ -946,6 +950,21 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
   })
 }
 
+function pageNumbersFromBlocks(blocks: unknown[]): number[] {
+  return uniqueNumbers(
+    blocks
+      .map((block) => (isRecord(block) ? toNumberValue(block.page_number ?? block.pageNumber, 0) : 0))
+      .filter((value) => value > 0),
+  )
+}
+
+function formatWordPageLabel(beforePages: number[], afterPages: number[]): string {
+  const before = beforePages.length > 0 ? `${beforePages.join(', ')}쪽` : ''
+  const after = afterPages.length > 0 ? `${afterPages.join(', ')}쪽` : ''
+  if (before && after && before !== after) return `${before} → ${after}`
+  return after || before || '쪽 정보 없음'
+}
+
 function normalizeWordDiffs(value: unknown): WordDiffCard[] {
   if (!Array.isArray(value)) return []
 
@@ -964,6 +983,8 @@ function normalizeWordDiffs(value: unknown): WordDiffCard[] {
             : 'replace'
     const firstBefore = isRecord(beforeBlocks[0]) ? beforeBlocks[0] : {}
     const firstAfter = isRecord(afterBlocks[0]) ? afterBlocks[0] : {}
+    const beforePages = pageNumbersFromBlocks(beforeBlocks)
+    const afterPages = pageNumbersFromBlocks(afterBlocks)
 
     return {
       id: toStringValue(record.id) || `word-diff-${index}`,
@@ -982,6 +1003,7 @@ function normalizeWordDiffs(value: unknown): WordDiffCard[] {
         toStringValue(record.path) ||
         toStringValue(record.index) ||
         `#${index + 1}`,
+      pageLabel: formatWordPageLabel(beforePages, afterPages),
       beforeText:
         toStringValue(record.before_text) ||
         toStringValue(record.old_text) ||
