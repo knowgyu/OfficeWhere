@@ -172,13 +172,68 @@ def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
 
     missing_column = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "missing_column")
     assert missing_column["column"] == "담당자"
-    assert "열" in missing_column["message"]
+    assert "관련 내용" in missing_column["message"]
+    column_rows = [entry for entry in missing_column["values"] if entry["row_values"]]
+    assert column_rows
+    assert column_rows[0]["columns"] == ["과제명", "담당자"]
+    assert column_rows[0]["values"] == ["삭제된 내용"]
 
     missing_key = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "missing_key")
-    assert "행" in missing_key["message"]
+    assert "관련 내용" in missing_key["message"]
     present_rows = [entry for entry in missing_key["values"] if entry["row_values"]]
     assert present_rows
     assert present_rows[0]["columns"]
+    assert present_rows[0]["values"] == ["삭제된 내용"]
+
+
+def test_excel_consistency_reports_cell_value_added_and_removed(tmp_path):
+    file_a = tmp_path / "cell-a.xlsx"
+    file_b = tmp_path / "cell-b.xlsx"
+    _write_dataframe_excel(
+        file_a,
+        {"과제명": ["A", "B"], "담당자": ["", "Kim"], "예산": ["100", "200"]},
+    )
+    _write_dataframe_excel(
+        file_b,
+        {"과제명": ["A", "B"], "담당자": ["Lee", ""], "예산": ["100", "200"]},
+    )
+
+    result = run_consistency_check(
+        [
+            {
+                "id": 1,
+                "path": str(file_a),
+                "name": "cell-a.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": _make_parser_config(columns=3, rows=2),
+            },
+            {
+                "id": 2,
+                "path": str(file_b),
+                "name": "cell-b.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": _make_parser_config(columns=3, rows=2),
+            },
+        ]
+    )
+
+    issues = result["excel"]["issues"]
+    added = next(issue for issue in issues if issue["issue_type"] == "value_added")
+    removed = next(issue for issue in issues if issue["issue_type"] == "value_removed")
+
+    assert added["key"] == "a"
+    assert added["column"] == "담당자"
+    assert added["message"] == "담당자 값이 추가되었습니다."
+    assert [entry["values"] for entry in added["values"]] == [["(빈 값)"], ["Lee"]]
+    assert added["values"][1]["cell_refs"] == ["B2"]
+
+    assert removed["key"] == "b"
+    assert removed["column"] == "담당자"
+    assert removed["message"] == "담당자 값이 삭제되었습니다."
+    assert [entry["values"] for entry in removed["values"]] == [["Kim"], ["(빈 값)"]]
+    assert removed["values"][0]["cell_refs"] == ["B3"]
 
 
 def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):

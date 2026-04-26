@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type WheelEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import {
   CheckResponse,
@@ -33,21 +33,9 @@ import {
 const CHECK_FILE_PAGE_SIZE = 60
 const GROUP_PAGE_SIZE = 50
 const GROUP_DETAIL_FILE_LIMIT = 200
-const VERSION_VIEW_SIZE_KEY = 'officewhere:version-view-size'
-
 type GroupFilter = 'all' | LibraryGroupKind
 type ContentStatus = LibraryGroupSummary['content_status']
 type HistoryTransitionStatus = 'pending' | 'loading' | 'done' | 'error'
-type VersionViewSize = 'normal' | 'large' | 'xlarge'
-
-const VERSION_VIEW_SIZE_LABELS: Record<VersionViewSize, string> = {
-  normal: '기본',
-  large: '크게',
-  xlarge: '더 크게',
-}
-
-const VERSION_VIEW_SIZE_ORDER: VersionViewSize[] = ['normal', 'large', 'xlarge']
-
 interface HistoryTransition {
   id: string
   fromFile: FileInfo
@@ -151,6 +139,9 @@ const pathTail = (path: string) => {
   return parts.slice(-3).join(' / ') || path
 }
 
+const versionGroupAnchorId = (groupId: string) =>
+  `version-group-${groupId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+
 export default function ConsistencyCheck() {
   const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
@@ -173,13 +164,7 @@ export default function ConsistencyCheck() {
   const [historyState, setHistoryState] = useState<HistoryDiffState | null>(null)
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
-  const [viewSize, setViewSize] = useState<VersionViewSize>(() => {
-    if (typeof window === 'undefined') return 'normal'
-    const stored = window.localStorage.getItem(VERSION_VIEW_SIZE_KEY)
-    return VERSION_VIEW_SIZE_ORDER.includes(stored as VersionViewSize)
-      ? (stored as VersionViewSize)
-      : 'normal'
-  })
+  const [pendingScrollGroupId, setPendingScrollGroupId] = useState<string | null>(null)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setFilesLoading(true)
@@ -231,28 +216,14 @@ export default function ConsistencyCheck() {
   }, [])
 
   useEffect(() => {
-    window.localStorage.setItem(VERSION_VIEW_SIZE_KEY, viewSize)
-  }, [viewSize])
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) return
-      const key = event.key
-      if (!['+', '=', '-', '_', '0'].includes(key)) return
-      event.preventDefault()
-      setViewSize((current) => {
-        if (key === '0') return 'normal'
-        const currentIndex = VERSION_VIEW_SIZE_ORDER.indexOf(current)
-        const nextIndex = key === '-' || key === '_'
-          ? Math.max(0, currentIndex - 1)
-          : Math.min(VERSION_VIEW_SIZE_ORDER.length - 1, currentIndex + 1)
-        return VERSION_VIEW_SIZE_ORDER[nextIndex]
-      })
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+    if (!pendingScrollGroupId || activeGroupDetail?.id !== pendingScrollGroupId) return
+    const anchorId = versionGroupAnchorId(pendingScrollGroupId)
+    window.requestAnimationFrame(() => {
+      const element = document.getElementById(anchorId)
+      element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setPendingScrollGroupId(null)
+    })
+  }, [activeGroupDetail?.id, pendingScrollGroupId])
 
   const knownFilesById = useMemo(() => {
     const byId = new Map<number, FileInfo>()
@@ -465,6 +436,7 @@ export default function ConsistencyCheck() {
 
     const detail = await loadGroupDetail(group)
     if (!detail) return
+    setPendingScrollGroupId(detail.id)
     if (historyState?.groupId === detail.id && historyState.transitions.length > 0) return
     await runHistoryDiffs(detail)
   }
@@ -499,23 +471,6 @@ export default function ConsistencyCheck() {
     setActiveGroupDetail(null)
     setHistoryState(null)
     void fetchGroups(0, nextFilter)
-  }
-
-  const changeViewSize = (direction: -1 | 1) => {
-    setViewSize((current) => {
-      const currentIndex = VERSION_VIEW_SIZE_ORDER.indexOf(current)
-      const nextIndex = Math.min(
-        VERSION_VIEW_SIZE_ORDER.length - 1,
-        Math.max(0, currentIndex + direction),
-      )
-      return VERSION_VIEW_SIZE_ORDER[nextIndex]
-    })
-  }
-
-  const handleVersionWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return
-    event.preventDefault()
-    changeViewSize(event.deltaY < 0 ? 1 : -1)
   }
 
   const goToGroupPage = (nextOffset: number) => {
@@ -556,29 +511,7 @@ export default function ConsistencyCheck() {
   }
 
   return (
-    <div className={`space-y-6 version-view-${viewSize}`} onWheel={handleVersionWheel}>
-      <Card variant="outlined" className="p-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">보기 크기</p>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              버전 관리 글자가 작으면 크게 바꿔 보세요. Ctrl + / Ctrl - / Ctrl + 휠도 이 화면에서 동작합니다.
-            </p>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            {VERSION_VIEW_SIZE_ORDER.map((size) => (
-              <Chip
-                key={size}
-                label={VERSION_VIEW_SIZE_LABELS[size]}
-                kind="filter"
-                selected={viewSize === size}
-                onClick={() => setViewSize(size)}
-              />
-            ))}
-          </div>
-        </div>
-      </Card>
-
+    <div className="space-y-6">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard
           label="버전 관리"
@@ -883,7 +816,10 @@ function GroupCard({
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
 
   return (
-    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+    <div
+      id={versionGroupAnchorId(group.id)}
+      className="scroll-mt-24 rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4"
+    >
       <div className="space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
           <FileTypeBadge fileType={group.file_type} />
@@ -1126,23 +1062,45 @@ function firstExcelLocation(issue: ExcelCheckIssue) {
   return located ? formatExcelLocation(located) : ''
 }
 
+function isExcelContentChange(issue: ExcelCheckIssue) {
+  return issue.type !== 'value_conflict'
+}
+
 function excelIssueTitle(issue: ExcelCheckIssue) {
   if (issue.type === 'value_conflict') {
     const location = firstExcelLocation(issue)
     return location ? `${location} 값 다름` : '셀 값 다름'
+  }
+  if (issue.type === 'value_added') {
+    const location = firstExcelLocation(issue)
+    return location ? `${location} 내용 추가` : '셀 내용 추가'
+  }
+  if (issue.type === 'value_removed') {
+    const location = firstExcelLocation(issue)
+    return location ? `${location} 내용 삭제` : '셀 내용 삭제'
+  }
+  if (issue.type === 'value_presence') {
+    const location = firstExcelLocation(issue)
+    return location ? `${location} 내용 있음/없음` : '셀 내용 있음/없음'
   }
   return issue.message
 }
 
 function excelIssueSubtext(issue: ExcelCheckIssue) {
   if (issue.type === 'missing_column') {
-    return issue.columnGroup ? `${issue.columnGroup} 열` : ''
+    return issue.columnGroup ? `항목 ${issue.columnGroup}` : ''
   }
   return issue.key ? `기준값 ${issue.key}` : ''
 }
 
 function conflictStatus(conflict: ExcelCheckIssue['conflicts'][number]) {
-  return conflict.values.join(' | ') || (conflict.rowValues.length > 0 ? '행 있음' : '-')
+  return conflict.values.join(' | ') || (conflict.rowValues.length > 0 ? '내용 있음' : '-')
+}
+
+function isAbsentExcelConflict(conflict: ExcelCheckIssue['conflicts'][number]) {
+  if (conflict.rowValues.length > 0) return false
+  const status = conflict.values.join(' ')
+  return /없음|누락/.test(status)
 }
 
 function ExcelCheckResult({
@@ -1153,9 +1111,7 @@ function ExcelCheckResult({
   compact?: boolean
 }) {
   const valueConflicts = result.issues.filter((issue) => issue.type === 'value_conflict')
-  const missingKeys = result.issues.filter((issue) => issue.type === 'missing_key')
-  const missingColumns = result.issues.filter((issue) => issue.type === 'missing_column')
-  const structuralIssues = [...missingKeys, ...missingColumns]
+  const contentChanges = result.issues.filter(isExcelContentChange)
 
   if (compact && result.issues.length === 0) {
     return (
@@ -1177,10 +1133,10 @@ function ExcelCheckResult({
             tone={valueConflicts.length > 0 ? 'danger' : 'neutral'}
           />
           <StatCard
-            label="표 구조 차이"
-            value={structuralIssues.length}
-            icon="splitscreen"
-            tone={structuralIssues.length > 0 ? 'warning' : 'neutral'}
+            label="추가/삭제"
+            value={contentChanges.length}
+            icon="difference"
+            tone={contentChanges.length > 0 ? 'warning' : 'neutral'}
           />
         </div>
       )}
@@ -1193,12 +1149,12 @@ function ExcelCheckResult({
           issues={valueConflicts}
         />
       )}
-      {(!compact || structuralIssues.length > 0) && (
+      {(!compact || contentChanges.length > 0) && (
         <ExcelIssueSection
-          title="표 구조 차이"
-          icon="splitscreen"
-          description="한쪽에만 있는 행/열입니다. 새 기능 추가라기보다 표 모양이 달라졌다는 신호로 보고 원본을 확인하면 됩니다."
-          issues={structuralIssues}
+          title="추가/삭제된 내용"
+          icon="difference"
+          description="빈 셀에 값이 생기거나 사라진 경우, 한쪽 파일에만 있는 관련 내용을 묶어 보여줍니다. 행/열 자체의 의미를 단정하지 않고 실제 추가·삭제된 값을 확인합니다."
+          issues={contentChanges}
         />
       )}
     </div>
@@ -1272,18 +1228,25 @@ function ExcelIssueSection({
 }
 
 function ExcelIssueTable({ issue }: { issue: ExcelCheckIssue }) {
-  if (issue.type === 'missing_key') return <ExcelRowIssueTable issue={issue} />
-  if (issue.type === 'missing_column') return <ExcelColumnIssueTable issue={issue} />
-  return <ExcelValueIssueTable issue={issue} />
+  if (issue.type === 'missing_key' || issue.type === 'missing_column') {
+    return <ExcelContentPreviewTable issue={issue} />
+  }
+  return <ExcelValueIssueTable issue={issue} valueHeader={issue.type === 'value_conflict' ? '값' : '내용'} />
 }
 
-function ExcelValueIssueTable({ issue }: { issue: ExcelCheckIssue }) {
+function ExcelValueIssueTable({
+  issue,
+  valueHeader = '값',
+}: {
+  issue: ExcelCheckIssue
+  valueHeader?: string
+}) {
   return (
     <div className="overflow-x-auto rounded-md border border-[var(--md-sys-color-outline-variant)]">
       <table className="min-w-full text-sm">
         <thead className="bg-[var(--md-sys-color-surface-container-low)]">
           <tr>
-            {['파일', '위치', '값'].map((header) => (
+            {['파일', '위치', valueHeader].map((header) => (
               <th
                 key={header}
                 className="px-3 py-2 text-left type-label-md text-[var(--md-sys-color-on-surface-variant)]"
@@ -1313,75 +1276,76 @@ function ExcelValueIssueTable({ issue }: { issue: ExcelCheckIssue }) {
   )
 }
 
-function ExcelColumnIssueTable({ issue }: { issue: ExcelCheckIssue }) {
-  return (
-    <div className="overflow-x-auto rounded-md border border-[var(--md-sys-color-outline-variant)]">
-      <table className="min-w-full text-sm">
-        <thead className="bg-[var(--md-sys-color-surface-container-low)]">
-          <tr>
-            {['파일', '상태'].map((header) => (
-              <th
-                key={header}
-                className="px-3 py-2 text-left type-label-md text-[var(--md-sys-color-on-surface-variant)]"
-              >
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-          {issue.conflicts.map((conflict) => (
-            <tr key={`${issue.id}-${conflict.fileId}`} className="bg-[var(--md-sys-color-surface-container-lowest)]">
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
-                {conflict.fileName}
-              </td>
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
-                {conflictStatus(conflict)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
+function ExcelContentPreviewTable({ issue }: { issue: ExcelCheckIssue }) {
+  const presentConflicts = issue.conflicts.filter((conflict) => !isAbsentExcelConflict(conflict))
+  const absentConflicts = issue.conflicts.filter(isAbsentExcelConflict)
 
-function ExcelRowIssueTable({ issue }: { issue: ExcelCheckIssue }) {
   return (
-    <div className="overflow-x-auto rounded-md border border-[var(--md-sys-color-outline-variant)]">
-      <table className="min-w-full text-sm">
-        <thead className="bg-[var(--md-sys-color-surface-container-low)]">
-          <tr>
-            {['파일', '상태', '행 내용'].map((header) => (
-              <th
-                key={header}
-                className="px-3 py-2 text-left type-label-md text-[var(--md-sys-color-on-surface-variant)]"
-              >
-                {header}
-              </th>
+    <div className="space-y-3">
+      {presentConflicts.length === 0 ? (
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          표시할 추가/삭제 내용이 없습니다.
+        </p>
+      ) : (
+        presentConflicts.map((conflict) => {
+          const location = formatExcelLocation(conflict)
+          const visibleCount = conflict.rowValues.length
+          const countLabel =
+            conflict.rowCount > visibleCount && visibleCount > 0
+              ? `표시 ${visibleCount}/${conflict.rowCount}개`
+              : conflict.rowCount > 0
+                ? `${conflict.rowCount}개 값`
+                : ''
+          return (
+            <div
+              key={`${issue.id}-${conflict.fileId}`}
+              className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-3"
+            >
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge tone={conflict.values.some((value) => value.includes('삭제')) ? 'danger' : 'success'}>
+                      {conflictStatus(conflict)}
+                    </Badge>
+                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)] break-all">
+                      {conflict.fileName}
+                    </p>
+                  </div>
+                  {location !== '-' && (
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 font-mono">
+                      {location}
+                    </p>
+                  )}
+                </div>
+                {countLabel && <Chip label={countLabel} tone="neutral" as="span" />}
+              </div>
+              {conflict.rowValues.length > 0 ? (
+                <ExcelRowPreview conflict={conflict} />
+              ) : (
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface)] font-mono">
+                  {conflict.values.join(' | ')}
+                </p>
+              )}
+            </div>
+          )
+        })
+      )}
+
+      {absentConflicts.length > 0 && (
+        <div className="rounded-md border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3">
+          <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">내용이 없는 파일</p>
+          <div className="mt-2 flex gap-2 flex-wrap">
+            {absentConflicts.map((conflict) => (
+              <Chip
+                key={`${issue.id}-absent-${conflict.fileId}`}
+                label={`${conflict.fileName} · ${conflictStatus(conflict)}`}
+                tone="neutral"
+                as="span"
+              />
             ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-          {issue.conflicts.map((conflict) => (
-            <tr key={`${issue.id}-${conflict.fileId}`} className="bg-[var(--md-sys-color-surface-container-lowest)] align-top">
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
-                {conflict.fileName}
-              </td>
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
-                {conflictStatus(conflict)}
-              </td>
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)]">
-                {conflict.rowValues.length > 0 ? (
-                  <ExcelRowPreview conflict={conflict} />
-                ) : (
-                  <span className="text-[var(--md-sys-color-on-surface-variant)]">이 파일에는 행 없음</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

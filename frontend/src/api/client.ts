@@ -238,7 +238,13 @@ export interface ExcelConflictEntry {
   rowValues: string[][]
 }
 
-export type ExcelIssueType = 'value_conflict' | 'missing_key' | 'missing_column'
+export type ExcelIssueType =
+  | 'value_conflict'
+  | 'value_added'
+  | 'value_removed'
+  | 'value_presence'
+  | 'missing_key'
+  | 'missing_column'
 
 export interface ExcelCheckIssue {
   id: string
@@ -924,7 +930,13 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
         ? 'missing_key'
         : rawType === 'missing_column' || rawType === 'missing column'
           ? 'missing_column'
-          : 'value_conflict'
+          : rawType === 'value_added' || rawType === 'value added'
+            ? 'value_added'
+            : rawType === 'value_removed' || rawType === 'value removed'
+              ? 'value_removed'
+              : rawType === 'value_presence' || rawType === 'value presence'
+                ? 'value_presence'
+                : 'value_conflict'
     const columnGroup = toStringValue(record.column_group ?? record.column ?? record.column_name)
     const conflicts = [
       ...normalizeExcelConflictEntries(record.conflicts ?? record.entries ?? record.values),
@@ -944,7 +956,15 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
         toStringValue(record.message) ||
         (type === 'missing_key'
           ? '일부 파일에 기준 항목이 없습니다.'
-          : '같은 기준 항목에서 값 차이가 발견되었습니다.'),
+          : type === 'missing_column'
+            ? '일부 파일에만 있는 표 내용입니다.'
+            : type === 'value_added'
+              ? '새 값이 추가되었습니다.'
+              : type === 'value_removed'
+                ? '기존 값이 삭제되었습니다.'
+                : type === 'value_presence'
+                  ? '일부 파일에만 값이 있습니다.'
+                  : '같은 기준 항목에서 값 차이가 발견되었습니다.'),
       conflicts,
     }
   })

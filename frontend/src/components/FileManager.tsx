@@ -38,6 +38,12 @@ import {
   useSnackbar,
 } from '../ui'
 import { useLibraryRescan } from '../contexts/LibraryRescanContext'
+import {
+  APP_TEXT_SIZE_DESCRIPTIONS,
+  APP_TEXT_SIZE_LABELS,
+  APP_TEXT_SIZE_ORDER,
+  useDisplaySettings,
+} from '../contexts/DisplaySettingsContext'
 import PreviewPanel from './PreviewPanel'
 
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
@@ -110,6 +116,7 @@ function appDataSize(candidates: AppDataCandidate[], ids: string[]) {
 
 export default function FileManager() {
   const snackbar = useSnackbar()
+  const { textSize, setTextSize } = useDisplaySettings()
   const [files, setFiles] = useState<FileInfo[]>([])
   const [fileTotal, setFileTotal] = useState(0)
   const [fileCountsByType, setFileCountsByType] = useState<Record<string, number>>({})
@@ -559,6 +566,38 @@ export default function FileManager() {
 
   return (
     <div className="space-y-6">
+      <Card variant="elevated">
+        <CardSection
+          title="화면 표시"
+          description="앱 전체 글자 크기를 조정합니다. 검색 결과, 설정, 버전 관리, Excel 표 내용에 함께 적용됩니다. Ctrl + / Ctrl - / Ctrl + 휠도 전체 화면에서 동작합니다."
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {APP_TEXT_SIZE_ORDER.map((size) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => setTextSize(size)}
+                className={`state-host relative text-left rounded-md border p-4 transition-colors ${
+                  textSize === size
+                    ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/40'
+                    : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-low)]'
+                }`}
+              >
+                <span className="state-layer" />
+                <span className="relative flex items-center justify-between gap-2">
+                  <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                    {APP_TEXT_SIZE_LABELS[size]}
+                  </span>
+                  {textSize === size && <Icon name="check_circle" size={20} filled className="text-[var(--md-sys-color-primary)]" />}
+                </span>
+                <span className="relative block type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-2">
+                  {APP_TEXT_SIZE_DESCRIPTIONS[size]}
+                </span>
+              </button>
+            ))}
+          </div>
+        </CardSection>
+      </Card>
       <Card variant="elevated">
         <CardSection
           title="대상 폴더"

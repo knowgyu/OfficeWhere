@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type WheelEvent } from 'react'
 
 import FileManager from './components/FileManager'
 import JoinQuery from './components/JoinQuery'
@@ -6,6 +6,7 @@ import ConsistencyCheck from './components/ConsistencyCheck'
 import FileSearch from './components/FileSearch'
 import { Button, Icon, Spinner } from './ui'
 import { useLibraryRescan } from './contexts/LibraryRescanContext'
+import { useDisplaySettings } from './contexts/DisplaySettingsContext'
 
 type Tab = 'search' | 'check' | 'join' | 'files'
 
@@ -62,15 +63,45 @@ export default function App() {
     const stored = window.localStorage.getItem(LS_TAB) as Tab | null
     return stored && TABS.some((tab) => tab.id === stored) ? stored : 'search'
   })
+  const { textSize, increaseTextSize, decreaseTextSize, resetTextSize } = useDisplaySettings()
 
   useEffect(() => {
     window.localStorage.setItem(LS_TAB, activeTab)
   }, [activeTab])
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      const key = event.key
+      if (!['+', '=', '-', '_', '0'].includes(key)) return
+      event.preventDefault()
+      if (key === '0') {
+        resetTextSize()
+      } else if (key === '-' || key === '_') {
+        decreaseTextSize()
+      } else {
+        increaseTextSize()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [decreaseTextSize, increaseTextSize, resetTextSize])
+
+  const handleGlobalWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    if (event.deltaY < 0) increaseTextSize()
+    else decreaseTextSize()
+  }
+
   const current = TABS.find((tab) => tab.id === activeTab) ?? TABS[0]
 
   return (
-    <div className="flex flex-1 min-h-screen bg-[var(--md-sys-color-background)]">
+    <div
+      className={`app-text-${textSize} flex flex-1 min-h-screen bg-[var(--md-sys-color-background)]`}
+      onWheel={handleGlobalWheel}
+    >
       <NavigationRail activeTab={activeTab} onChange={setActiveTab} />
 
       <div className="flex-1 flex flex-col min-w-0">

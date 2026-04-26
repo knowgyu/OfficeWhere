@@ -28,6 +28,9 @@ Use this checklist before publishing a release tag.
 - [ ] While version changes are calculated, progress is visible as completed/total comparisons.
 - [ ] Word changes show page labels and side-by-side “기존 내용” / “변경 후 내용” panels.
 - [ ] Excel search and value changes show worksheet coordinates such as `예산현황 시트 | 5행 E열`.
+- [ ] Settings / Library → 화면 표시 changes app-wide text size across search, settings, version management, and Excel previews.
+- [ ] Version Management keeps the selected group visible after opening another group.
+- [ ] Excel added/removed cell content appears under 추가/삭제된 내용, and missing rows/columns show actual content previews rather than only row/column labels.
 - [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.
 - [ ] If a group exceeds the latest-file detail limit, the UI explains only the displayed/latest files were analyzed.
 - [ ] Content-evidence wording avoids internal terms such as “fingerprint”.

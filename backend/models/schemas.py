@@ -106,8 +106,10 @@ class ExcelConflictValue(BaseModel):
 
 class ExcelCheckIssue(BaseModel):
     issue_type: str
+    severity: Optional[str] = None
     key: Optional[str] = None
     column: Optional[str] = None
+    message: Optional[str] = None
     values: List[ExcelConflictValue] = Field(default_factory=list)
     present_in: List[FileRef] = Field(default_factory=list)
     missing_in: List[FileRef] = Field(default_factory=list)

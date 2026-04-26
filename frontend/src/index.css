@@ -165,50 +165,112 @@
     letter-spacing: 0.04em;
   }
 
-  .version-view-large .type-title-sm {
+  .app-text-large .type-title-lg {
+    font-size: 1.375rem;
+    line-height: 1.875rem;
+  }
+  .app-text-large .type-title-md {
+    font-size: 1.125rem;
+    line-height: 1.625rem;
+  }
+  .app-text-large .type-title-sm {
     font-size: 1rem;
     line-height: 1.5rem;
   }
-  .version-view-large .type-body-md,
-  .version-view-large .text-sm {
+  .app-text-large .type-body-lg {
+    font-size: 1.125rem;
+    line-height: 1.625rem;
+  }
+  .app-text-large .type-body-md,
+  .app-text-large .text-sm {
     font-size: 0.9375rem;
     line-height: 1.45rem;
   }
-  .version-view-large .type-body-sm,
-  .version-view-large .type-label-lg {
+  .app-text-large .type-body-sm,
+  .app-text-large .type-label-lg {
     font-size: 0.875rem;
     line-height: 1.35rem;
   }
-  .version-view-large .type-label-md {
+  .app-text-large .type-label-md {
     font-size: 0.8125rem;
     line-height: 1.15rem;
   }
-  .version-view-large .type-label-sm {
+  .app-text-large .type-label-sm,
+  .app-text-large .text-xs {
     font-size: 0.75rem;
     line-height: 1.05rem;
   }
 
-  .version-view-xlarge .type-title-sm {
+  .app-text-xlarge .type-title-lg {
+    font-size: 1.5rem;
+    line-height: 2rem;
+  }
+  .app-text-xlarge .type-title-md {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+  .app-text-xlarge .type-title-sm {
     font-size: 1.125rem;
     line-height: 1.625rem;
   }
-  .version-view-xlarge .type-body-md,
-  .version-view-xlarge .text-sm {
+  .app-text-xlarge .type-body-lg {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+  .app-text-xlarge .type-body-md,
+  .app-text-xlarge .text-sm {
     font-size: 1rem;
     line-height: 1.55rem;
   }
-  .version-view-xlarge .type-body-sm,
-  .version-view-xlarge .type-label-lg {
+  .app-text-xlarge .type-body-sm,
+  .app-text-xlarge .type-label-lg {
     font-size: 0.9375rem;
     line-height: 1.45rem;
   }
-  .version-view-xlarge .type-label-md {
+  .app-text-xlarge .type-label-md {
     font-size: 0.875rem;
     line-height: 1.25rem;
   }
-  .version-view-xlarge .type-label-sm {
+  .app-text-xlarge .type-label-sm,
+  .app-text-xlarge .text-xs {
     font-size: 0.8125rem;
     line-height: 1.15rem;
+  }
+
+  .app-text-xxlarge .type-title-lg {
+    font-size: 1.75rem;
+    line-height: 2.25rem;
+  }
+  .app-text-xxlarge .type-title-md {
+    font-size: 1.375rem;
+    line-height: 1.875rem;
+  }
+  .app-text-xxlarge .type-title-sm {
+    font-size: 1.25rem;
+    line-height: 1.85rem;
+  }
+  .app-text-xxlarge .type-body-lg {
+    font-size: 1.375rem;
+    line-height: 1.95rem;
+  }
+  .app-text-xxlarge .type-body-md,
+  .app-text-xxlarge .text-sm {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+  }
+  .app-text-xxlarge .type-body-sm,
+  .app-text-xxlarge .type-label-lg {
+    font-size: 1rem;
+    line-height: 1.55rem;
+  }
+  .app-text-xxlarge .type-label-md {
+    font-size: 0.9375rem;
+    line-height: 1.35rem;
+  }
+  .app-text-xxlarge .type-label-sm,
+  .app-text-xxlarge .text-xs {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
   }
 }
 
