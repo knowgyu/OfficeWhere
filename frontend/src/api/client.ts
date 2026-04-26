@@ -425,18 +425,41 @@ export interface LibraryRescanStatus {
   error?: string | null
 }
 
-export interface LibraryFileGroup {
+export type LibraryGroupKind = 'exact_name_conflict' | 'version_family'
+
+export interface LibraryGroupSummary {
   id: string
+  group_kind: LibraryGroupKind
   file_type: string
+  base_name: string
   canonical_name: string
   title: string
+  file_count: number
   confidence: string
-  files: FileInfo[]
+  reason: string
+  latest_file?: FileInfo | null
+  previous_file?: FileInfo | null
+  tokens_summary: string[]
   recommended_action: 'excel_integrate' | 'compare_latest'
 }
 
+export interface LibraryGroupDetail extends LibraryGroupSummary {
+  files: FileInfo[]
+}
+
 export interface LibraryGroupsResponse {
-  groups: LibraryFileGroup[]
+  total: number
+  groups: LibraryGroupSummary[]
+  limit: number
+  offset: number
+  counts_by_kind: Partial<Record<LibraryGroupKind, number>>
+}
+
+export interface LibraryGroupsParams {
+  kind?: LibraryGroupKind
+  fileType?: string
+  limit?: number
+  offset?: number
 }
 
 const electronApi = () =>
@@ -487,6 +510,18 @@ async function getFilePage(params: FileListParams = {}) {
   const url = await apiPath('/api/files/page')
   const suffix = searchParams.toString()
   return axios.get<FileListResponse>(suffix ? `${url}?${suffix}` : url)
+}
+
+async function getLibraryGroups(params: LibraryGroupsParams = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.kind) searchParams.set('kind', params.kind)
+  if (params.fileType) searchParams.set('type', params.fileType)
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
+
+  const url = await apiPath('/api/library/groups')
+  const suffix = searchParams.toString()
+  return axios.get<LibraryGroupsResponse>(suffix ? `${url}?${suffix}` : url)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1178,7 +1213,9 @@ export const api = {
     startRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start')),
     rescanStatus: async () => axios.get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
     cancelRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/cancel')),
-    groups: async () => axios.get<LibraryGroupsResponse>(await apiPath('/api/library/groups')),
+    groups: getLibraryGroups,
+    groupDetail: async (id: string) =>
+      axios.get<LibraryGroupDetail>(await apiPath(`/api/library/groups/${encodeURIComponent(id)}`)),
   },
 }
 

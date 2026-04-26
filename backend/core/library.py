@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -25,6 +26,9 @@ from ..database import (
 from ..models.schemas import (
     FileInfo,
     LibraryFileGroup,
+    LibraryGroupDetail,
+    LibraryGroupsResponse,
+    LibraryGroupSummary,
     LibraryRescanResponse,
     LibraryRescanResult,
     LibraryRescanStatus,
@@ -40,6 +44,10 @@ LAST_RESCAN_KEY = "library_last_rescan_at"
 MAX_WORKERS = get_worker_count()
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[Dict[str, Any]], None]
+OFFICE_FILE_TYPES = {"Excel", "Word", "PowerPoint"}
+DEFAULT_GROUP_LIMIT = 50
+MAX_GROUP_LIMIT = 100
+MAX_GROUP_DETAIL_LIMIT = 200
 
 _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
@@ -136,17 +144,129 @@ def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
     return normalized
 
 
+def _normalize_name_part(value: str) -> str:
+    normalized = value.lower()
+    normalized = re.sub(r"[\[\]\(\)\{\}]", " ", normalized)
+    normalized = re.sub(r"[_\-.]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _parse_date_token(raw: str) -> Optional[Tuple[str, int]]:
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 6:
+        year = 2000 + int(digits[:2])
+        month = int(digits[2:4])
+        day = int(digits[4:6])
+    elif len(digits) == 8:
+        year = int(digits[:4])
+        month = int(digits[4:6])
+        day = int(digits[6:8])
+    else:
+        return None
+
+    if year < 1900 or not 1 <= month <= 12 or not 1 <= day <= 31:
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}", year * 10000 + month * 100 + day
+
+
+def _version_sort_value(value: str) -> Tuple[int, ...]:
+    return tuple(int(part) for part in value.split(".") if part.isdigit())
+
+
+def _token_display(token: Dict[str, Any]) -> str:
+    if token["kind"] == "version":
+        return f"v{token['value']}"
+    return str(token["value"])
+
+
+def parse_document_identity(name: str) -> Dict[str, Any]:
+    """Parse conservative document identity tokens from an Office filename.
+
+    The parser intentionally returns explainable tokens only. It is used for
+    grouping candidates, not for deleting/merging files or claiming content
+    differences.
+    """
+
+    original_stem = Path(name).stem
+    working = original_stem
+    tokens: List[Dict[str, Any]] = []
+
+    def replace_with_token(pattern: str, value_fn: Callable[[re.Match[str]], Optional[Dict[str, Any]]]):
+        nonlocal working
+
+        def repl(match: re.Match[str]) -> str:
+            token = value_fn(match)
+            if token:
+                token.setdefault("raw", match.group(0))
+                tokens.append(token)
+            return " "
+
+        working = re.sub(pattern, repl, working, flags=re.IGNORECASE)
+
+    replace_with_token(
+        r"(?<!\d)(20\d{2})[._-](0[1-9]|1[0-2])[._-]([0-2]\d|3[01])(?!\d)",
+        lambda match: (
+            {"kind": "date", "value": parsed[0], "sort_value": parsed[1]}
+            if (parsed := _parse_date_token(match.group(0)))
+            else None
+        ),
+    )
+    replace_with_token(
+        r"(?<!\d)(?:20\d{2}(?:0[1-9]|1[0-2])(?:[0-2]\d|3[01])|\d{2}(?:0[1-9]|1[0-2])(?:[0-2]\d|3[01]))(?!\d)",
+        lambda match: (
+            {"kind": "date", "value": parsed[0], "sort_value": parsed[1]}
+            if (parsed := _parse_date_token(match.group(0)))
+            else None
+        ),
+    )
+    replace_with_token(
+        r"(?<![A-Za-z0-9가-힣])(?:v|ver|version|rev|revision)\s*\.?\s*(\d+(?:\.\d+)*)(?![A-Za-z0-9가-힣])",
+        lambda match: {
+            "kind": "version",
+            "value": match.group(1),
+            "sort_value": _version_sort_value(match.group(1)),
+        },
+    )
+    replace_with_token(
+        r"(최종본?|수정본|개정본|복사본|초안|구버전|신버전)|(?<![A-Za-z0-9가-힣])(final|draft|copy|new|old)(?![A-Za-z0-9가-힣])",
+        lambda match: {
+            "kind": "status",
+            "value": (match.group(1) or match.group(2) or "").lower(),
+            "sort_value": {
+                "old": 10,
+                "구버전": 10,
+                "draft": 20,
+                "초안": 20,
+                "copy": 30,
+                "복사본": 30,
+                "수정본": 40,
+                "개정본": 45,
+                "new": 50,
+                "신버전": 50,
+                "final": 60,
+                "최종": 60,
+                "최종본": 60,
+            }.get((match.group(1) or match.group(2) or "").lower(), 0),
+        },
+    )
+
+    base_name = _normalize_name_part(working) or _normalize_name_part(original_stem)
+    latest_date = max((token.get("sort_value", 0) for token in tokens if token["kind"] == "date"), default=0)
+    latest_version = max((token.get("sort_value", ()) for token in tokens if token["kind"] == "version"), default=())
+    latest_status = max((token.get("sort_value", 0) for token in tokens if token["kind"] == "status"), default=0)
+    token_kinds = sorted({token["kind"] for token in tokens})
+    reason = "파일명에서 " + ", ".join(token_kinds) + " 표시를 감지했습니다." if token_kinds else "파일명 기준"
+    return {
+        "base_name": base_name,
+        "tokens": tokens,
+        "sort_key": (latest_date, latest_version, latest_status),
+        "confidence_reason": reason,
+    }
+
+
 def canonical_name(name: str) -> str:
-    stem = Path(name).stem.lower()
-    stem = re.sub(r"[\[\]\(\)\{\}]", " ", stem)
-    stem = re.sub(r"[_\-.]+", " ", stem)
-    stem = re.sub(r"\b(20\d{2})[ ._-]?(0[1-9]|1[0-2])[ ._-]?([0-2]\d|3[01])\b", " ", stem)
-    stem = re.sub(r"\b\d{6,8}\b", " ", stem)
-    stem = re.sub(r"\b(v|ver|version|rev|revision)\s*\d+\b", " ", stem)
-    stem = re.sub(r"\b(final|draft|copy|new|old)\b", " ", stem)
-    stem = re.sub(r"(최종|수정본|개정본|복사본|초안|구버전|신버전)", " ", stem)
-    stem = re.sub(r"\s+", " ", stem).strip()
-    return stem or Path(name).stem.lower()
+    return parse_document_identity(name)["base_name"]
 
 
 def file_sort_key(file_info: FileInfo) -> Tuple[float, str]:
@@ -596,32 +716,206 @@ def cancel_library_rescan() -> LibraryRescanStatus:
         )
         return LibraryRescanStatus(**_rescan_status)
 
-def build_file_groups() -> List[LibraryFileGroup]:
-    buckets: Dict[Tuple[str, str], List[FileInfo]] = {}
+def _bounded_limit(limit: int, *, default: int = DEFAULT_GROUP_LIMIT, maximum: int = MAX_GROUP_LIMIT) -> int:
+    if limit < 1:
+        return default
+    return min(limit, maximum)
+
+
+def _slug(value: str) -> str:
+    base = re.sub(r"[^a-z0-9가-힣]+", "-", value.lower()).strip("-") or "group"
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    return f"{base}-{digest}"
+
+
+def _recommended_action(file_type: str) -> str:
+    return "excel_integrate" if file_type == "Excel" else "compare_latest"
+
+
+def _tokens_summary(identities: List[Dict[str, Any]]) -> List[str]:
+    seen: set[str] = set()
+    summary: List[str] = []
+    for identity in identities:
+        for token in identity["tokens"]:
+            display = _token_display(token)
+            if display in seen:
+                continue
+            seen.add(display)
+            summary.append(display)
+    return summary
+
+
+def _version_file_sort_key(file_info: FileInfo) -> Tuple[Any, ...]:
+    identity = parse_document_identity(file_info.name)
+    return (*identity["sort_key"], *file_sort_key(file_info))
+
+
+def _group_detail(
+    *,
+    group_kind: str,
+    file_type: str,
+    base_name: str,
+    files: List[FileInfo],
+    confidence: str,
+    reason: str,
+    tokens_summary: Optional[List[str]] = None,
+) -> LibraryGroupDetail:
+    ordered = sorted(
+        files,
+        key=_version_file_sort_key if group_kind == "version_family" else file_sort_key,
+        reverse=True,
+    )
+    group_id = _slug(f"{group_kind}-{file_type}-{base_name}")
+    return LibraryGroupDetail(
+        id=group_id,
+        group_kind=group_kind,
+        file_type=file_type,
+        base_name=base_name,
+        canonical_name=base_name,
+        title=ordered[0].name,
+        file_count=len(ordered),
+        confidence=confidence,
+        reason=reason,
+        latest_file=ordered[0] if ordered else None,
+        previous_file=ordered[1] if len(ordered) > 1 else None,
+        tokens_summary=tokens_summary or [],
+        recommended_action=_recommended_action(file_type),
+        files=ordered,
+    )
+
+
+def _all_file_group_details() -> List[LibraryGroupDetail]:
+    exact_buckets: Dict[Tuple[str, str], List[FileInfo]] = {}
+    version_buckets: Dict[Tuple[str, str], List[Tuple[FileInfo, Dict[str, Any]]]] = {}
+
     for row in get_all_files():
         file_info = file_info_from_row(row)
-        buckets.setdefault((file_info.file_type, canonical_name(file_info.name)), []).append(file_info)
-
-    groups: List[LibraryFileGroup] = []
-    for (file_type, canonical), files in buckets.items():
-        if len(files) < 2:
+        if file_info.file_type not in OFFICE_FILE_TYPES:
             continue
-        ordered = sorted(files, key=file_sort_key, reverse=True)
-        group_id = re.sub(r"[^a-z0-9가-힣]+", "-", f"{file_type}-{canonical}".lower()).strip("-")
+
+        exact_buckets.setdefault((file_info.file_type, file_info.name.lower()), []).append(file_info)
+
+        identity = parse_document_identity(file_info.name)
+        if identity["tokens"]:
+            version_buckets.setdefault((file_info.file_type, identity["base_name"]), []).append((file_info, identity))
+
+    groups: List[LibraryGroupDetail] = []
+    for (file_type, _name_key), files in exact_buckets.items():
+        paths = {os.path.normpath(file.path) for file in files}
+        if len(files) < 2 or len(paths) < 2:
+            continue
         groups.append(
-            LibraryFileGroup(
-                id=group_id,
+            _group_detail(
+                group_kind="exact_name_conflict",
                 file_type=file_type,
-                canonical_name=canonical,
-                title=ordered[0].name,
-                confidence="filename",
-                files=ordered,
-                recommended_action="excel_integrate" if file_type == "Excel" else "compare_latest",
+                base_name=files[0].name.lower(),
+                files=files,
+                confidence="exact_filename",
+                reason="같은 파일명이 여러 위치에 있습니다. 내용을 확인해 보세요.",
             )
         )
 
-    groups.sort(key=lambda group: (file_sort_key(group.files[0]), len(group.files)), reverse=True)
+    for (file_type, base_name), items in version_buckets.items():
+        files = [file for file, _identity in items]
+        if len(files) < 2:
+            continue
+        token_signatures = {
+            tuple((token["kind"], str(token["value"])) for token in identity["tokens"])
+            for _file, identity in items
+        }
+        if len(token_signatures) < 2:
+            continue
+        groups.append(
+            _group_detail(
+                group_kind="version_family",
+                file_type=file_type,
+                base_name=base_name,
+                files=files,
+                confidence="filename_tokens",
+                reason="파일명에서 버전/날짜/상태 표시를 감지했습니다. 같은 문서 계열 후보로 확인해 보세요.",
+                tokens_summary=_tokens_summary([identity for _file, identity in items]),
+            )
+        )
+
+    groups.sort(
+        key=lambda group: (
+            file_sort_key(group.latest_file) if group.latest_file else (0, ""),
+            group.file_count,
+            group.group_kind == "exact_name_conflict",
+        ),
+        reverse=True,
+    )
     return groups
+
+
+def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
+    return LibraryGroupSummary(
+        id=group.id,
+        group_kind=group.group_kind,
+        file_type=group.file_type,
+        base_name=group.base_name,
+        canonical_name=group.canonical_name,
+        title=group.title,
+        file_count=group.file_count,
+        confidence=group.confidence,
+        reason=group.reason,
+        latest_file=group.latest_file,
+        previous_file=group.previous_file,
+        tokens_summary=group.tokens_summary,
+        recommended_action=group.recommended_action,
+    )
+
+
+def list_file_groups(
+    *,
+    kind: Optional[str] = None,
+    file_type: Optional[str] = None,
+    limit: int = DEFAULT_GROUP_LIMIT,
+    offset: int = 0,
+) -> LibraryGroupsResponse:
+    safe_limit = _bounded_limit(limit)
+    safe_offset = max(0, offset)
+    groups = _all_file_group_details()
+    if kind:
+        groups = [group for group in groups if group.group_kind == kind]
+    if file_type:
+        groups = [group for group in groups if group.file_type == file_type]
+
+    counts_by_kind: Dict[str, int] = {}
+    for group in groups:
+        counts_by_kind[group.group_kind] = counts_by_kind.get(group.group_kind, 0) + 1
+
+    page = groups[safe_offset : safe_offset + safe_limit]
+    return LibraryGroupsResponse(
+        total=len(groups),
+        groups=[_group_summary(group) for group in page],
+        limit=safe_limit,
+        offset=safe_offset,
+        counts_by_kind=counts_by_kind,
+    )
+
+
+def get_file_group_detail(group_id: str, *, limit: int = MAX_GROUP_DETAIL_LIMIT) -> Optional[LibraryGroupDetail]:
+    safe_limit = _bounded_limit(limit, default=MAX_GROUP_DETAIL_LIMIT, maximum=MAX_GROUP_DETAIL_LIMIT)
+    for group in _all_file_group_details():
+        if group.id != group_id:
+            continue
+        return LibraryGroupDetail(
+            **{
+                **group.model_dump(exclude={"files"}),
+                "files": group.files[:safe_limit],
+            }
+        )
+    return None
+
+
+def build_file_groups() -> List[LibraryFileGroup]:
+    return [
+        LibraryFileGroup(
+            **group.model_dump(),
+        )
+        for group in _all_file_group_details()
+    ]
 
 
 def should_auto_rescan(now: datetime | None = None) -> bool:

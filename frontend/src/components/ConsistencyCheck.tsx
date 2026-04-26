@@ -4,7 +4,7 @@ import {
   CheckResponse,
   ExcelCheckIssue,
   FileInfo,
-  LibraryFileGroup,
+  LibraryGroupSummary,
   PptSlideCard,
   WordDiffCard,
   api,
@@ -72,8 +72,10 @@ export default function ConsistencyCheck() {
   const [fileQueryDraft, setFileQueryDraft] = useState('')
   const [filesLoading, setFilesLoading] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  const [groups, setGroups] = useState<LibraryFileGroup[]>([])
+  const [groups, setGroups] = useState<LibraryGroupSummary[]>([])
   const [groupTotal, setGroupTotal] = useState(0)
+  const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
+  const [groupDetailFiles, setGroupDetailFiles] = useState<FileInfo[]>([])
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -100,10 +102,10 @@ export default function ConsistencyCheck() {
   useEffect(() => {
     void fetchFiles(0, '')
     api.library
-      .groups()
+      .groups({ limit: GROUP_PREVIEW_LIMIT })
       .then((response) => {
-        setGroups(response.data.groups.slice(0, GROUP_PREVIEW_LIMIT))
-        setGroupTotal(response.data.groups.length)
+        setGroups(response.data.groups)
+        setGroupTotal(response.data.total)
       })
       .catch(() => {
         /* silent */
@@ -113,9 +115,13 @@ export default function ConsistencyCheck() {
   const knownFilesById = useMemo(() => {
     const byId = new Map<number, FileInfo>()
     files.forEach((file) => byId.set(file.id, file))
-    groups.forEach((group) => group.files.forEach((file) => byId.set(file.id, file)))
+    groupDetailFiles.forEach((file) => byId.set(file.id, file))
+    groups.forEach((group) => {
+      if (group.latest_file) byId.set(group.latest_file.id, group.latest_file)
+      if (group.previous_file) byId.set(group.previous_file.id, group.previous_file)
+    })
     return byId
-  }, [files, groups])
+  }, [files, groupDetailFiles, groups])
 
   const selectedFiles = useMemo(
     () =>
@@ -192,17 +198,27 @@ export default function ConsistencyCheck() {
     }
   }
 
-  const selectGroup = (group: LibraryFileGroup) => {
+  const selectGroup = async (group: LibraryGroupSummary) => {
     if (!['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(group.file_type))) {
       snackbar.warn('이 묶음은 검색 등록용 파일이라 정합성 검사 대상으로 선택할 수 없습니다.')
       return
     }
-    const ids =
-      normalizeFileType(group.file_type) === 'Excel'
-        ? group.files.map((file) => file.id)
-        : group.files.slice(0, 2).map((file) => file.id)
-    setSelectedIds(new Set(ids))
-    setResult(null)
+    setGroupLoadingId(group.id)
+    try {
+      const response = await api.library.groupDetail(group.id)
+      const detailFiles = response.data.files
+      const ids =
+        normalizeFileType(group.file_type) === 'Excel'
+          ? detailFiles.map((file) => file.id)
+          : detailFiles.slice(0, 2).map((file) => file.id)
+      setGroupDetailFiles(detailFiles)
+      setSelectedIds(new Set(ids))
+      setResult(null)
+    } catch {
+      snackbar.error('문서 묶음 상세 정보를 불러오지 못했습니다.')
+    } finally {
+      setGroupLoadingId(null)
+    }
   }
 
   const handleFileSearch = () => {
@@ -246,7 +262,7 @@ export default function ConsistencyCheck() {
         <Card variant="elevated">
           <CardSection
             title="자동 감지된 유사 파일 묶음"
-            description="Phase 2 전까지는 첫 화면에 최대 20개만 보여줍니다. 전체 그룹 요약/상세 API는 다음 단계에서 bounded로 바꿉니다."
+            description="같은 파일명 또는 버전/날짜 표시가 있는 Office 문서 후보를 요약만 먼저 보여줍니다. 내용 차이는 실제 비교 후에만 확인합니다."
             trailing={
               <Chip
                 label={groupTotal > groups.length ? `표시 ${groups.length}/${groupTotal}개` : `${groups.length}개 묶음`}
@@ -261,7 +277,8 @@ export default function ConsistencyCheck() {
                 <button
                   key={group.id}
                   type="button"
-                  onClick={() => selectGroup(group)}
+                  onClick={() => void selectGroup(group)}
+                  disabled={groupLoadingId === group.id}
                   className="state-host relative text-left rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 hover:border-[var(--md-sys-color-primary)] transition-colors"
                 >
                   <span className="state-layer" />
@@ -269,23 +286,38 @@ export default function ConsistencyCheck() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <FileTypeBadge fileType={group.file_type} />
                       <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                        {group.canonical_name}
+                        {group.base_name}
                       </span>
-                      <Badge tone="neutral">{group.files.length}개 파일</Badge>
+                      <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
+                        {group.group_kind === 'exact_name_conflict' ? '같은 파일명' : '버전 후보'}
+                      </Badge>
+                      <Badge tone="neutral">{group.file_count}개 파일</Badge>
                     </div>
                     <div className="space-y-1">
-                      {group.files.slice(0, 3).map((file) => (
+                      {[group.latest_file, group.previous_file].filter(Boolean).map((file) => (
                         <p
-                          key={file.id}
+                          key={(file as FileInfo).id}
                           className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate"
-                          title={file.path}
+                          title={(file as FileInfo).path}
                         >
-                          {file.name}
+                          {(file as FileInfo).name}
                         </p>
                       ))}
                     </div>
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                      {group.reason}
+                    </p>
+                    {group.tokens_summary.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap">
+                        {group.tokens_summary.slice(0, 5).map((token) => (
+                          <Chip key={token} label={token} tone="secondary" as="span" />
+                        ))}
+                      </div>
+                    )}
                     <p className="type-label-md text-[var(--md-sys-color-primary)]">
-                      {normalizeFileType(group.file_type) === 'Excel'
+                      {groupLoadingId === group.id
+                        ? '묶음 상세 불러오는 중…'
+                        : normalizeFileType(group.file_type) === 'Excel'
                         ? '이 묶음 전체를 비교 대상으로 선택'
                         : '이 묶음에서 최신 2개 파일을 비교 대상으로 선택'}
                     </p>

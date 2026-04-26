@@ -308,13 +308,44 @@ class LibraryRescanStatus(BaseModel):
 
 class LibraryFileGroup(BaseModel):
     id: str
+    group_kind: str = "version_family"
     file_type: str
+    base_name: str = ""
     canonical_name: str
     title: str
     confidence: str = "filename"
-    files: List[FileInfo]
+    reason: str = ""
+    file_count: int = 0
+    latest_file: Optional[FileInfo] = None
+    previous_file: Optional[FileInfo] = None
+    tokens_summary: List[str] = Field(default_factory=list)
+    files: List[FileInfo] = Field(default_factory=list)
     recommended_action: str
 
 
+class LibraryGroupSummary(BaseModel):
+    id: str
+    group_kind: str
+    file_type: str
+    base_name: str
+    canonical_name: str
+    title: str
+    file_count: int
+    confidence: str
+    reason: str
+    latest_file: Optional[FileInfo] = None
+    previous_file: Optional[FileInfo] = None
+    tokens_summary: List[str] = Field(default_factory=list)
+    recommended_action: str
+
+
+class LibraryGroupDetail(LibraryGroupSummary):
+    files: List[FileInfo]
+
+
 class LibraryGroupsResponse(BaseModel):
-    groups: List[LibraryFileGroup]
+    total: int = 0
+    groups: List[LibraryGroupSummary]
+    limit: int = 50
+    offset: int = 0
+    counts_by_kind: Dict[str, int] = Field(default_factory=dict)
