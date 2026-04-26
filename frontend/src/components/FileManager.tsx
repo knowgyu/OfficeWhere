@@ -38,7 +38,6 @@ import {
   useSnackbar,
 } from '../ui'
 import { useLibraryRescan } from '../contexts/LibraryRescanContext'
-import FolderScanner from './FolderScanner'
 import PreviewPanel from './PreviewPanel'
 
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
@@ -555,7 +554,7 @@ export default function FileManager() {
     }
     if (mode === 'word') return ['문단/표 행 변경 확인', '2개 파일 비교', '기준 컬럼 불필요']
     if (fileType === 'PowerPoint') return ['슬라이드 변경 확인', '추가/삭제 및 내용 변경', '기준 컬럼 불필요']
-    return ['검색 내용 미리보기', '정합성 검사 제외', '기준 컬럼 불필요']
+    return ['검색 내용 미리보기', '변경점 확인 제외', '기준 컬럼 불필요']
   }
 
   return (
@@ -563,7 +562,7 @@ export default function FileManager() {
       <Card variant="elevated">
         <CardSection
           title="대상 폴더"
-          description="자주 쓰는 문서 폴더를 등록하면 검색과 비교에 바로 사용할 수 있습니다. 자동 재스캔은 바뀐 파일만 다시 읽습니다."
+          description="자주 쓰는 문서 폴더를 등록하면 검색과 히스토리 확인에 바로 사용할 수 있습니다. K:/ 같은 네트워크 드라이브도 접근 가능하면 추가할 수 있고, 앱은 원본 문서를 읽기만 합니다."
           trailing={
             <Button
               variant="filled"
@@ -981,8 +980,6 @@ export default function FileManager() {
           </p>
         </CardSection>
       </Card>
-
-      <FolderScanner onRegistered={() => void fetchFiles(0, fileQuery)} />
 
       <Card variant="outlined" className="overflow-hidden">
         <header className="px-6 py-4 space-y-4 border-b border-[var(--md-sys-color-outline-variant)]">

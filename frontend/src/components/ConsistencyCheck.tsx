@@ -36,6 +36,25 @@ const GROUP_DETAIL_FILE_LIMIT = 200
 
 type GroupFilter = 'all' | LibraryGroupKind
 type ContentStatus = LibraryGroupSummary['content_status']
+type HistoryTransitionStatus = 'pending' | 'loading' | 'done' | 'error'
+
+interface HistoryTransition {
+  id: string
+  fromFile: FileInfo
+  toFile: FileInfo
+  status: HistoryTransitionStatus
+  result: CheckResponse | null
+  error?: string
+}
+
+interface HistoryDiffState {
+  groupId: string
+  transitions: HistoryTransition[]
+  loading: boolean
+  completed: number
+  total: number
+  truncated: boolean
+}
 
 const MODE_GUIDE: Record<string, string> = {
   excel: 'Excel은 여러 파일을 동시에 비교합니다. 기준 컬럼이 같은 행에서 값이 다르거나 일부 파일에 항목이 없는 경우를 찾습니다.',
@@ -68,11 +87,11 @@ const CONTENT_STATUS_META: Record<
   ContentStatus,
   { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' }
 > = {
-  pending: { label: '내용 판단 대기', tone: 'neutral' },
-  partial: { label: '일부만 판단', tone: 'warning' },
+  pending: { label: '내용 확인 전', tone: 'neutral' },
+  partial: { label: '일부만 확인', tone: 'warning' },
   not_enough_content: { label: '본문 부족', tone: 'neutral' },
-  same_content: { label: '내용 같음', tone: 'success' },
-  content_differs: { label: '내용 다름', tone: 'danger' },
+  same_content: { label: '내용 같아 보임', tone: 'success' },
+  content_differs: { label: '내용 다름 가능', tone: 'danger' },
 }
 
 const isCheckableFile = (file: FileInfo) =>
@@ -81,7 +100,28 @@ const isCheckableFile = (file: FileInfo) =>
 const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
 
 const groupKindLabel = (kind: LibraryGroupKind) =>
-  kind === 'exact_name_conflict' ? '같은 파일명' : '버전 후보'
+  kind === 'exact_name_conflict' ? '같은 이름 문서' : '버전/날짜 문서'
+
+const sanitizeGroupReason = (reason: string) =>
+  reason
+    .replace(/fingerprint/gi, '추출 내용')
+    .replace(/후보입니다\./g, '문서로 보입니다.')
+
+const contentStatusHint = (group: LibraryGroupSummary) => {
+  if (group.content_status === 'same_content') {
+    return `${group.fingerprint_coverage}개 문서에서 추출한 내용이 같아 보입니다.`
+  }
+  if (group.content_status === 'content_differs') {
+    return `${group.fingerprint_unique_count}가지 내용이 있어 변경 가능성이 있습니다.`
+  }
+  if (group.content_status === 'partial') {
+    return `${group.file_count}개 중 ${group.fingerprint_coverage}개 문서만 내용 확인이 끝났습니다.`
+  }
+  if (group.content_status === 'not_enough_content') {
+    return '추출할 본문이 부족해 내용 차이를 단정하지 않습니다.'
+  }
+  return '재스캔 후 내용 확인 정확도가 올라갑니다.'
+}
 
 const formatDate = (value?: string | number | null) => {
   if (!value) return '날짜 정보 없음'
@@ -120,6 +160,7 @@ export default function ConsistencyCheck() {
   const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
   const [activeGroupDetail, setActiveGroupDetail] = useState<LibraryGroupDetail | null>(null)
   const [groupDetailFiles, setGroupDetailFiles] = useState<FileInfo[]>([])
+  const [historyState, setHistoryState] = useState<HistoryDiffState | null>(null)
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -198,7 +239,7 @@ export default function ConsistencyCheck() {
   const validateFilesForCheck = (candidateFiles: FileInfo[]): string | null => {
     if (candidateFiles.length < 2) return '최소 2개 파일을 선택해 주세요.'
     if (candidateFiles.some((file) => !isCheckableFile(file))) {
-      return '정합성 검사는 Word, PowerPoint, Excel 파일만 지원합니다.'
+      return '변경점 확인은 Word, PowerPoint, Excel 파일만 지원합니다.'
     }
     const modes = new Set(candidateFiles.map((file) => getCompareMode(undefined, file.file_type)))
     if (modes.size > 1) return '파일 타입이 섞이면 검사할 수 없습니다.'
@@ -228,7 +269,7 @@ export default function ConsistencyCheck() {
     } catch (error) {
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        '정합성 검사에 실패했습니다.'
+        '변경점 확인에 실패했습니다.'
       snackbar.error(detail)
     } finally {
       setLoading(false)
@@ -237,7 +278,7 @@ export default function ConsistencyCheck() {
 
   const toggleFile = (file: FileInfo) => {
     if (!isCheckableFile(file)) {
-      snackbar.warn('이 파일 형식은 검색 등록은 가능하지만 정합성 검사는 지원하지 않습니다.')
+      snackbar.warn('이 파일 형식은 검색 등록은 가능하지만 변경점 확인은 지원하지 않습니다.')
       return
     }
     const next = new Set(selectedIds)
@@ -252,7 +293,7 @@ export default function ConsistencyCheck() {
     }
 
     if (selectedMode && fileMode !== selectedMode) {
-      snackbar.warn('정합성 검사는 같은 파일 타입만 함께 선택할 수 있습니다.')
+      snackbar.warn('변경점 확인은 같은 파일 타입만 함께 선택할 수 있습니다.')
       return
     }
     if ((fileMode === 'word' || fileMode === 'ppt') && next.size >= 2) {
@@ -287,19 +328,97 @@ export default function ConsistencyCheck() {
     }
   }
 
-  const selectGroup = async (group: LibraryGroupSummary) => {
-    await loadGroupDetail(group)
+  const buildHistoryTransitions = (detail: LibraryGroupDetail): HistoryTransition[] =>
+    detail.files.slice(0, GROUP_DETAIL_FILE_LIMIT).flatMap((toFile, index, filesForHistory) => {
+      const fromFile = filesForHistory[index + 1]
+      if (!fromFile) return []
+      return [
+        {
+          id: `${fromFile.id}->${toFile.id}`,
+          fromFile,
+          toFile,
+          status: 'pending' as const,
+          result: null,
+        },
+      ]
+    })
+
+  const runHistoryDiffs = async (detail: LibraryGroupDetail) => {
+    const transitions = buildHistoryTransitions(detail)
+    const total = transitions.length
+    const truncated = detail.file_count > detail.files.length
+    setHistoryState({
+      groupId: detail.id,
+      transitions,
+      loading: total > 0,
+      completed: 0,
+      total,
+      truncated,
+    })
+
+    if (total === 0) return
+
+    for (let index = 0; index < transitions.length; index += 1) {
+      const transition = transitions[index]
+      setHistoryState((current) =>
+        current?.groupId === detail.id
+          ? {
+              ...current,
+              transitions: current.transitions.map((item) =>
+                item.id === transition.id ? { ...item, status: 'loading' } : item,
+              ),
+            }
+          : current,
+      )
+
+      try {
+        const response = await api.check.run({
+          file_ids: [transition.fromFile.id, transition.toFile.id],
+        })
+        const normalized = normalizeCheckResponse(response.data)
+        setHistoryState((current) =>
+          current?.groupId === detail.id
+            ? {
+                ...current,
+                completed: Math.min(current.completed + 1, current.total),
+                transitions: current.transitions.map((item) =>
+                  item.id === transition.id
+                    ? { ...item, status: 'done', result: normalized, error: undefined }
+                    : item,
+                ),
+              }
+            : current,
+        )
+      } catch (error) {
+        const detailMessage =
+          (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+          '이 버전 사이의 변경점을 계산하지 못했습니다.'
+        setHistoryState((current) =>
+          current?.groupId === detail.id
+            ? {
+                ...current,
+                completed: Math.min(current.completed + 1, current.total),
+                transitions: current.transitions.map((item) =>
+                  item.id === transition.id
+                    ? { ...item, status: 'error', error: detailMessage }
+                    : item,
+                ),
+              }
+            : current,
+        )
+      }
+    }
+
+    setHistoryState((current) =>
+      current?.groupId === detail.id ? { ...current, loading: false } : current,
+    )
   }
 
-  const compareGroup = async (group: LibraryGroupSummary, scope: 'latest_two' | 'all') => {
+  const selectGroup = async (group: LibraryGroupSummary) => {
     const detail = await loadGroupDetail(group)
     if (!detail) return
-    const normalizedType = normalizeFileType(detail.file_type)
-    const candidateFiles =
-      scope === 'all' && normalizedType === 'Excel'
-        ? detail.files
-        : detail.files.slice(0, 2)
-    await runCheckForFiles(candidateFiles)
+    if (historyState?.groupId === detail.id && historyState.transitions.length > 0) return
+    await runHistoryDiffs(detail)
   }
 
   const openFile = async (file: FileInfo) => {
@@ -330,12 +449,14 @@ export default function ConsistencyCheck() {
 
   const changeGroupFilter = (nextFilter: GroupFilter) => {
     setActiveGroupDetail(null)
+    setHistoryState(null)
     void fetchGroups(0, nextFilter)
   }
 
   const goToGroupPage = (nextOffset: number) => {
     const boundedOffset = Math.max(0, nextOffset)
     setActiveGroupDetail(null)
+    setHistoryState(null)
     void fetchGroups(boundedOffset, groupFilter)
   }
 
@@ -353,8 +474,8 @@ export default function ConsistencyCheck() {
   const versionCount =
     groupCounts.version_family ??
     groups.filter((group) => group.group_kind === 'version_family').length
-  const contentEvidenceCount = groups.filter(
-    (group) => group.content_status === 'same_content' || group.content_status === 'content_differs',
+  const contentDiffCandidateCount = groups.filter(
+    (group) => group.content_status === 'content_differs',
   ).length
 
   if (fileTotal === 0 && groupTotal === 0 && !filesLoading && !groupsLoading) {
@@ -363,7 +484,7 @@ export default function ConsistencyCheck() {
         <EmptyState
           icon="fact_check"
           title="먼저 파일을 등록해 주세요"
-          description="정합성 검사는 등록된 Office 파일 사이의 차이를 탐지합니다."
+          description="문서 히스토리는 등록된 Office 파일 사이의 버전과 변경점을 확인합니다."
         />
       </Card>
     )
@@ -373,35 +494,35 @@ export default function ConsistencyCheck() {
     <div className="space-y-6">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard
-          label="확인할 묶음"
+          label="문서 히스토리"
           value={groupTotal}
           icon="folder_copy"
           tone={groupTotal > 0 ? 'primary' : 'neutral'}
         />
         <StatCard
-          label="같은 파일명"
+          label="같은 이름 문서"
           value={exactCount}
           icon="content_copy"
           tone={exactCount > 0 ? 'warning' : 'neutral'}
         />
         <StatCard
-          label="버전 후보"
+          label="버전/날짜 문서"
           value={versionCount}
           icon="history"
           tone={versionCount > 0 ? 'primary' : 'neutral'}
         />
         <StatCard
-          label="현재 페이지 근거"
-          value={contentEvidenceCount}
+          label="표시 중 차이 후보"
+          value={contentDiffCandidateCount}
           icon="fingerprint"
-          tone={contentEvidenceCount > 0 ? 'success' : 'neutral'}
+          tone={contentDiffCandidateCount > 0 ? 'warning' : 'neutral'}
         />
       </div>
 
       <Card variant="elevated">
         <CardSection
-          title="자동 감지된 Office 문서 묶음"
-          description="같은 파일명 또는 버전/날짜 표시가 있는 Word, PowerPoint, Excel 후보를 먼저 보여줍니다. 내용 판단은 fingerprint 근거가 있을 때만 표시합니다."
+          title="자동 감지된 문서 히스토리"
+          description="같은 이름이거나 v1.0, v1.1, 260426처럼 버전/날짜가 붙은 Office 문서를 묶어 보여줍니다. 히스토리를 열면 그 묶음의 변경점만 계산합니다."
           trailing={
             <Chip
               label={
@@ -423,13 +544,13 @@ export default function ConsistencyCheck() {
               onClick={() => changeGroupFilter('all')}
             />
             <Chip
-              label={`같은 파일명 ${exactCount}`}
+                label={`같은 이름 ${exactCount}`}
               kind="filter"
               selected={groupFilter === 'exact_name_conflict'}
               onClick={() => changeGroupFilter('exact_name_conflict')}
             />
             <Chip
-              label={`버전 후보 ${versionCount}`}
+                label={`버전/날짜 ${versionCount}`}
               kind="filter"
               selected={groupFilter === 'version_family'}
               onClick={() => changeGroupFilter('version_family')}
@@ -443,8 +564,8 @@ export default function ConsistencyCheck() {
           ) : groups.length === 0 ? (
             <EmptyState
               icon="task_alt"
-              title="자동 감지된 묶음이 없습니다"
-              description="같은 파일명이나 버전/날짜가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
+              title="자동 감지된 히스토리가 없습니다"
+              description="같은 이름이거나 버전/날짜가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
               compact
             />
           ) : (
@@ -452,14 +573,12 @@ export default function ConsistencyCheck() {
               {groups.map((group) => (
                 <GroupCard
                   key={group.id}
-                  group={group}
-                  activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
-                  loading={groupLoadingId === group.id}
-                  checking={loading}
-                  onOpen={() => void selectGroup(group)}
-                  onCompareLatest={() => void compareGroup(group, 'latest_two')}
-                  onCompareAll={() => void compareGroup(group, 'all')}
-                  onOpenFile={(file) => void openFile(file)}
+                    group={group}
+                    activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
+                    historyState={historyState?.groupId === group.id ? historyState : null}
+                    loading={groupLoadingId === group.id}
+                    onOpen={() => void selectGroup(group)}
+                    onOpenFile={(file) => void openFile(file)}
                 />
               ))}
             </div>
@@ -520,9 +639,9 @@ export default function ConsistencyCheck() {
               onClick={handleCheck}
               loading={loading}
               disabled={selectedFiles.length < 2}
-            >
-              선택 파일 검사
-            </Button>
+              >
+                선택 파일 변경점 확인
+              </Button>
           </div>
 
           {manualOpen && (
@@ -531,7 +650,7 @@ export default function ConsistencyCheck() {
                 <div className="flex-1 min-w-[240px]">
                   <TextField
                     leadingIcon="search"
-                    placeholder="검사할 Office 파일명 또는 경로 검색"
+                      placeholder="비교할 Office 파일명 또는 경로 검색"
                     value={fileQueryDraft}
                     onChange={(event) => setFileQueryDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -609,7 +728,7 @@ export default function ConsistencyCheck() {
                           </div>
                           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
                             {unsupported
-                              ? '검색 등록 가능 · 정합성 검사 제외'
+                              ? '검색 등록 가능 · 변경점 확인 제외'
                               : fileMode === 'excel'
                                 ? `기준 컬럼 ${file.key_column || '미지정'} · 여러 파일 비교`
                                 : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
@@ -661,28 +780,20 @@ export default function ConsistencyCheck() {
 function GroupCard({
   group,
   activeDetail,
+  historyState,
   loading,
-  checking,
   onOpen,
-  onCompareLatest,
-  onCompareAll,
   onOpenFile,
 }: {
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
+  historyState: HistoryDiffState | null
   loading: boolean
-  checking: boolean
   onOpen: () => void
-  onCompareLatest: () => void
-  onCompareAll: () => void
   onOpenFile: (file: FileInfo) => void
 }) {
-  const normalizedType = normalizeFileType(group.file_type)
   const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
-  const excelGroupCompareLabel =
-    group.file_count > GROUP_DETAIL_FILE_LIMIT
-      ? `최신 ${GROUP_DETAIL_FILE_LIMIT}개 비교`
-      : '묶음 전체 비교'
+  const historyLoading = loading || Boolean(historyState?.loading)
 
   return (
     <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
@@ -713,13 +824,11 @@ function GroupCard({
         </div>
 
         <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          {group.reason}
+          {sanitizeGroupReason(group.reason)}
         </p>
-        {group.content_evidence && (
-          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            근거 · {group.content_evidence}
-          </p>
-        )}
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          내용 확인 · {contentStatusHint(group)}
+        </p>
         {group.tokens_summary.length > 0 && (
           <div className="flex gap-1.5 flex-wrap">
             {group.tokens_summary.slice(0, 6).map((token) => (
@@ -730,31 +839,35 @@ function GroupCard({
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        <Button variant="outlined" leadingIcon="timeline" onClick={onOpen} loading={loading}>
-          히스토리 보기
+        <Button variant="filled" leadingIcon="timeline" onClick={onOpen} loading={historyLoading}>
+          {activeDetail ? '히스토리 보기' : '히스토리 열기'}
         </Button>
-        <Button variant="filled" leadingIcon="difference" onClick={onCompareLatest} loading={checking || loading}>
-          최신 2개 비교
-        </Button>
-        {normalizedType === 'Excel' && (
-          <Button variant="tonal" leadingIcon="table_chart" onClick={onCompareAll} loading={checking || loading}>
-            {excelGroupCompareLabel}
-          </Button>
-        )}
       </div>
 
-      {activeDetail && <GroupTimeline detail={activeDetail} onOpenFile={onOpenFile} />}
+      {activeDetail && (
+        <GroupTimeline detail={activeDetail} historyState={historyState} onOpenFile={onOpenFile} />
+      )}
     </div>
   )
 }
 
 function GroupTimeline({
   detail,
+  historyState,
   onOpenFile,
 }: {
   detail: LibraryGroupDetail
+  historyState: HistoryDiffState | null
   onOpenFile: (file: FileInfo) => void
 }) {
+  const progressLabel = historyState
+    ? historyState.total === 0
+      ? '비교할 이전 버전 없음'
+      : historyState.loading
+        ? `변경점 계산 중… ${historyState.completed}/${historyState.total}`
+        : `변경점 계산 완료 ${historyState.completed}/${historyState.total}`
+    : '변경점 계산 준비 중'
+
   return (
     <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -765,6 +878,26 @@ function GroupTimeline({
           </p>
         </div>
         <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
+      </div>
+
+      <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">버전별 변경점</p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              이 묶음 안에서 바로 이전 버전과 다음 버전만 순서대로 비교합니다.
+            </p>
+          </div>
+          <Badge tone={historyState?.loading ? 'warning' : 'neutral'}>
+            {historyState?.loading && <Spinner size={14} />} {progressLabel}
+          </Badge>
+        </div>
+        {historyState?.truncated && (
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            최신 {detail.files.length}개만 표시되어 이 범위 안의 변경점만 계산했습니다.
+          </p>
+        )}
+        <HistoryTransitions transitions={historyState?.transitions ?? []} />
       </div>
 
       <ol className="space-y-2">
@@ -801,28 +934,129 @@ function GroupTimeline({
   )
 }
 
-function ExcelCheckResult({ result }: { result: Extract<CheckResponse, { mode: 'excel' }> }) {
+function HistoryTransitions({ transitions }: { transitions: HistoryTransition[] }) {
+  if (transitions.length === 0) {
+    return (
+      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+        비교할 이전 버전이 없습니다. 같은 문서의 다른 버전을 더 등록하면 변경점이 표시됩니다.
+      </p>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {transitions.map((transition) => (
+        <HistoryTransitionCard key={transition.id} transition={transition} />
+      ))}
+    </div>
+  )
+}
+
+function changeCount(result: CheckResponse | null) {
+  if (!result) return 0
+  if (result.mode === 'excel') return result.issues.length
+  if (result.mode === 'word') return result.diffs.length
+  return result.slides.length
+}
+
+function HistoryTransitionCard({ transition }: { transition: HistoryTransition }) {
+  const count = changeCount(transition.result)
+  const statusTone =
+    transition.status === 'error'
+      ? 'danger'
+      : transition.status === 'done'
+        ? count > 0
+          ? 'warning'
+          : 'success'
+        : 'neutral'
+  const statusLabel =
+    transition.status === 'loading'
+      ? '계산 중'
+      : transition.status === 'error'
+        ? '실패'
+        : transition.status === 'done'
+          ? count > 0
+            ? `${count}건 변경`
+            : '변경 없음'
+          : '대기'
+
+  return (
+    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)] break-words">
+            {transition.fromFile.name} → {transition.toFile.name}
+          </p>
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            이전 버전에서 다음 버전으로 바뀐 내용을 확인합니다.
+          </p>
+        </div>
+        <Badge tone={statusTone}>
+          {transition.status === 'loading' && <Spinner size={14} />} {statusLabel}
+        </Badge>
+      </div>
+
+      {transition.status === 'error' && (
+        <p className="type-body-sm text-[var(--md-sys-color-error)]">
+          {transition.error ?? '이 버전 사이의 변경점을 계산하지 못했습니다.'}
+        </p>
+      )}
+      {transition.status === 'done' && transition.result && (
+        <HistoryTransitionResult result={transition.result} />
+      )}
+    </div>
+  )
+}
+
+function HistoryTransitionResult({ result }: { result: CheckResponse }) {
+  if (result.mode === 'excel') return <ExcelCheckResult result={result} compact />
+  if (result.mode === 'word') return <WordCheckResult diffs={result.diffs} compact />
+  return <PptCheckResult slides={result.slides} compact />
+}
+
+function formatExcelLocation(conflict: ExcelCheckIssue['conflicts'][number]) {
+  const rows = conflict.rowNumbers.length > 0 ? `${conflict.rowNumbers.join(', ')}행` : ''
+  const columns = conflict.columnLetters.length > 0 ? `${conflict.columnLetters.join(', ')}열` : ''
+  const rowColumnText = [rows, columns].filter(Boolean).join(' ')
+
+  if (conflict.cellRefs.length > 0) {
+    const cells = conflict.cellRefs.slice(0, 4).join(', ')
+    const suffix = conflict.cellRefs.length > 4 ? ` 외 ${conflict.cellRefs.length - 4}개` : ''
+    return rowColumnText ? `${rowColumnText} (${cells}${suffix})` : `${cells}${suffix}`
+  }
+  return rowColumnText || '-'
+}
+
+function ExcelCheckResult({
+  result,
+  compact = false,
+}: {
+  result: Extract<CheckResponse, { mode: 'excel' }>
+  compact?: boolean
+}) {
   const valueConflicts = result.issues.filter((issue) => issue.type === 'value_conflict')
   const missingKeys = result.issues.filter((issue) => issue.type === 'missing_key')
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <StatCard label="전체 항목" value={result.totalKeys} icon="tag" />
-        <StatCard label="공통 항목" value={result.matchedKeys} icon="check_circle" tone="success" />
-        <StatCard
-          label="값 불일치"
-          value={valueConflicts.length}
-          icon="report_problem"
-          tone={valueConflicts.length > 0 ? 'danger' : 'neutral'}
-        />
-        <StatCard
-          label="항목 누락"
-          value={missingKeys.length}
-          icon="pending"
-          tone={missingKeys.length > 0 ? 'warning' : 'neutral'}
-        />
-      </div>
+      {!compact && (
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <StatCard label="전체 항목" value={result.totalKeys} icon="tag" />
+          <StatCard label="공통 항목" value={result.matchedKeys} icon="check_circle" tone="success" />
+          <StatCard
+            label="값 불일치"
+            value={valueConflicts.length}
+            icon="report_problem"
+            tone={valueConflicts.length > 0 ? 'danger' : 'neutral'}
+          />
+          <StatCard
+            label="항목 누락"
+            value={missingKeys.length}
+            icon="pending"
+            tone={missingKeys.length > 0 ? 'warning' : 'neutral'}
+          />
+        </div>
+      )}
 
       <ExcelIssueSection
         title="값 불일치"
@@ -904,7 +1138,7 @@ function ExcelIssueSection({
                 <table className="min-w-full text-sm">
                   <thead className="bg-[var(--md-sys-color-surface-container-low)]">
                     <tr>
-                      {['파일', '컬럼', '행 수', '값'].map((header) => (
+                      {['파일', '위치', '컬럼', '행 수', '값'].map((header) => (
                         <th
                           key={header}
                           className="px-3 py-2 text-left type-label-md text-[var(--md-sys-color-on-surface-variant)]"
@@ -920,11 +1154,14 @@ function ExcelIssueSection({
                         key={`${issue.id}-${conflict.fileId}`}
                         className="bg-[var(--md-sys-color-surface-container-lowest)]"
                       >
-                        <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
-                          {conflict.fileName}
-                        </td>
-                        <td className="px-3 py-2 text-[var(--md-sys-color-on-surface-variant)] whitespace-nowrap">
-                          {conflict.columns.join(', ') || '-'}
+                          <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
+                            {conflict.fileName}
+                          </td>
+                          <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap font-mono">
+                            {formatExcelLocation(conflict)}
+                          </td>
+                          <td className="px-3 py-2 text-[var(--md-sys-color-on-surface-variant)] whitespace-nowrap">
+                            {conflict.columns.join(', ') || '-'}
                         </td>
                         <td className="px-3 py-2 text-[var(--md-sys-color-on-surface-variant)] whitespace-nowrap">
                           {conflict.rowCount}
@@ -945,19 +1182,27 @@ function ExcelIssueSection({
   )
 }
 
-function WordCheckResult({ diffs }: { diffs: WordDiffCard[] }) {
+function WordCheckResult({
+  diffs,
+  compact = false,
+}: {
+  diffs: WordDiffCard[]
+  compact?: boolean
+}) {
   const insertCount = diffs.filter((diff) => diff.type === 'insert').length
   const deleteCount = diffs.filter((diff) => diff.type === 'delete').length
   const replaceCount = diffs.filter((diff) => diff.type === 'replace').length
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <StatCard label="전체 변경" value={diffs.length} icon="edit_note" />
-        <StatCard label="추가" value={insertCount} icon="add_circle" tone="success" />
-        <StatCard label="삭제" value={deleteCount} icon="do_not_disturb_on" tone="danger" />
-        <StatCard label="수정" value={replaceCount} icon="change_circle" tone="warning" />
-      </div>
+      {!compact && (
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <StatCard label="전체 변경" value={diffs.length} icon="edit_note" />
+          <StatCard label="추가" value={insertCount} icon="add_circle" tone="success" />
+          <StatCard label="삭제" value={deleteCount} icon="do_not_disturb_on" tone="danger" />
+          <StatCard label="수정" value={replaceCount} icon="change_circle" tone="warning" />
+        </div>
+      )}
 
       <Card variant="outlined" className="overflow-hidden">
         <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
@@ -990,10 +1235,7 @@ function WordCheckResult({ diffs }: { diffs: WordDiffCard[] }) {
                     {blockTypeLabel(diff.blockType)}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  <DiffPanel title="이전 내용" content={diff.beforeText} tone="danger" />
-                  <DiffPanel title="변경 후 내용" content={diff.afterText} tone="success" />
-                </div>
+                <GitDiffPanel diff={diff} />
               </li>
             ))}
           </ul>
@@ -1003,24 +1245,32 @@ function WordCheckResult({ diffs }: { diffs: WordDiffCard[] }) {
   )
 }
 
-function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
+function PptCheckResult({
+  slides,
+  compact = false,
+}: {
+  slides: PptSlideCard[]
+  compact?: boolean
+}) {
   const inserted = slides.filter((slide) => slide.type === 'inserted_slide').length
   const removed = slides.filter((slide) => slide.type === 'removed_slide').length
   const changed = slides.filter((slide) => slide.type === 'matched_slide_change').length
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <StatCard label="전체 변경" value={slides.length} icon="slideshow" />
-        <StatCard label="슬라이드 추가" value={inserted} icon="add_to_photos" tone="success" />
-        <StatCard label="슬라이드 제거" value={removed} icon="delete_sweep" tone="danger" />
-        <StatCard
-          label="내용 변경"
-          value={changed}
-          icon="compare_arrows"
-          tone="warning"
-        />
-      </div>
+      {!compact && (
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <StatCard label="전체 변경" value={slides.length} icon="slideshow" />
+          <StatCard label="슬라이드 추가" value={inserted} icon="add_to_photos" tone="success" />
+          <StatCard label="슬라이드 제거" value={removed} icon="delete_sweep" tone="danger" />
+          <StatCard
+            label="내용 변경"
+            value={changed}
+            icon="compare_arrows"
+            tone="warning"
+          />
+        </div>
+      )}
 
       <Card variant="outlined" className="overflow-hidden">
         <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
@@ -1046,10 +1296,12 @@ function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
                   >
                     {PPT_TYPE_KO[slide.type]}
                   </Badge>
-                  <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                    슬라이드 {slide.slideNumber}
-                    {slide.matchedSlideNumber ? ` ↔ ${slide.matchedSlideNumber}` : ''}
-                  </span>
+                    <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                      슬라이드 {slide.slideNumber}
+                      {slide.matchedSlideNumber && slide.matchedSlideNumber !== slide.slideNumber
+                        ? ` → ${slide.matchedSlideNumber}`
+                        : ''}
+                    </span>
                   <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                     {slide.title}
                   </span>
@@ -1069,6 +1321,37 @@ function PptCheckResult({ slides }: { slides: PptSlideCard[] }) {
           </ul>
         )}
       </Card>
+    </div>
+  )
+}
+
+function GitDiffPanel({ diff }: { diff: WordDiffCard }) {
+  const rows: Array<{ prefix: '+' | '-'; text: string; tone: 'success' | 'danger' }> = []
+  if (diff.type !== 'insert' && diff.beforeText) {
+    rows.push({ prefix: '-', text: diff.beforeText, tone: 'danger' })
+  }
+  if (diff.type !== 'delete' && diff.afterText) {
+    rows.push({ prefix: '+', text: diff.afterText, tone: 'success' })
+  }
+
+  if (rows.length === 0) {
+    rows.push({ prefix: '+', text: '(내용 없음)', tone: 'success' })
+  }
+
+  return (
+    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] overflow-hidden bg-[var(--md-sys-color-surface-container-lowest)] font-mono text-sm">
+      {rows.map((row, index) => {
+        const bg =
+          row.tone === 'danger'
+            ? 'bg-[var(--md-sys-color-error-container)]/45 text-[var(--md-sys-color-on-error-container)]'
+            : 'bg-[var(--md-sys-color-success-container)]/45 text-[var(--md-sys-color-on-success-container)]'
+        return (
+          <div key={`${row.prefix}-${index}`} className={`px-3 py-2 whitespace-pre-wrap break-words ${bg}`}>
+            <span className="font-bold mr-2">{row.prefix}</span>
+            {row.text}
+          </div>
+        )
+      })}
     </div>
   )
 }

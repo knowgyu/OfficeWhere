@@ -29,11 +29,11 @@ const TABS: TabDef[] = [
   },
   {
     id: 'check',
-    label: '버전 묶음 / 정합성',
-    short: '검사',
-    icon: 'difference',
-    iconFilled: 'difference',
-    hint: '같은 문서의 여러 버전에서 빠진 항목과 변경 내용을 확인합니다',
+    label: '문서 히스토리',
+    short: '히스토리',
+    icon: 'history',
+    iconFilled: 'history',
+    hint: '같은 문서의 여러 버전에서 무엇이 바뀌었는지 확인합니다',
   },
   {
     id: 'join',

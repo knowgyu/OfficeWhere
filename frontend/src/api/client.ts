@@ -231,6 +231,9 @@ export interface ExcelConflictEntry {
   fileName: string
   columns: string[]
   values: string[]
+  rowNumbers: number[]
+  columnLetters: string[]
+  cellRefs: string[]
   rowCount: number
 }
 
@@ -556,6 +559,13 @@ const toNumberValue = (value: unknown, fallback = 0): number => {
 
 const uniqueStrings = (values: string[]): string[] => Array.from(new Set(values.filter(Boolean)))
 
+const toNumberArray = (value: unknown): number[] => {
+  const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]
+  return values
+    .map((item) => toNumberValue(item, Number.NaN))
+    .filter((item) => Number.isFinite(item))
+}
+
 export function normalizeFileType(fileType: unknown): FileType {
   const raw = toStringValue(fileType).trim().toLowerCase()
   if (raw.includes('excel')) return 'Excel'
@@ -868,6 +878,11 @@ function normalizeExcelConflictEntries(value: unknown): ExcelConflictEntry[] {
       fileName: toStringValue(record.file_name ?? record.fileName) || `파일 ${index + 1}`,
       columns: toStringArray(record.columns ?? record.column_names),
       values: toStringArray(record.values ?? record.value),
+      rowNumbers: toNumberArray(record.row_numbers ?? record.rowNumbers ?? record.row_number ?? record.rowNumber),
+      columnLetters: toStringArray(
+        record.column_letters ?? record.columnLetters ?? record.column_letter ?? record.columnLetter,
+      ),
+      cellRefs: toStringArray(record.cell_refs ?? record.cellRefs ?? record.cell_ref ?? record.cellRef),
       rowCount: toNumberValue(record.row_count ?? record.rowCount, 0),
     }
   })
@@ -883,6 +898,9 @@ function normalizeExcelFileRefs(value: unknown, column: string, fallbackValue: s
       fileName: toStringValue(record.file_name ?? record.fileName) || `파일 ${index + 1}`,
       columns: column ? [column] : [],
       values: fallbackValue ? [fallbackValue] : [],
+      rowNumbers: [],
+      columnLetters: [],
+      cellRefs: [],
       rowCount: 0,
     }
   })
@@ -987,12 +1005,15 @@ function normalizePptSlides(payload: Record<string, unknown>): PptSlideCard[] {
         `슬라이드 ${slideNumber}`
 
       if (changeType === 'slide_insert' || changeType === 'slide_delete') {
+        const oneSidedSlideNumber =
+          changeType === 'slide_insert'
+            ? toNumberValue(record.slide_number_after, index + 1)
+            : toNumberValue(record.slide_number_before, index + 1)
         return [
           {
             id: `ppt-slide-${index}`,
             type: changeType === 'slide_insert' ? 'inserted_slide' as const : 'removed_slide' as const,
-            slideNumber,
-            matchedSlideNumber,
+            slideNumber: oneSidedSlideNumber,
             title,
             itemType: 'slide',
             beforeText: toStringValue(record.title_before),

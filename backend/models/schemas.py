@@ -96,6 +96,10 @@ class ExcelConflictValue(BaseModel):
     file_id: int
     file_name: str
     values: List[str]
+    row_numbers: List[int] = Field(default_factory=list)
+    column_letters: List[str] = Field(default_factory=list)
+    cell_refs: List[str] = Field(default_factory=list)
+    row_count: int = 0
 
 
 class ExcelCheckIssue(BaseModel):

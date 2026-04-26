@@ -31,6 +31,25 @@ def _write_excel_with_offset_table(path: Path):
     workbook.save(path)
 
 
+def _write_excel_with_offset_conflict_table(path: Path, budget: str):
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "사업현황"
+    worksheet["A1"] = "2026 사업 목록"
+    worksheet["C3"] = "과제명"
+    worksheet["D3"] = "담당자"
+    worksheet["E3"] = "예산"
+    # Row 4 is intentionally blank. The parser drops it after reset_index, so
+    # location metadata must preserve the remaining DataFrame index offset.
+    worksheet["C5"] = "A"
+    worksheet["D5"] = "Kim"
+    worksheet["E5"] = budget
+    worksheet["C6"] = "B"
+    worksheet["D6"] = "Lee"
+    worksheet["E6"] = "200"
+    workbook.save(path)
+
+
 def _write_dataframe_excel(path: Path, data: dict):
     pd.DataFrame(data).to_excel(path, index=False)
 
@@ -134,6 +153,59 @@ def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
     conflict = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
     assert conflict["key"] == "a"
     assert conflict["column"] == "예산"
+    values_by_file = {entry["file_id"]: entry for entry in conflict["values"]}
+    assert values_by_file[1]["row_numbers"] == [2]
+    assert values_by_file[1]["column_letters"] == ["B"]
+    assert values_by_file[1]["cell_refs"] == ["B2"]
+    assert values_by_file[1]["row_count"] == 1
+    assert values_by_file[2]["row_numbers"] == [2]
+    assert values_by_file[2]["column_letters"] == ["B"]
+    assert values_by_file[2]["cell_refs"] == ["B2"]
+    assert values_by_file[2]["row_count"] == 1
+
+
+def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
+    file_a = tmp_path / "offset-a.xlsx"
+    file_b = tmp_path / "offset-b.xlsx"
+    _write_excel_with_offset_conflict_table(file_a, "100")
+    _write_excel_with_offset_conflict_table(file_b, "999")
+
+    parser_config = {
+        "sheet_name": "사업현황",
+        "header_row": 3,
+        "start_col": 3,
+        "end_col": 5,
+        "end_row": 6,
+    }
+    result = run_consistency_check(
+        [
+            {
+                "id": 1,
+                "path": str(file_a),
+                "name": "offset-a.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": parser_config,
+            },
+            {
+                "id": 2,
+                "path": str(file_b),
+                "name": "offset-b.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": parser_config,
+            },
+        ]
+    )
+
+    conflict = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
+    assert conflict["key"] == "a"
+    assert conflict["column"] == "예산"
+    for entry in conflict["values"]:
+        assert entry["row_numbers"] == [5]
+        assert entry["column_letters"] == ["E"]
+        assert entry["cell_refs"] == ["E5"]
+        assert entry["row_count"] == 1
 
 
 def test_word_diff_reports_paragraph_and_table_changes(tmp_path):

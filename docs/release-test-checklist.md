@@ -24,16 +24,21 @@ Use this checklist before publishing a release tag.
 - [ ] Same Office filename in two folders appears as a “same filename” group.
 - [ ] `v1.0`, `v1.1`, `260426`, or `2026-04-26` filename variants appear as a version-family group.
 - [ ] Text and Markdown files do not appear in consistency/version groups.
-- [ ] Opening a group loads a timeline/detail view on demand.
-- [ ] Word/PPT latest-two compare runs successfully.
-- [ ] Excel latest-two compare runs successfully.
-- [ ] Excel bounded group compare runs successfully for small groups, and large groups clearly show the latest-200-file limit.
-- [ ] “내용 같음/내용 다름” appears only when fingerprint evidence is available.
+- [ ] Opening a group loads a timeline/detail view and calculates only that group’s adjacent version changes on demand.
+- [ ] While version changes are calculated, progress is visible as completed/total comparisons.
+- [ ] Word changes render in red `-` / green `+` diff style.
+- [ ] Excel value changes show row/cell evidence such as `E5` / `5행 E열`.
+- [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.
+- [ ] If a group exceeds the latest-file detail limit, the UI explains only the displayed/latest files were analyzed.
+- [ ] Content-evidence wording avoids internal terms such as “fingerprint”.
 
 ## Data safety
 - [ ] App-data safe reset copy says original documents are not deleted.
 - [ ] Full reset remains behind a stronger warning/advanced path.
 - [ ] Original watched folders and Office documents remain untouched after app-data cleanup.
+- [ ] A mapped/network drive folder can be added when the current OS user can access it.
+- [ ] Search, indexing, and history comparison read source documents only; they do not delete, move, rename, or save originals.
+- [ ] The OS “open file” action is understood as handing the document to Office; manual user edits in Office are outside app-controlled read-only scanning.
 
 ## Release
 - [ ] Version is bumped in `frontend/package.json` and `frontend/package-lock.json`.
