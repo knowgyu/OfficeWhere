@@ -556,6 +556,8 @@ export interface LibraryGroupsResponse {
 export interface LibraryGroupsParams {
   kind?: LibraryGroupKind
   fileType?: string
+  query?: string
+  sort?: 'recent' | 'name' | 'count' | 'content'
   limit?: number
   offset?: number
 }
@@ -614,6 +616,8 @@ async function getLibraryGroups(params: LibraryGroupsParams = {}) {
   const searchParams = new URLSearchParams()
   if (params.kind) searchParams.set('kind', params.kind)
   if (params.fileType) searchParams.set('type', params.fileType)
+  if (params.query) searchParams.set('q', params.query)
+  if (params.sort) searchParams.set('sort', params.sort)
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
 
@@ -736,8 +740,8 @@ function buildCapabilitySummary(mode: CompareMode, fileType: FileType): string[]
   if (fileType === 'Text' || fileType === 'Markdown') {
     return ['본문 검색 가능', '내용 미리보기 가능', '버전 관리 제외']
   }
-  if (mode === 'excel') return ['Excel 통합 가능', '여러 파일 비교 가능', '표 영역 자동 저장']
-  if (mode === 'word') return ['2개 문서 비교', '문단/표 행 변경 확인', '기준 컬럼 불필요']
+  if (mode === 'excel') return ['Excel 문서', '검색 및 비교 가능', '표 내용 확인 가능']
+  if (mode === 'word') return ['Word 문서', '2개 문서 비교', '문단/표 행 변경 확인']
   return ['2개 발표자료 비교', '슬라이드 추가/삭제 확인', '슬라이드 내용 변경 확인']
 }
 

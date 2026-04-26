@@ -57,10 +57,12 @@ def cancel_library_rescan_job():
 def get_library_groups(
     kind: Optional[str] = None,
     type: Annotated[Optional[str], Query(alias="type")] = None,
+    q: Optional[str] = None,
+    sort: str = "recent",
     limit: int = 50,
     offset: int = 0,
 ):
-    return list_file_groups(kind=kind, file_type=type, limit=limit, offset=offset)
+    return list_file_groups(kind=kind, file_type=type, query=q, sort=sort, limit=limit, offset=offset)
 
 
 @router.get("/groups/{group_id}", response_model=LibraryGroupDetail)

@@ -28,6 +28,7 @@ import {
   EmptyState,
   FileTypeBadge,
   Icon,
+  SelectField,
   Spinner,
   StatCard,
   TextField,
@@ -38,6 +39,8 @@ const CHECK_FILE_PAGE_SIZE = 60
 const GROUP_PAGE_SIZE = 50
 const GROUP_DETAIL_FILE_LIMIT = 200
 type GroupFilter = 'all' | LibraryGroupKind
+type GroupFileTypeFilter = 'all' | 'Excel' | 'Word' | 'PowerPoint'
+type GroupSort = 'recent' | 'count' | 'name'
 type ContentStatus = LibraryGroupSummary['content_status']
 type HistoryTransitionStatus = 'pending' | 'loading' | 'done' | 'error'
 interface HistoryTransition {
@@ -66,7 +69,7 @@ interface ExcelGridModalState {
 }
 
 const MODE_GUIDE: Record<string, string> = {
-  excel: 'Excel은 여러 파일을 동시에 비교합니다. 기준 컬럼이 같은 행의 값 차이와 행/열 추가·삭제를 찾습니다.',
+  excel: 'Excel은 여러 파일을 동시에 비교합니다. 같은 항목의 행을 맞춰 값 차이와 행/열 추가·삭제를 찾습니다.',
   word: 'Word는 2개 파일만 비교합니다. 추가·삭제·수정된 문단과 표 행을 카드 형태로 보여줍니다.',
   ppt: 'PPT는 2개 파일만 비교합니다. 슬라이드 추가/삭제와 슬라이드 내 항목 변경을 보여줍니다.',
   none: '자동 감지된 묶음에서 바로 비교하거나, 필요할 때만 수동 선택을 열어 직접 고를 수 있습니다.',
@@ -110,6 +113,19 @@ const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
 
 const groupKindLabel = (kind: LibraryGroupKind) =>
   kind === 'exact_name_conflict' ? '같은 이름 문서' : '버전/날짜 문서'
+
+const GROUP_FILTER_OPTIONS: { value: GroupFilter; label: string }[] = [
+  { value: 'all', label: '전체 묶음' },
+  { value: 'exact_name_conflict', label: '이름이 같은 문서' },
+  { value: 'version_family', label: '버전 후보' },
+]
+
+const GROUP_FILE_TYPE_OPTIONS: { value: GroupFileTypeFilter; label: string }[] = [
+  { value: 'all', label: '전체 형식' },
+  { value: 'Excel', label: 'Excel' },
+  { value: 'Word', label: 'Word' },
+  { value: 'PowerPoint', label: 'PowerPoint' },
+]
 
 const excelChangeTypeFromIssue = (
   issue: ExcelCheckIssue,
@@ -298,9 +314,12 @@ export default function ConsistencyCheck() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [groups, setGroups] = useState<LibraryGroupSummary[]>([])
   const [groupTotal, setGroupTotal] = useState(0)
-  const [groupCounts, setGroupCounts] = useState<Partial<Record<LibraryGroupKind, number>>>({})
   const [groupOffset, setGroupOffset] = useState(0)
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('all')
+  const [groupQuery, setGroupQuery] = useState('')
+  const [groupQueryDraft, setGroupQueryDraft] = useState('')
+  const [groupFileType, setGroupFileType] = useState<GroupFileTypeFilter>('all')
+  const [groupSort, setGroupSort] = useState<GroupSort>('recent')
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
   const [activeGroupDetail, setActiveGroupDetail] = useState<LibraryGroupDetail | null>(null)
@@ -331,23 +350,30 @@ export default function ConsistencyCheck() {
     }
   }
 
-  const fetchGroups = async (nextOffset = groupOffset, nextFilter = groupFilter) => {
+  const fetchGroups = async (
+    nextOffset = groupOffset,
+    nextFilter = groupFilter,
+    nextQuery = groupQuery,
+    nextFileType = groupFileType,
+    nextSort = groupSort,
+  ) => {
     setGroupsLoading(true)
     try {
       const response = await api.library.groups({
         limit: GROUP_PAGE_SIZE,
         offset: nextOffset,
         kind: nextFilter === 'all' ? undefined : nextFilter,
+        query: nextQuery,
+        fileType: nextFileType === 'all' ? undefined : nextFileType,
+        sort: nextSort,
       })
       setGroups(response.data.groups)
       setGroupTotal(response.data.total)
       setGroupOffset(response.data.offset)
       setGroupFilter(nextFilter)
-      setGroupCounts((current) =>
-        nextFilter === 'all'
-          ? response.data.counts_by_kind
-          : { ...current, ...response.data.counts_by_kind },
-      )
+      setGroupQuery(nextQuery)
+      setGroupFileType(nextFileType)
+      setGroupSort(nextSort)
     } catch {
       /* silent */
     } finally {
@@ -653,14 +679,49 @@ export default function ConsistencyCheck() {
   const changeGroupFilter = (nextFilter: GroupFilter) => {
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, nextFilter)
+    void fetchGroups(0, nextFilter, groupQuery, groupFileType, groupSort)
+  }
+
+  const changeGroupFileType = (nextFileType: GroupFileTypeFilter) => {
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, groupFilter, groupQuery, nextFileType, groupSort)
+  }
+
+  const changeGroupSort = (nextSort: GroupSort) => {
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, groupFilter, groupQuery, groupFileType, nextSort)
+  }
+
+  const handleGroupSearch = () => {
+    const nextQuery = groupQueryDraft.trim()
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, groupFilter, nextQuery, groupFileType, groupSort)
+  }
+
+  const clearGroupSearch = () => {
+    setGroupQueryDraft('')
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, groupFilter, '', groupFileType, groupSort)
+  }
+
+  const scrollToManualPicker = () => {
+    setManualOpen(true)
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById('manual-version-picker')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
 
   const goToGroupPage = (nextOffset: number) => {
     const boundedOffset = Math.max(0, nextOffset)
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(boundedOffset, groupFilter)
+    void fetchGroups(boundedOffset, groupFilter, groupQuery, groupFileType, groupSort)
   }
 
   const visibleFileStart = fileTotal === 0 ? 0 : fileOffset + 1
@@ -671,15 +732,6 @@ export default function ConsistencyCheck() {
   const visibleGroupEnd = Math.min(groupOffset + groups.length, groupTotal)
   const hasPreviousGroupPage = groupOffset > 0
   const hasNextGroupPage = groupOffset + groups.length < groupTotal
-  const exactCount =
-    groupCounts.exact_name_conflict ??
-    groups.filter((group) => group.group_kind === 'exact_name_conflict').length
-  const versionCount =
-    groupCounts.version_family ??
-    groups.filter((group) => group.group_kind === 'version_family').length
-  const contentDiffCandidateCount = groups.filter(
-    (group) => group.content_status === 'content_differs',
-  ).length
 
   if (fileTotal === 0 && groupTotal === 0 && !filesLoading && !groupsLoading) {
     return (
@@ -695,36 +747,10 @@ export default function ConsistencyCheck() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <StatCard
-          label="버전 관리"
-          value={groupTotal}
-          icon="folder_copy"
-          tone={groupTotal > 0 ? 'primary' : 'neutral'}
-        />
-        <StatCard
-          label="같은 이름 문서"
-          value={exactCount}
-          icon="content_copy"
-          tone={exactCount > 0 ? 'warning' : 'neutral'}
-        />
-        <StatCard
-          label="버전/날짜 문서"
-          value={versionCount}
-          icon="history"
-          tone={versionCount > 0 ? 'primary' : 'neutral'}
-        />
-        <StatCard
-          label="표시 중 차이 후보"
-          value={contentDiffCandidateCount}
-          icon="fingerprint"
-          tone={contentDiffCandidateCount > 0 ? 'warning' : 'neutral'}
-        />
-      </div>
-
       <Card variant="elevated">
         <CardSection
-          title="자동 감지된 버전 관리"
+          title="문서 비교"
+          description="검토가 필요한 문서 묶음을 찾아 확인하세요. 문서가 많으면 문서명, 폴더명, 형식으로 좁혀볼 수 있습니다."
           trailing={
             <Chip
               label={
@@ -733,30 +759,89 @@ export default function ConsistencyCheck() {
                   : `${groupTotal}개 묶음`
               }
               tone="primary"
-              icon="auto_awesome"
+              icon="view_list"
               as="span"
             />
           }
         >
-          <div className="flex gap-2 flex-wrap">
-            <Chip
-              label="전체"
-              kind="filter"
-              selected={groupFilter === 'all'}
-              onClick={() => changeGroupFilter('all')}
-            />
-            <Chip
-                label={`같은 이름 ${exactCount}`}
-              kind="filter"
-              selected={groupFilter === 'exact_name_conflict'}
-              onClick={() => changeGroupFilter('exact_name_conflict')}
-            />
-            <Chip
-                label={`버전/날짜 ${versionCount}`}
-              kind="filter"
-              selected={groupFilter === 'version_family'}
-              onClick={() => changeGroupFilter('version_family')}
-            />
+          <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+            <div className="flex gap-2 items-start flex-wrap lg:flex-nowrap">
+              <div className="flex-1 min-w-[240px]">
+                <TextField
+                  leadingIcon="search"
+                  placeholder="문서명, 파일명, 폴더명으로 찾기"
+                  value={groupQueryDraft}
+                  onChange={(event) => setGroupQueryDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') handleGroupSearch()
+                  }}
+                  helper="예: 사업예산, 주간보고, 프로젝트명, 부서명"
+                />
+              </div>
+              <div className="w-full sm:w-[190px]">
+                <SelectField
+                  label="문서 형식"
+                  value={groupFileType}
+                  onChange={(event) => changeGroupFileType(event.target.value as GroupFileTypeFilter)}
+                >
+                  {GROUP_FILE_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+              <div className="w-full sm:w-[220px]">
+                <SelectField
+                  label="정렬"
+                  value={groupSort}
+                  onChange={(event) => changeGroupSort(event.target.value as GroupSort)}
+                >
+                  <option value="recent">최근 변경된 문서 먼저</option>
+                  <option value="count">파일 많은 묶음 먼저</option>
+                  <option value="name">이름순</option>
+                </SelectField>
+              </div>
+              <div className="flex gap-2 shrink-0 pt-0 sm:pt-[1.625rem]">
+                <Button variant="filled" leadingIcon="search" onClick={handleGroupSearch} disabled={groupsLoading}>
+                  찾기
+                </Button>
+                {groupQuery && (
+                  <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
+                    지우기
+                  </Button>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex gap-2 flex-wrap">
+                {GROUP_FILTER_OPTIONS.map((option) => (
+                  <Chip
+                    key={option.value}
+                    label={option.label}
+                    kind="filter"
+                    selected={groupFilter === option.value}
+                    onClick={() => changeGroupFilter(option.value)}
+                  />
+                ))}
+              </div>
+              <Button
+                variant="outlined"
+                leadingIcon="library_add_check"
+                onClick={scrollToManualPicker}
+              >
+                직접 파일 고르기
+              </Button>
+            </div>
+            {(groupQuery || groupFileType !== 'all' || groupFilter !== 'all') && (
+              <div className="flex gap-2 flex-wrap">
+                {groupQuery && <Chip label={`검색어 · ${groupQuery}`} tone="secondary" icon="search" as="span" />}
+                {groupFileType !== 'all' && <Chip label={`형식 · ${groupFileType}`} tone="neutral" as="span" />}
+                {groupFilter !== 'all' && (
+                  <Chip label={GROUP_FILTER_OPTIONS.find((option) => option.value === groupFilter)?.label} tone="neutral" as="span" />
+                )}
+              </div>
+            )}
           </div>
 
           {groupsLoading ? (
@@ -815,7 +900,7 @@ export default function ConsistencyCheck() {
         </CardSection>
       </Card>
 
-      <Card variant="outlined">
+      <Card id="manual-version-picker" variant="outlined">
         <CardSection
           title="수동으로 직접 고르기"
           description="자동 묶음에 없는 특수 케이스만 열어서 사용하세요. 1만 개 문서에서도 현재 페이지와 검색 결과만 보여줍니다."
@@ -933,7 +1018,7 @@ export default function ConsistencyCheck() {
                             {unsupported
                               ? '검색 등록 가능 · 변경점 확인 제외'
                               : fileMode === 'excel'
-                                ? `기준 컬럼 ${file.key_column || '미지정'} · 여러 파일 비교`
+                                ? `행 기준 ${file.key_column || '미지정'} · 여러 파일 비교`
                                 : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
                           </p>
                         </div>
@@ -1699,7 +1784,7 @@ function ExcelDiffGridSummary({ data }: { data: ExcelDiffGridResponse }) {
         <Chip label={`최신 파일 값 기준 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
         <Chip label={`${data.sheet_name} 시트`} tone="neutral" as="span" />
         <Chip label={`${data.row_count}행 × ${data.column_count}열`} tone="neutral" as="span" />
-        {data.key_column && <Chip label={`기준 컬럼 · ${data.key_column}`} tone="secondary" as="span" />}
+        {data.key_column && <Chip label={`행 기준 · ${data.key_column}`} tone="secondary" as="span" />}
       </div>
 
       <div className="flex gap-2 flex-wrap">

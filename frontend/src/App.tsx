@@ -42,7 +42,7 @@ const TABS: TabDef[] = [
     short: '통합',
     icon: 'table_chart',
     iconFilled: 'table_chart',
-    hint: '같은 기준 컬럼을 가진 여러 Excel 표를 하나로 합칩니다',
+    hint: '여러 Excel 표를 한 화면에서 비교·정리합니다',
   },
   {
     id: 'files',
@@ -50,7 +50,7 @@ const TABS: TabDef[] = [
     short: '설정',
     icon: 'settings',
     iconFilled: 'settings',
-    hint: '검색과 비교에 사용할 폴더와 파일을 등록합니다',
+    hint: '문서 폴더, 화면 표시, 종료 방식을 설정합니다',
   },
 ]
 

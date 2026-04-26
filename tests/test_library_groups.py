@@ -95,3 +95,25 @@ def test_library_groups_type_filter_and_limit_cap(tmp_path, monkeypatch):
     assert response.limit == 100
     assert len(response.groups) == 100
     assert {group.file_type for group in response.groups} == {"Excel"}
+
+
+def test_library_groups_searches_names_paths_and_sorts(tmp_path, monkeypatch):
+    from backend.api.library import get_library_groups
+
+    _setup_db(tmp_path, monkeypatch)
+    _register("/tmp/sales/예산_v1.xlsx", "예산_v1.xlsx", "Excel")
+    _register("/tmp/sales/예산_v2.xlsx", "예산_v2.xlsx", "Excel")
+    _register("/tmp/research/보고서_v1.docx", "보고서_v1.docx", "Word")
+    _register("/tmp/research/보고서_v2.docx", "보고서_v2.docx", "Word")
+    _register("/tmp/research/보고서_v3.docx", "보고서_v3.docx", "Word")
+    _register("/tmp/marketing/홍보_v1.pptx", "홍보_v1.pptx", "PowerPoint")
+    _register("/tmp/marketing/홍보_v2.pptx", "홍보_v2.pptx", "PowerPoint")
+
+    response = get_library_groups(q="research", sort="count", limit=10)
+
+    assert response.total == 1
+    assert response.groups[0].base_name == "보고서"
+    assert response.groups[0].file_count == 3
+
+    response = get_library_groups(sort="name", limit=10)
+    assert [group.base_name for group in response.groups] == ["보고서", "예산", "홍보"]

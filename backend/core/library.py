@@ -976,6 +976,8 @@ def list_file_groups(
     *,
     kind: Optional[str] = None,
     file_type: Optional[str] = None,
+    query: Optional[str] = None,
+    sort: str = "recent",
     limit: int = DEFAULT_GROUP_LIMIT,
     offset: int = 0,
 ) -> LibraryGroupsResponse:
@@ -986,6 +988,37 @@ def list_file_groups(
         groups = [group for group in groups if group.group_kind == kind]
     if file_type:
         groups = [group for group in groups if group.file_type == file_type]
+    normalized_query = (query or "").strip().lower()
+    if normalized_query:
+        groups = [
+            group
+            for group in groups
+            if normalized_query in " ".join(
+                [
+                    group.base_name,
+                    group.title,
+                    group.file_type,
+                    group.group_kind,
+                    *(group.tokens_summary or []),
+                    *(file.name for file in group.files),
+                    *(file.path for file in group.files),
+                ]
+            ).lower()
+        ]
+
+    if sort == "name":
+        groups.sort(key=lambda group: (group.base_name.lower(), group.file_type, group.group_kind))
+    elif sort == "count":
+        groups.sort(key=lambda group: (-group.file_count, group.base_name.lower(), group.file_type, group.group_kind))
+    elif sort == "content":
+        content_rank = {
+            "content_differs": 4,
+            "partial": 3,
+            "pending": 2,
+            "not_enough_content": 1,
+            "same_content": 0,
+        }
+        groups.sort(key=lambda group: (content_rank.get(group.content_status, 0), group.file_count), reverse=True)
 
     counts_by_kind: Dict[str, int] = {}
     for group in groups:
