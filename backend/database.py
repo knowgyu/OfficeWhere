@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .core.hangul_search import build_search_text, make_search_snippet
+
 
 def _default_db_dir() -> Path:
     configured = os.environ.get("ODJ_DATA_DIR", "").strip()
@@ -18,6 +20,7 @@ def _default_db_dir() -> Path:
 DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
+SEARCH_INDEX_VERSION = "2"
 
 
 def configure_database(data_dir: str | os.PathLike[str]):
@@ -47,6 +50,40 @@ def _ensure_registered_files_columns(cursor: sqlite3.Cursor):
         cursor.execute("ALTER TABLE registered_files ADD COLUMN file_mtime REAL")
     if "parser_config" not in existing_columns:
         cursor.execute("ALTER TABLE registered_files ADD COLUMN parser_config TEXT NOT NULL DEFAULT '{}'")
+
+
+def _ensure_file_chunks_columns(cursor: sqlite3.Cursor):
+    cursor.execute("PRAGMA table_info(file_chunks)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+
+    if "search_text" not in existing_columns:
+        cursor.execute("ALTER TABLE file_chunks ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
+
+
+def _refresh_search_text(cursor: sqlite3.Cursor):
+    cursor.execute("SELECT id, content FROM file_chunks")
+    rows = cursor.fetchall()
+    cursor.executemany(
+        "UPDATE file_chunks SET search_text = ? WHERE id = ?",
+        [(build_search_text(row[1]), row[0]) for row in rows],
+    )
+
+
+def _get_setting_with_cursor(cursor: sqlite3.Cursor, key: str, default: str = "") -> str:
+    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    return row[0] if row else default
+
+
+def _set_setting_with_cursor(cursor: sqlite3.Cursor, key: str, value: str):
+    cursor.execute(
+        """
+        INSERT INTO settings (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+        """,
+        (key, value),
+    )
 
 
 def _decode_parser_config(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -171,6 +208,7 @@ def init_db():
         """
     )
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON file_chunks(file_id)")
+    _ensure_file_chunks_columns(cursor)
 
     cursor.execute(
         """
@@ -210,6 +248,32 @@ def init_db():
 
     cursor.execute(
         """
+        CREATE VIRTUAL TABLE IF NOT EXISTS file_search_ko USING fts5(
+            search_text,
+            content='file_chunks',
+            content_rowid='id',
+            tokenize='unicode61'
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS chunks_ai_ko AFTER INSERT ON file_chunks BEGIN
+            INSERT INTO file_search_ko(rowid, search_text) VALUES (new.id, new.search_text);
+        END
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS chunks_ad_ko AFTER DELETE ON file_chunks BEGIN
+            INSERT INTO file_search_ko(file_search_ko, rowid, search_text)
+            VALUES ('delete', old.id, old.search_text);
+        END
+        """
+    )
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS document_fingerprints (
             file_id INTEGER PRIMARY KEY,
             normalized_hash TEXT NOT NULL,
@@ -228,6 +292,11 @@ def init_db():
         ON document_fingerprints(normalized_hash)
         """
     )
+
+    if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
+        _refresh_search_text(cursor)
+        cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('rebuild')")
+        _set_setting_with_cursor(cursor, "search_index_version", SEARCH_INDEX_VERSION)
 
     conn.commit()
     conn.close()
@@ -409,8 +478,16 @@ def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
     source_mtime = row[0] if row else None
     cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
     cursor.executemany(
-        "INSERT INTO file_chunks (file_id, location, content) VALUES (?, ?, ?)",
-        [(file_id, chunk["location"], chunk["content"]) for chunk in chunks],
+        "INSERT INTO file_chunks (file_id, location, content, search_text) VALUES (?, ?, ?, ?)",
+        [
+            (
+                file_id,
+                chunk["location"],
+                chunk["content"],
+                build_search_text(chunk["content"]),
+            )
+            for chunk in chunks
+        ],
     )
     _upsert_document_fingerprint(cursor, file_id, chunks, source_mtime=source_mtime)
     conn.commit()
@@ -517,6 +594,7 @@ def search_chunks(
     fts_query: str,
     limit: int = 100,
     file_types: Optional[Sequence[str]] = None,
+    raw_query: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     conn = _connect()
     conn.row_factory = sqlite3.Row
@@ -531,12 +609,11 @@ def search_chunks(
     params.append(limit)
     cursor.execute(
         f"""
-        SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location,
-               snippet(file_search, 0, '**', '**', '...', 15) AS snippet
-        FROM file_search
-        JOIN file_chunks fc ON fc.id = file_search.rowid
+        SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content
+        FROM file_search_ko
+        JOIN file_chunks fc ON fc.id = file_search_ko.rowid
         JOIN registered_files rf ON rf.id = fc.file_id
-        WHERE file_search MATCH ?{type_clause}
+        WHERE file_search_ko MATCH ?{type_clause}
         ORDER BY rank
         LIMIT ?
         """,
@@ -544,7 +621,14 @@ def search_chunks(
     )
     rows = cursor.fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    query_for_snippet = raw_query or fts_query
+    return [
+        {
+            **{key: row[key] for key in ("file_id", "name", "path", "file_type", "location")},
+            "snippet": make_search_snippet(row["content"], query_for_snippet),
+        }
+        for row in rows
+    ]
 
 
 def get_setting(key: str, default: str = "") -> str:

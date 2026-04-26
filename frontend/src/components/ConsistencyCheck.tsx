@@ -833,13 +833,10 @@ export default function ConsistencyCheck() {
                 직접 파일 고르기
               </Button>
             </div>
-            {(groupQuery || groupFileType !== 'all' || groupFilter !== 'all') && (
+            {(groupQuery || groupFileType !== 'all') && (
               <div className="flex gap-2 flex-wrap">
                 {groupQuery && <Chip label={`검색어 · ${groupQuery}`} tone="secondary" icon="search" as="span" />}
                 {groupFileType !== 'all' && <Chip label={`형식 · ${groupFileType}`} tone="neutral" as="span" />}
-                {groupFilter !== 'all' && (
-                  <Chip label={GROUP_FILTER_OPTIONS.find((option) => option.value === groupFilter)?.label} tone="neutral" as="span" />
-                )}
               </div>
             )}
           </div>

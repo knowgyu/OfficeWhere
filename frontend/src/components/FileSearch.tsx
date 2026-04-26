@@ -79,6 +79,30 @@ function SnippetText({ snippet }: { snippet: string }) {
   )
 }
 
+function SearchResultListItem({
+  item,
+  onOpen,
+}: {
+  item: SearchResult
+  onOpen: (fileId: number, fileName: string) => void
+}) {
+  return (
+    <li className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors">
+      <button
+        type="button"
+        onClick={() => onOpen(item.file_id, item.name)}
+        className="block w-full text-left"
+      >
+        <p className="type-label-md text-[var(--md-sys-color-primary)] mb-1 inline-flex items-center gap-1.5">
+          <Icon name="my_location" size={14} />
+          {item.location}
+        </p>
+        <SnippetText snippet={item.snippet} />
+      </button>
+    </li>
+  )
+}
+
 export default function FileSearch() {
   const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
@@ -87,6 +111,7 @@ export default function FileSearch() {
   const [searched, setSearched] = useState(false)
   const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>([])
   const [searchScope, setSearchScope] = useState<SearchScope>('filename_content')
+  const [expandedContentFiles, setExpandedContentFiles] = useState<Set<string>>(new Set())
 
   const [settings, setSettings] = useState<SchedulerSettings | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -107,6 +132,7 @@ export default function FileSearch() {
       if (!q.trim()) {
         setResults([])
         setSearched(false)
+        setExpandedContentFiles(new Set())
         return
       }
       setLoading(true)
@@ -118,6 +144,7 @@ export default function FileSearch() {
           search_scope: scope,
         })
         setResults(response.data.results)
+        setExpandedContentFiles(new Set())
         setSearched(true)
       } catch {
         setResults([])
@@ -146,6 +173,18 @@ export default function FileSearch() {
   const handleSearchScopeChange = (next: SearchScope) => {
     setSearchScope(next)
     if (query.trim()) void doSearch(query, selectedFileTypes, next)
+  }
+
+  const toggleContentMatches = (fileKey: string) => {
+    setExpandedContentFiles((current) => {
+      const next = new Set(current)
+      if (next.has(fileKey)) {
+        next.delete(fileKey)
+      } else {
+        next.add(fileKey)
+      }
+      return next
+    })
   }
 
   const handleReindex = async () => {
@@ -229,6 +268,7 @@ export default function FileSearch() {
                       setQuery('')
                       setResults([])
                       setSearched(false)
+                      setExpandedContentFiles(new Set())
                     }}
                   />
                 ) : null
@@ -419,45 +459,63 @@ export default function FileSearch() {
               {grouped.length}개 파일에서 매칭됨
             </span>
           </div>
-          {grouped.map(([fileName, items]) => (
-            <Card key={fileName} variant="outlined" className="overflow-hidden">
-              <header className="px-5 py-3 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)]">
-                <FileTypeBadge fileType={items[0].file_type} />
-                <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
-                  {fileName}
-                </span>
-                <Badge tone="neutral">{items.length}건</Badge>
-                <Button
-                  variant="text"
-                  size="sm"
-                  leadingIcon="open_in_new"
-                  onClick={() => handleOpenFile(items[0].file_id, fileName)}
-                >
-                  열기
-                </Button>
-              </header>
-              <ul>
-                {items.map((item, index) => (
-                  <li
-                    key={index}
-                    className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors"
+          {grouped.map(([fileName, items]) => {
+            const fileKey = `${items[0].file_id}:${fileName}`
+            const filenameItems = items.filter((item) => item.location === '파일명')
+            const contentItems = items.filter((item) => item.location !== '파일명')
+            const contentExpanded = expandedContentFiles.has(fileKey)
+
+            return (
+              <Card key={fileKey} variant="outlined" className="overflow-hidden">
+                <header className="px-5 py-3 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)]">
+                  <FileTypeBadge fileType={items[0].file_type} />
+                  <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
+                    {fileName}
+                  </span>
+                  <Badge tone="neutral">{items.length}건</Badge>
+                  <Button
+                    variant="text"
+                    size="sm"
+                    leadingIcon="open_in_new"
+                    onClick={() => handleOpenFile(items[0].file_id, fileName)}
                   >
-                    <button
-                      type="button"
-                      onClick={() => handleOpenFile(item.file_id, item.name)}
-                      className="block w-full text-left"
-                    >
-                      <p className="type-label-md text-[var(--md-sys-color-primary)] mb-1 inline-flex items-center gap-1.5">
-                        <Icon name="my_location" size={14} />
-                        {item.location}
-                      </p>
-                      <SnippetText snippet={item.snippet} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          ))}
+                    열기
+                  </Button>
+                </header>
+                <ul>
+                  {filenameItems.map((item, index) => (
+                    <SearchResultListItem
+                      key={`filename-${item.file_id}-${index}`}
+                      item={item}
+                      onOpen={handleOpenFile}
+                    />
+                  ))}
+                  {contentItems.length > 0 && (
+                    <li className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0">
+                      <Button
+                        variant="tonal"
+                        size="sm"
+                        leadingIcon={contentExpanded ? 'expand_less' : 'expand_more'}
+                        onClick={() => toggleContentMatches(fileKey)}
+                      >
+                        {contentExpanded
+                          ? '본문 매칭 접기'
+                          : `본문 매칭 ${contentItems.length}건 보기`}
+                      </Button>
+                    </li>
+                  )}
+                  {contentExpanded &&
+                    contentItems.map((item, index) => (
+                      <SearchResultListItem
+                        key={`content-${item.file_id}-${item.location}-${index}`}
+                        item={item}
+                        onOpen={handleOpenFile}
+                      />
+                    ))}
+                </ul>
+              </Card>
+            )
+          })}
         </div>
       )}
     </div>

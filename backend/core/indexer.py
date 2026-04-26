@@ -137,7 +137,7 @@ def _sanitize_fts_query(raw: str) -> str:
 def search(query: str, limit: int = 100, file_types: Optional[Sequence[str]] = None) -> list:
     if not query.strip():
         return []
-    return search_chunks(_sanitize_fts_query(query), limit=limit, file_types=file_types)
+    return search_chunks(_sanitize_fts_query(query), limit=limit, file_types=file_types, raw_query=query)
 
 
 def reindex_all() -> Dict[str, int]:

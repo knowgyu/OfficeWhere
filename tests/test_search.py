@@ -116,6 +116,34 @@ def test_search_no_results_for_missing_term(tmp_path):
     assert results == []
 
 
+def test_search_matches_korean_substrings_inside_words(tmp_path):
+    text_path = tmp_path / "meeting.txt"
+    text_path.write_text("주간 회의록 작성 후 공유", encoding="utf-8")
+
+    file_id = register_file(str(text_path), "meeting.txt", "Text", "", 0)
+    index_file(file_id, str(text_path))
+
+    results = search("회의")
+
+    assert len(results) == 1
+    assert results[0]["file_id"] == file_id
+    assert "**회의**" in results[0]["snippet"]
+
+
+def test_search_matches_hangul_choseong(tmp_path):
+    text_path = tmp_path / "meeting.txt"
+    text_path.write_text("주간 회의록 작성 후 공유", encoding="utf-8")
+
+    file_id = register_file(str(text_path), "meeting.txt", "Text", "", 0)
+    index_file(file_id, str(text_path))
+
+    results = search("ㅎㅇㄹ")
+
+    assert len(results) == 1
+    assert results[0]["file_id"] == file_id
+    assert "**회의록**" in results[0]["snippet"]
+
+
 def test_reindex_on_file_change(tmp_path):
     xlsx = str(tmp_path / "change.xlsx")
     _make_excel(xlsx, {"항목": ["원래값"], "값": ["1"]})
