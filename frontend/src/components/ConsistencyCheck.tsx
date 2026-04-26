@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 
 import {
   CheckResponse,
+  ExcelDiffGridCell,
+  ExcelDiffGridFocus,
+  ExcelDiffGridResponse,
+  ExcelDiffHighlight,
   ExcelCheckIssue,
   FileInfo,
   LibraryGroupDetail,
@@ -52,6 +56,13 @@ interface HistoryDiffState {
   completed: number
   total: number
   truncated: boolean
+}
+
+interface ExcelGridModalState {
+  detail: LibraryGroupDetail
+  loading: boolean
+  data: ExcelDiffGridResponse | null
+  error: string
 }
 
 const MODE_GUIDE: Record<string, string> = {
@@ -121,6 +132,133 @@ const contentStatusHint = (group: LibraryGroupSummary) => {
   return '재스캔 후 내용 확인 정확도가 올라갑니다.'
 }
 
+const excelChangeTypeFromIssue = (
+  issue: ExcelCheckIssue,
+  beforeValue: string,
+  afterValue: string,
+): ExcelDiffHighlight => {
+  if (issue.type === 'value_added') return 'added'
+  if (issue.type === 'value_removed') return 'removed'
+  if (issue.type === 'value_presence') {
+    if (isEmptyExcelValue(beforeValue) && !isEmptyExcelValue(afterValue)) return 'added'
+    if (!isEmptyExcelValue(beforeValue) && isEmptyExcelValue(afterValue)) return 'removed'
+  }
+  return 'changed'
+}
+
+const excelHighlightRank = (type: ExcelDiffHighlight) => {
+  if (type === 'removed') return 3
+  if (type === 'changed') return 2
+  return 1
+}
+
+const isEmptyExcelValue = (value: string) => {
+  const normalized = value.trim()
+  return !normalized || normalized === '(빈 값)' || normalized === '-'
+}
+
+const excelConflictText = (conflict?: ExcelCheckIssue['conflicts'][number]) =>
+  conflict?.values.join(' | ') || '(빈 값)'
+
+function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridFocus[] {
+  const focusMap = new Map<string, ExcelDiffGridFocus>()
+  const addFocus = (
+    key: string,
+    column: string,
+    changeType: ExcelDiffHighlight,
+    history: ExcelDiffGridFocus['histories'][number],
+  ) => {
+    if (!key || !column) return
+    const focusKey = `${key}::${column}`
+    const existing = focusMap.get(focusKey)
+    if (existing) {
+      existing.histories.push(history)
+      if (excelHighlightRank(changeType) > excelHighlightRank(existing.change_type)) {
+        existing.change_type = changeType
+      }
+      return
+    }
+
+    focusMap.set(focusKey, {
+      key,
+      column,
+      change_type: changeType,
+      histories: [history],
+    })
+  }
+
+  transitions.forEach((transition) => {
+    if (transition.status !== 'done' || transition.result?.mode !== 'excel') return
+
+    transition.result.issues.forEach((issue) => {
+      if (issue.type === 'missing_column' && issue.columnGroup) {
+        issue.conflicts.forEach((conflict) => {
+          const changeType = conflict.fileId === transition.toFile.id ? 'added' : 'removed'
+          conflict.rowValues.forEach((row) => {
+            const key = row[0] ?? ''
+            const value = row[row.length - 1] ?? ''
+            addFocus(key, issue.columnGroup, changeType, {
+              change_type: changeType,
+              from_file_id: transition.fromFile.id,
+              from_file_name: transition.fromFile.name,
+              to_file_id: transition.toFile.id,
+              to_file_name: transition.toFile.name,
+              before: changeType === 'added' ? '(빈 값)' : value,
+              after: changeType === 'added' ? value : '(빈 값)',
+              label: `${transition.fromFile.name} → ${transition.toFile.name}`,
+            })
+          })
+        })
+        return
+      }
+
+      if (issue.type === 'missing_key') {
+        issue.conflicts.forEach((conflict) => {
+          const changeType = conflict.fileId === transition.toFile.id ? 'added' : 'removed'
+          conflict.rowValues.forEach((row) => {
+            const key = row[0] ?? issue.key
+            conflict.columns.slice(1).forEach((column, columnIndex) => {
+              const value = row[columnIndex + 1] ?? ''
+              addFocus(key, column, changeType, {
+                change_type: changeType,
+                from_file_id: transition.fromFile.id,
+                from_file_name: transition.fromFile.name,
+                to_file_id: transition.toFile.id,
+                to_file_name: transition.toFile.name,
+                before: changeType === 'added' ? '(빈 값)' : value,
+                after: changeType === 'added' ? value : '(빈 값)',
+                label: `${transition.fromFile.name} → ${transition.toFile.name}`,
+              })
+            })
+          })
+        })
+        return
+      }
+
+      if (!issue.key || !issue.columnGroup) return
+
+      const beforeConflict = issue.conflicts.find((conflict) => conflict.fileId === transition.fromFile.id)
+      const afterConflict = issue.conflicts.find((conflict) => conflict.fileId === transition.toFile.id)
+      const before = excelConflictText(beforeConflict)
+      const after = excelConflictText(afterConflict)
+      const changeType = excelChangeTypeFromIssue(issue, before, after)
+      const history = {
+        change_type: changeType,
+        from_file_id: transition.fromFile.id,
+        from_file_name: transition.fromFile.name,
+        to_file_id: transition.toFile.id,
+        to_file_name: transition.toFile.name,
+        before,
+        after,
+        label: `${transition.fromFile.name} → ${transition.toFile.name}`,
+      }
+      addFocus(issue.key, issue.columnGroup, changeType, history)
+    })
+  })
+
+  return Array.from(focusMap.values())
+}
+
 const formatDate = (value?: string | number | null) => {
   if (!value) return '날짜 정보 없음'
   const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value)
@@ -165,6 +303,7 @@ export default function ConsistencyCheck() {
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [pendingScrollGroupId, setPendingScrollGroupId] = useState<string | null>(null)
+  const [excelGridModal, setExcelGridModal] = useState<ExcelGridModalState | null>(null)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setFilesLoading(true)
@@ -441,6 +580,43 @@ export default function ConsistencyCheck() {
     await runHistoryDiffs(detail)
   }
 
+  const openExcelGrid = async (detail: LibraryGroupDetail, currentHistoryState: HistoryDiffState | null) => {
+    if (normalizeFileType(detail.file_type) !== 'Excel') {
+      snackbar.warn('표로 보기는 Excel 묶음에서만 사용할 수 있습니다.')
+      return
+    }
+
+    const focuses = currentHistoryState ? buildExcelGridFocuses(currentHistoryState.transitions) : []
+    setExcelGridModal({
+      detail,
+      loading: true,
+      data: null,
+      error: '',
+    })
+    try {
+      const response = await api.check.excelGrid({
+        file_ids: detail.files.map((file) => file.id),
+        focuses,
+      })
+      setExcelGridModal({
+        detail,
+        loading: false,
+        data: response.data,
+        error: '',
+      })
+    } catch (error) {
+      const detailMessage =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        'Excel 표를 불러오지 못했습니다.'
+      setExcelGridModal({
+        detail,
+        loading: false,
+        data: null,
+        error: detailMessage,
+      })
+    }
+  }
+
   const openFile = async (file: FileInfo) => {
     try {
       await api.files.open(file.id)
@@ -599,6 +775,7 @@ export default function ConsistencyCheck() {
                     loading={groupLoadingId === group.id}
                     onOpen={() => void selectGroup(group)}
                     onOpenFile={(file) => void openFile(file)}
+                    onOpenExcelGrid={(detail, state) => void openExcelGrid(detail, state)}
                 />
               ))}
             </div>
@@ -793,6 +970,12 @@ export default function ConsistencyCheck() {
       {result?.mode === 'excel' && <ExcelCheckResult result={result} />}
       {result?.mode === 'word' && <WordCheckResult diffs={result.diffs} />}
       {result?.mode === 'ppt' && <PptCheckResult slides={result.slides} />}
+      {excelGridModal && (
+        <ExcelDiffGridModal
+          modal={excelGridModal}
+          onClose={() => setExcelGridModal(null)}
+        />
+      )}
     </div>
   )
 }
@@ -804,6 +987,7 @@ function GroupCard({
   loading,
   onOpen,
   onOpenFile,
+  onOpenExcelGrid,
 }: {
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
@@ -811,6 +995,7 @@ function GroupCard({
   loading: boolean
   onOpen: () => void
   onOpenFile: (file: FileInfo) => void
+  onOpenExcelGrid: (detail: LibraryGroupDetail, historyState: HistoryDiffState | null) => void
 }) {
   const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
@@ -873,7 +1058,12 @@ function GroupCard({
       </div>
 
       {activeDetail && (
-        <GroupTimeline detail={activeDetail} historyState={historyState} onOpenFile={onOpenFile} />
+        <GroupTimeline
+          detail={activeDetail}
+          historyState={historyState}
+          onOpenFile={onOpenFile}
+          onOpenExcelGrid={() => onOpenExcelGrid(activeDetail, historyState)}
+        />
       )}
     </div>
   )
@@ -883,10 +1073,12 @@ function GroupTimeline({
   detail,
   historyState,
   onOpenFile,
+  onOpenExcelGrid,
 }: {
   detail: LibraryGroupDetail
   historyState: HistoryDiffState | null
   onOpenFile: (file: FileInfo) => void
+  onOpenExcelGrid: () => void
 }) {
   const progressLabel = historyState
     ? historyState.total === 0
@@ -905,7 +1097,19 @@ function GroupTimeline({
             파일명 토큰, 등록/수정 시간 기준으로 최신 후보부터 정렬했습니다.
           </p>
         </div>
-        <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
+          {normalizeFileType(detail.file_type) === 'Excel' && (
+            <Button
+              variant="outlined"
+              size="sm"
+              leadingIcon="table_chart"
+              onClick={onOpenExcelGrid}
+            >
+              표로 보기
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-3">
@@ -1383,6 +1587,254 @@ function ExcelRowPreview({ conflict }: { conflict: ExcelCheckIssue['conflicts'][
         </tbody>
       </table>
     </div>
+  )
+}
+
+function excelGridHighlightClass(highlight: ExcelDiffHighlight | null) {
+  if (highlight === 'added') {
+    return 'bg-emerald-100 text-emerald-950 ring-1 ring-inset ring-emerald-300'
+  }
+  if (highlight === 'removed') {
+    return 'bg-red-100 text-red-950 ring-1 ring-inset ring-red-300'
+  }
+  if (highlight === 'changed') {
+    return 'bg-amber-100 text-amber-950 ring-1 ring-inset ring-amber-300'
+  }
+  return 'bg-[var(--md-sys-color-surface-container-lowest)] text-[var(--md-sys-color-on-surface)]'
+}
+
+function excelGridHighlightLabel(highlight: ExcelDiffHighlight | null) {
+  if (highlight === 'added') return '추가'
+  if (highlight === 'removed') return '삭제'
+  if (highlight === 'changed') return '변경'
+  return '변경 없음'
+}
+
+function excelGridCellTitle(cell: ExcelDiffGridCell) {
+  const location = `${cell.row_number}행 ${cell.column_letter}열`
+  if (cell.histories.length === 0) return `${location} · ${cell.value || '(빈 값)'}`
+  const first = cell.histories[0]
+  return `${location} · ${excelGridHighlightLabel(cell.highlight)} · ${first.before || '(빈 값)'} → ${first.after || '(빈 값)'}`
+}
+
+function ExcelDiffGridModal({
+  modal,
+  onClose,
+}: {
+  modal: ExcelGridModalState
+  onClose: () => void
+}) {
+  const [selectedCell, setSelectedCell] = useState<ExcelDiffGridCell | null>(null)
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm p-3 sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Excel 표로 보기"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[92vh] w-full max-w-[min(1500px,96vw)] flex-col overflow-hidden rounded-2xl bg-[var(--md-sys-color-surface)] shadow-2xl border border-[var(--md-sys-color-outline-variant)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] px-5 py-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Icon name="table_chart" size={22} className="text-[var(--md-sys-color-primary)]" />
+              <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 표로 보기</p>
+              <Badge tone="neutral">최신본 기준</Badge>
+            </div>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate mt-1">
+              {modal.detail.base_name}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-high)]"
+            aria-label="닫기"
+          >
+            <Icon name="close" size={22} />
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {modal.loading ? (
+            <div className="flex items-center justify-center gap-2 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+              <Spinner size={20} /> Excel 표 범위를 계산하는 중…
+            </div>
+          ) : modal.error ? (
+            <div className="rounded-lg border border-[var(--md-sys-color-error)] bg-[var(--md-sys-color-error-container)] p-4 text-[var(--md-sys-color-on-error-container)]">
+              {modal.error}
+            </div>
+          ) : modal.data ? (
+            <>
+              <ExcelDiffGridSummary data={modal.data} />
+              {modal.data.sections.map((section) => (
+                <ExcelDiffGridSectionView
+                  key={section.id}
+                  section={section}
+                  selectedCell={selectedCell}
+                  onSelectCell={setSelectedCell}
+                />
+              ))}
+              {selectedCell && <ExcelDiffGridCellDetail cell={selectedCell} />}
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ExcelDiffGridSummary({ data }: { data: ExcelDiffGridResponse }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2 flex-wrap">
+        <Chip label={`최신 파일 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
+        <Chip label={`${data.sheet_name} 시트`} tone="neutral" as="span" />
+        <Chip label={`${data.row_count}행 × ${data.column_count}열`} tone="neutral" as="span" />
+        {data.key_column && <Chip label={`기준 컬럼 · ${data.key_column}`} tone="secondary" as="span" />}
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+        <Badge tone="success">초록 · 추가</Badge>
+        <Badge tone="danger">빨강 · 삭제</Badge>
+        <Badge tone="warning">노랑 · 변경</Badge>
+      </div>
+
+      {data.partial && (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 type-body-sm text-amber-950">
+          표가 커서 전체를 한 번에 표시하지 않고 변경 셀 주변 구간만 보여줍니다.
+          {data.omitted_focus_count > 0 && ` 최신 표에서 위치를 찾지 못한 변경 ${data.omitted_focus_count}건은 표에 표시하지 못했습니다.`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function ExcelDiffGridSectionView({
+  section,
+  selectedCell,
+  onSelectCell,
+}: {
+  section: ExcelDiffGridResponse['sections'][number]
+  selectedCell: ExcelDiffGridCell | null
+  onSelectCell: (cell: ExcelDiffGridCell) => void
+}) {
+  const columnsByIndex = useMemo(
+    () => new Map(section.columns.map((column) => [column.index, column])),
+    [section.columns],
+  )
+
+  return (
+    <section className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[var(--md-sys-color-outline-variant)]">
+        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{section.title}</p>
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          {section.description} 표시 범위: {section.row_start}-{section.row_end}행, {section.col_start}-{section.col_end}열
+        </p>
+      </div>
+      <div
+        className="max-h-[54vh] overflow-auto overscroll-contain"
+        onWheel={(event) => {
+          if (!event.shiftKey) return
+          event.currentTarget.scrollLeft += event.deltaY
+          event.preventDefault()
+        }}
+      >
+        <table className="min-w-max border-separate border-spacing-0 text-xs">
+          <thead>
+            <tr>
+              <th className="sticky left-0 top-0 z-30 min-w-[4rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm">
+                행
+              </th>
+              {section.columns.map((column) => (
+                <th
+                  key={column.index}
+                  className={`sticky top-0 z-20 min-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm ${
+                    column.is_key ? 'left-[4rem] z-30' : ''
+                  }`}
+                >
+                  <span className="font-mono">{column.letter}열</span>
+                  <span className="block text-[var(--md-sys-color-on-surface-variant)] truncate">
+                    {column.name}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {section.rows.map((row) => (
+              <tr key={row.row_index}>
+                <th className="sticky left-0 z-10 border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 text-left font-mono">
+                  {row.row_number}
+                </th>
+                {row.cells.map((cell) => {
+                  const columnMeta = columnsByIndex.get(cell.column_index)
+                  const selected =
+                    selectedCell?.row_index === cell.row_index &&
+                    selectedCell?.column_index === cell.column_index
+                  return (
+                    <td
+                      key={`${cell.row_index}-${cell.column_index}`}
+                      title={excelGridCellTitle(cell)}
+                      className={`max-w-[16rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-default ${excelGridHighlightClass(cell.highlight)} ${
+                        selected ? 'outline outline-2 outline-[var(--md-sys-color-primary)] outline-offset-[-2px]' : ''
+                      } ${columnMeta?.is_key ? 'sticky left-[4rem] z-10' : ''}`}
+                      onClick={() => cell.histories.length > 0 && onSelectCell(cell)}
+                    >
+                      <div className="flex items-center gap-1">
+                        {cell.highlight && (
+                          <span className="material-symbols-rounded text-[14px]" aria-hidden>
+                            fiber_manual_record
+                          </span>
+                        )}
+                        <span className="truncate">{cell.value || '(빈 값)'}</span>
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell }) {
+  return (
+    <aside className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge tone={cell.highlight === 'removed' ? 'danger' : cell.highlight === 'added' ? 'success' : 'warning'}>
+          {excelGridHighlightLabel(cell.highlight)}
+        </Badge>
+        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+          {cell.row_number}행 {cell.column_letter}열 · {cell.column_name}
+        </p>
+      </div>
+      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+        현재 최신본 값: <span className="font-mono text-[var(--md-sys-color-on-surface)]">{cell.value || '(빈 값)'}</span>
+      </p>
+      <div className="space-y-2">
+        {cell.histories.map((history, index) => (
+          <div
+            key={`${history.label}-${index}`}
+            className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3"
+          >
+            <p className="type-label-md text-[var(--md-sys-color-on-surface)]">
+              {history.label || `${history.from_file_name ?? '이전 파일'} → ${history.to_file_name ?? '다음 파일'}`}
+            </p>
+            <p className="mt-1 type-body-sm font-mono text-[var(--md-sys-color-on-surface-variant)]">
+              {history.before || '(빈 값)'} → {history.after || '(빈 값)'}
+            </p>
+          </div>
+        ))}
+      </div>
+    </aside>
   )
 }
 

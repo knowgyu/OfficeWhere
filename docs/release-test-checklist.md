@@ -31,6 +31,9 @@ Use this checklist before publishing a release tag.
 - [ ] Settings / Library → 화면 표시 changes app-wide text size across search, settings, version management, and Excel previews.
 - [ ] Version Management keeps the selected group visible after opening another group.
 - [ ] Excel added/removed cell content appears under 추가/삭제된 내용, and missing rows/columns show actual content previews rather than only row/column labels.
+- [ ] Excel version groups show a `표로 보기` button that opens a large modal grid.
+- [ ] The Excel grid highlights added/removed/changed cells in green/red/yellow and cell click shows detailed history.
+- [ ] Large Excel grids show partial-range guidance and keep horizontal scrolling, including Shift + mouse wheel.
 - [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.
 - [ ] If a group exceeds the latest-file detail limit, the UI explains only the displayed/latest files were analyzed.
 - [ ] Content-evidence wording avoids internal terms such as “fingerprint”.

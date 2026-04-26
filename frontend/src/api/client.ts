@@ -227,6 +227,83 @@ export interface CheckRequest {
   file_ids: number[]
 }
 
+export type ExcelDiffHighlight = 'added' | 'removed' | 'changed'
+
+export interface ExcelDiffFocusHistory {
+  change_type: ExcelDiffHighlight
+  from_file_id?: number | null
+  from_file_name?: string
+  to_file_id?: number | null
+  to_file_name?: string
+  before?: string
+  after?: string
+  label?: string
+}
+
+export interface ExcelDiffGridFocus {
+  key: string
+  column: string
+  change_type: ExcelDiffHighlight
+  histories: ExcelDiffFocusHistory[]
+}
+
+export interface ExcelDiffGridRequest {
+  file_ids: number[]
+  focuses: ExcelDiffGridFocus[]
+}
+
+export interface ExcelDiffGridColumn {
+  index: number
+  letter: string
+  name: string
+  is_key: boolean
+}
+
+export interface ExcelDiffGridCell {
+  row_index: number
+  row_number: number
+  column_index: number
+  column_letter: string
+  column_name: string
+  value: string
+  highlight: ExcelDiffHighlight | null
+  histories: ExcelDiffFocusHistory[]
+}
+
+export interface ExcelDiffGridRow {
+  row_index: number
+  row_number: number
+  key_value: string
+  cells: ExcelDiffGridCell[]
+}
+
+export interface ExcelDiffGridSection {
+  id: string
+  title: string
+  description: string
+  partial: boolean
+  row_start: number
+  row_end: number
+  col_start: number
+  col_end: number
+  columns: ExcelDiffGridColumn[]
+  rows: ExcelDiffGridRow[]
+}
+
+export interface ExcelDiffGridResponse {
+  latest_file: {
+    file_id: number
+    file_name: string
+  }
+  row_count: number
+  column_count: number
+  key_column: string
+  sheet_name: string
+  partial: boolean
+  omitted_focus_count: number
+  sections: ExcelDiffGridSection[]
+}
+
 export interface ExcelConflictEntry {
   fileId: number
   fileName: string
@@ -1252,6 +1329,8 @@ export const api = {
   check: {
     run: (data: CheckRequest) =>
       apiPath('/api/check').then((url) => axios.post<unknown>(url, data)),
+    excelGrid: (data: ExcelDiffGridRequest) =>
+      apiPath('/api/check/excel-grid').then((url) => axios.post<ExcelDiffGridResponse>(url, data)),
   },
   search: {
     query: (data: SearchRequest) =>

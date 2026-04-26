@@ -10,6 +10,7 @@ from pptx.util import Inches
 
 from backend.api.check import consistency_check
 from backend.core.checker import run_consistency_check
+from backend.core.excel_diff_grid import build_excel_diff_grid
 from backend.core.file_access import inspect_file_path
 from backend.models.schemas import CheckRequest
 
@@ -278,6 +279,118 @@ def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
         assert entry["column_letters"] == ["E"]
         assert entry["cell_refs"] == ["E5"]
         assert entry["row_count"] == 1
+
+
+def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
+    latest = tmp_path / "grid-latest.xlsx"
+    previous = tmp_path / "grid-previous.xlsx"
+    _write_dataframe_excel(latest, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
+    _write_dataframe_excel(previous, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "200"]})
+
+    result = build_excel_diff_grid(
+        [
+            {
+                "id": 2,
+                "path": str(latest),
+                "name": "grid-latest.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": _make_parser_config(columns=3, rows=2),
+            },
+            {
+                "id": 1,
+                "path": str(previous),
+                "name": "grid-previous.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": _make_parser_config(columns=3, rows=2),
+            },
+        ],
+        [
+            {
+                "key": "B",
+                "column": "예산",
+                "change_type": "changed",
+                "histories": [
+                    {
+                        "change_type": "changed",
+                        "from_file_id": 1,
+                        "from_file_name": "grid-previous.xlsx",
+                        "to_file_id": 2,
+                        "to_file_name": "grid-latest.xlsx",
+                        "before": "200",
+                        "after": "250",
+                        "label": "grid-previous.xlsx → grid-latest.xlsx",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert result["partial"] is False
+    assert result["row_count"] == 2
+    assert result["column_count"] == 3
+    section = result["sections"][0]
+    assert section["row_start"] == 1
+    assert section["row_end"] == 2
+    highlighted = [
+        cell
+        for row in section["rows"]
+        for cell in row["cells"]
+        if cell["highlight"] == "changed"
+    ]
+    assert len(highlighted) == 1
+    assert highlighted[0]["column_name"] == "예산"
+    assert highlighted[0]["value"] == "250"
+    assert highlighted[0]["histories"][0]["before"] == "200"
+
+
+def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
+    latest = tmp_path / "large-latest.xlsx"
+    previous = tmp_path / "large-previous.xlsx"
+    rows = 120
+    data = {"ID": [f"K{row}" for row in range(1, rows + 1)]}
+    for column in range(1, 120):
+        data[f"C{column}"] = [f"{row}-{column}" for row in range(1, rows + 1)]
+    _write_dataframe_excel(latest, data)
+    _write_dataframe_excel(previous, data)
+
+    result = build_excel_diff_grid(
+        [
+            {
+                "id": 2,
+                "path": str(latest),
+                "name": "large-latest.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": _make_parser_config(columns=120, rows=rows),
+            },
+            {
+                "id": 1,
+                "path": str(previous),
+                "name": "large-previous.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": _make_parser_config(columns=120, rows=rows),
+            },
+        ],
+        [{"key": "K100", "column": "C100", "change_type": "added", "histories": []}],
+    )
+
+    assert result["partial"] is True
+    section = result["sections"][0]
+    assert section["row_start"] > 1
+    assert section["row_end"] - section["row_start"] + 1 < rows
+    assert section["col_start"] > 1
+    assert any(column["name"] == "ID" and column["is_key"] for column in section["columns"])
+    highlighted = [
+        cell
+        for row in section["rows"]
+        for cell in row["cells"]
+        if cell["highlight"] == "added"
+    ]
+    assert highlighted
+    assert highlighted[0]["column_name"] == "C100"
 
 
 def test_word_diff_reports_paragraph_and_table_changes(tmp_path):

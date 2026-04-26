@@ -87,9 +87,81 @@ class CheckRequest(BaseModel):
     file_ids: List[int]
 
 
+class ExcelDiffFocusHistory(BaseModel):
+    change_type: str
+    from_file_id: Optional[int] = None
+    from_file_name: str = ""
+    to_file_id: Optional[int] = None
+    to_file_name: str = ""
+    before: str = ""
+    after: str = ""
+    label: str = ""
+
+
+class ExcelDiffGridFocus(BaseModel):
+    key: str = ""
+    column: str = ""
+    change_type: str = "changed"
+    histories: List[ExcelDiffFocusHistory] = Field(default_factory=list)
+
+
+class ExcelDiffGridRequest(BaseModel):
+    file_ids: List[int]
+    focuses: List[ExcelDiffGridFocus] = Field(default_factory=list)
+
+
 class FileRef(BaseModel):
     file_id: int
     file_name: str
+
+
+class ExcelDiffGridColumn(BaseModel):
+    index: int
+    letter: str
+    name: str
+    is_key: bool = False
+
+
+class ExcelDiffGridCell(BaseModel):
+    row_index: int
+    row_number: int
+    column_index: int
+    column_letter: str
+    column_name: str
+    value: str
+    highlight: Optional[str] = None
+    histories: List[ExcelDiffFocusHistory] = Field(default_factory=list)
+
+
+class ExcelDiffGridRow(BaseModel):
+    row_index: int
+    row_number: int
+    key_value: str = ""
+    cells: List[ExcelDiffGridCell]
+
+
+class ExcelDiffGridSection(BaseModel):
+    id: str
+    title: str
+    description: str
+    partial: bool = False
+    row_start: int
+    row_end: int
+    col_start: int
+    col_end: int
+    columns: List[ExcelDiffGridColumn]
+    rows: List[ExcelDiffGridRow]
+
+
+class ExcelDiffGridResponse(BaseModel):
+    latest_file: FileRef
+    row_count: int
+    column_count: int
+    key_column: str
+    sheet_name: str
+    partial: bool = False
+    omitted_focus_count: int = 0
+    sections: List[ExcelDiffGridSection]
 
 
 class ExcelConflictValue(BaseModel):
