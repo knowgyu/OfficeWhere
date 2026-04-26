@@ -66,6 +66,48 @@
 `officewhere-vX.Y.Z-windows-x64.zip`을 받아 압축을 푼 뒤
 `OfficeWhere.exe`를 실행하는 것입니다. 별도 설치 과정은 없습니다.
 
+## 웹 브라우저에서 빠르게 테스트하기
+
+릴리스 zip을 매번 받지 않고 repo를 clone해서 브라우저로 바로 확인할 수 있습니다.
+이 방식은 **로컬 Python backend + Vite web frontend**를 한 번에 띄우는 개발/검증용 실행입니다.
+
+먼저 한 번만 의존성을 설치합니다.
+
+```bash
+./setup.sh
+```
+
+그다음부터는 터미널 하나에서 실행합니다.
+
+```bash
+./dev-web.sh
+```
+
+Windows에서는 다음처럼 실행합니다.
+
+```bat
+setup.bat
+dev-web.bat
+```
+
+실행 후 브라우저에서 `http://127.0.0.1:5173`을 열면 됩니다.
+종료는 실행 중인 터미널에서 `Ctrl+C`를 누르면 backend까지 같이 종료됩니다.
+
+기본 포트가 겹치면 원하는 포트로 바꿀 수 있습니다.
+
+```bash
+BACKEND_PORT=8876 FRONTEND_PORT=5174 ./dev-web.sh
+```
+
+```bat
+dev-web.bat -BackendPort 8876 -FrontendPort 5174
+```
+
+이 경우 브라우저 주소는 `http://127.0.0.1:5174`입니다.
+
+> WSL에서 실행할 수는 있지만, Windows 네트워크 드라이브나 Windows 경로(`K:\...`)를
+> 그대로 읽는 테스트는 Windows에서 `dev-web.bat`으로 실행하는 편이 더 안전합니다.
+
 ## 직접 빌드하기
 
 소스에서 직접 빌드하려면 다음이 필요합니다.
@@ -91,6 +133,11 @@ chmod +x setup.sh build.sh
 ```
 
 `build.sh`는 로컬 검증용이며, 정식 Windows 배포 zip은 `build.bat`으로 생성합니다.
+
+현재 GitHub Release 자동 빌드는 Windows zip만 생성합니다. macOS에서 웹 테스트와
+backend/frontend 빌드 검증은 가능하지만, macOS 데스크톱 앱 배포본은 별도
+Electron mac target, macOS에서의 backend 실행 파일 빌드, 서명/공증 설정을 추가로
+검증해야 합니다.
 
 ## 성능 메모
 

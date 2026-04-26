@@ -35,6 +35,7 @@ declare global {
 }
 
 let backendBaseUrlPromise: Promise<string> | null = null
+const configuredDevBackendUrl = import.meta.env.VITE_BACKEND_URL?.trim().replace(/\/$/, '')
 
 export async function getBackendBaseUrl(): Promise<string> {
   if (!backendBaseUrlPromise) {
@@ -42,7 +43,7 @@ export async function getBackendBaseUrl(): Promise<string> {
       typeof window !== 'undefined' ? window.officeDataJoiner : undefined
     backendBaseUrlPromise = bridge?.getBackendBaseUrl
       ? bridge.getBackendBaseUrl()
-      : Promise.resolve(import.meta.env.DEV ? 'http://localhost:8765' : '')
+      : Promise.resolve(import.meta.env.DEV ? configuredDevBackendUrl || '' : '')
   }
 
   return backendBaseUrlPromise

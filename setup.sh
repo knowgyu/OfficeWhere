@@ -28,6 +28,6 @@ cd ..
 
 echo ""
 echo "[완료] 개발 환경 설정이 완료되었습니다."
-echo "Backend 실행: source venv/bin/activate 후 python backend_server.py --host 127.0.0.1 --port 8765"
-echo "Frontend 실행: cd frontend 후 npm run dev"
+echo "웹 테스트 실행: ./dev-web.sh"
+echo "포트 변경 예: BACKEND_PORT=8876 FRONTEND_PORT=5174 ./dev-web.sh"
 echo "Electron 실행: cd frontend 후 npm run electron:dev"
