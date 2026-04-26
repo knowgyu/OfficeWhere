@@ -252,6 +252,13 @@ export default function FileSearch() {
     }
   }
 
+  const handleResetFileTypes = () => {
+    setSelectedFileTypes([])
+    if (query.trim()) {
+      void doSearch(query, [], searchScope, modifiedDateFilter, customModifiedFrom, customModifiedTo)
+    }
+  }
+
   const handleModifiedDateFilterChange = (next: ModifiedDateFilter) => {
     setModifiedDateFilter(next)
     if (query.trim()) {
@@ -458,20 +465,30 @@ export default function FileSearch() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">문서 형식</span>
-            {FILE_TYPE_FILTERS.map((filter) => (
-              <Chip
-                key={filter.value}
-                label={filter.label}
-                icon={filter.icon}
-                kind="filter"
-                selected={selectedFileTypes.includes(filter.value)}
-                onClick={() => toggleFileType(filter.value)}
-              />
-            ))}
+            {FILE_TYPE_FILTERS.map((filter) => {
+              const selected = selectedFileTypes.includes(filter.value)
+              return (
+                <Chip
+                  key={filter.value}
+                  label={filter.label}
+                  icon={filter.icon}
+                  kind="filter"
+                  selected={selected}
+                  aria-pressed={selected}
+                  onClick={() => toggleFileType(filter.value)}
+                />
+              )
+            })}
+            <Button
+              variant="text"
+              size="sm"
+              leadingIcon="restart_alt"
+              onClick={handleResetFileTypes}
+              disabled={selectedFileTypes.length === 0}
+            >
+              초기화
+            </Button>
           </div>
-          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            선택을 모두 해제하면 전체 형식에서 검색합니다.
-          </p>
           <div className="space-y-2">
             <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">수정일</span>
             <div className="flex items-center gap-2 flex-wrap">

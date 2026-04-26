@@ -122,9 +122,9 @@ const GROUP_FILTER_OPTIONS: { value: GroupFilter; label: string }[] = [
 
 const GROUP_FILE_TYPE_OPTIONS: { value: GroupFileTypeFilter; label: string }[] = [
   { value: 'all', label: '전체 형식' },
-  { value: 'Excel', label: 'Excel' },
-  { value: 'Word', label: 'Word' },
-  { value: 'PowerPoint', label: 'PowerPoint' },
+  { value: 'Excel', label: 'Excel 문서' },
+  { value: 'Word', label: 'Word 문서' },
+  { value: 'PowerPoint', label: 'PowerPoint 문서' },
 ]
 
 const excelChangeTypeFromIssue = (
@@ -780,7 +780,7 @@ export default function ConsistencyCheck() {
               </div>
               <div className="min-w-0">
                 <SelectField
-                  label="문서 형식"
+                  aria-label="문서 형식"
                   value={groupFileType}
                   onChange={(event) => changeGroupFileType(event.target.value as GroupFileTypeFilter)}
                 >
@@ -793,7 +793,7 @@ export default function ConsistencyCheck() {
               </div>
               <div className="min-w-0">
                 <SelectField
-                  label="정렬"
+                  aria-label="정렬"
                   value={groupSort}
                   onChange={(event) => changeGroupSort(event.target.value as GroupSort)}
                 >
@@ -802,7 +802,7 @@ export default function ConsistencyCheck() {
                   <option value="name">이름순</option>
                 </SelectField>
               </div>
-              <div className="flex gap-2 shrink-0 xl:pt-[1.625rem]">
+              <div className="flex gap-2 shrink-0">
                 <Button variant="filled" leadingIcon="search" onClick={handleGroupSearch} disabled={groupsLoading}>
                   찾기
                 </Button>

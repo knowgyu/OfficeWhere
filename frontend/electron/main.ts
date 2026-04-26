@@ -106,6 +106,7 @@ async function createMainWindow() {
     minHeight: 680,
     icon: getAppIconPath(),
     show: false,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -115,6 +116,7 @@ async function createMainWindow() {
   })
 
   mainWindow.removeMenu()
+  mainWindow.setMenuBarVisibility(false)
   mainWindow.once('ready-to-show', () => mainWindow?.show())
   mainWindow.on('close', (event) => {
     if (isQuitting || appDataCleanupInProgress) return
