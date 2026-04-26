@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,7 @@ def _default_db_dir() -> Path:
 
 DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
+FINGERPRINT_VERSION = 1
 
 
 def configure_database(data_dir: str | os.PathLike[str]):
@@ -56,6 +59,84 @@ def _decode_parser_config(row: Dict[str, Any]) -> Dict[str, Any]:
     except json.JSONDecodeError:
         row["parser_config"] = {}
     return row
+
+
+def _normalize_fingerprint_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return re.sub(r"\s+", " ", str(value).strip())
+
+
+def _build_document_fingerprint(
+    chunks: Sequence[Dict[str, str]],
+    source_mtime: Optional[float] = None,
+) -> Dict[str, Any]:
+    raw_lines: List[str] = []
+    normalized_lines: List[str] = []
+    content_chars = 0
+
+    for chunk in chunks:
+        location = str(chunk.get("location", ""))
+        content = str(chunk.get("content", ""))
+        normalized_content = _normalize_fingerprint_text(content)
+        normalized_location = _normalize_fingerprint_text(location)
+        raw_lines.append(f"{location}\n{content}")
+        if normalized_content:
+            normalized_lines.append(f"{normalized_location}\t{normalized_content}")
+            content_chars += len(normalized_content)
+
+    raw_payload = "\n".join(raw_lines)
+    normalized_payload = "\n".join(normalized_lines)
+    return {
+        "content_hash": hashlib.sha256(raw_payload.encode("utf-8")).hexdigest(),
+        "normalized_hash": hashlib.sha256(normalized_payload.encode("utf-8")).hexdigest(),
+        "content_chars": content_chars,
+        "chunk_count": len(chunks),
+        "fingerprint_version": FINGERPRINT_VERSION,
+        "source_mtime": source_mtime,
+        "fingerprinted_at": datetime.now().isoformat(),
+    }
+
+
+def _upsert_document_fingerprint(
+    cursor: sqlite3.Cursor,
+    file_id: int,
+    chunks: Sequence[Dict[str, str]],
+    source_mtime: Optional[float] = None,
+):
+    fingerprint = _build_document_fingerprint(chunks, source_mtime)
+    cursor.execute(
+        """
+        INSERT INTO document_fingerprints (
+            file_id, normalized_hash, content_hash, content_chars, chunk_count,
+            fingerprint_version, source_mtime, fingerprinted_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(file_id) DO UPDATE SET
+            normalized_hash=excluded.normalized_hash,
+            content_hash=excluded.content_hash,
+            content_chars=excluded.content_chars,
+            chunk_count=excluded.chunk_count,
+            fingerprint_version=excluded.fingerprint_version,
+            source_mtime=excluded.source_mtime,
+            fingerprinted_at=excluded.fingerprinted_at
+        """,
+        (
+            file_id,
+            fingerprint["normalized_hash"],
+            fingerprint["content_hash"],
+            fingerprint["content_chars"],
+            fingerprint["chunk_count"],
+            fingerprint["fingerprint_version"],
+            fingerprint["source_mtime"],
+            fingerprint["fingerprinted_at"],
+        ),
+    )
+
+
+def _batched_values(values: Sequence[int], size: int = 900):
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
 
 
 def init_db():
@@ -124,6 +205,27 @@ def init_db():
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_fingerprints (
+            file_id INTEGER PRIMARY KEY,
+            normalized_hash TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            content_chars INTEGER NOT NULL,
+            chunk_count INTEGER NOT NULL,
+            fingerprint_version INTEGER NOT NULL,
+            source_mtime REAL,
+            fingerprinted_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_fingerprints_normalized_hash
+        ON document_fingerprints(normalized_hash)
         """
     )
 
@@ -291,6 +393,7 @@ def delete_file(file_id: int) -> bool:
     conn = _connect()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM file_chunks WHERE file_id=?", (file_id,))
+    cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
     cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
     affected = cursor.rowcount
     conn.commit()
@@ -301,11 +404,15 @@ def delete_file(file_id: int) -> bool:
 def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
     conn = _connect()
     cursor = conn.cursor()
+    cursor.execute("SELECT file_mtime FROM registered_files WHERE id = ?", (file_id,))
+    row = cursor.fetchone()
+    source_mtime = row[0] if row else None
     cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
     cursor.executemany(
         "INSERT INTO file_chunks (file_id, location, content) VALUES (?, ?, ?)",
         [(file_id, chunk["location"], chunk["content"]) for chunk in chunks],
     )
+    _upsert_document_fingerprint(cursor, file_id, chunks, source_mtime=source_mtime)
     conn.commit()
     conn.close()
 
@@ -314,8 +421,96 @@ def update_file_mtime(file_id: int, mtime: float):
     conn = _connect()
     cursor = conn.cursor()
     cursor.execute("UPDATE registered_files SET file_mtime = ? WHERE id = ?", (mtime, file_id))
+    cursor.execute("UPDATE document_fingerprints SET source_mtime = ? WHERE file_id = ?", (mtime, file_id))
     conn.commit()
     conn.close()
+
+
+def get_file_fingerprints(file_ids: Optional[Sequence[int]] = None) -> Dict[int, Dict[str, Any]]:
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    rows: List[sqlite3.Row] = []
+    ids = [int(file_id) for file_id in file_ids] if file_ids is not None else None
+
+    if ids is None:
+        cursor.execute("SELECT * FROM document_fingerprints")
+        rows = cursor.fetchall()
+    elif ids:
+        for batch in _batched_values(ids):
+            placeholders = ",".join("?" for _ in batch)
+            cursor.execute(f"SELECT * FROM document_fingerprints WHERE file_id IN ({placeholders})", batch)
+            rows.extend(cursor.fetchall())
+
+    conn.close()
+    return {int(row["file_id"]): dict(row) for row in rows}
+
+
+def ensure_file_fingerprints(file_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
+    unique_ids = sorted({int(file_id) for file_id in file_ids})
+    if not unique_ids:
+        return {}
+
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    registered: Dict[int, Optional[float]] = {}
+    existing: Dict[int, Dict[str, Any]] = {}
+
+    for batch in _batched_values(unique_ids):
+        placeholders = ",".join("?" for _ in batch)
+        cursor.execute(f"SELECT id, file_mtime FROM registered_files WHERE id IN ({placeholders})", batch)
+        registered.update({int(row["id"]): row["file_mtime"] for row in cursor.fetchall()})
+        cursor.execute(f"SELECT * FROM document_fingerprints WHERE file_id IN ({placeholders})", batch)
+        existing.update({int(row["file_id"]): dict(row) for row in cursor.fetchall()})
+
+    stale_ids: List[int] = []
+    for file_id, source_mtime in registered.items():
+        current = existing.get(file_id)
+        if not current:
+            stale_ids.append(file_id)
+            continue
+        if current.get("fingerprint_version") != FINGERPRINT_VERSION:
+            stale_ids.append(file_id)
+            continue
+        if current.get("source_mtime") != source_mtime:
+            stale_ids.append(file_id)
+
+    if stale_ids:
+        chunks_by_file: Dict[int, List[Dict[str, str]]] = {file_id: [] for file_id in stale_ids}
+        for batch in _batched_values(stale_ids):
+            placeholders = ",".join("?" for _ in batch)
+            cursor.execute(
+                f"""
+                SELECT file_id, location, content
+                FROM file_chunks
+                WHERE file_id IN ({placeholders})
+                ORDER BY file_id, id
+                """,
+                batch,
+            )
+            for row in cursor.fetchall():
+                chunks_by_file[int(row["file_id"])].append(
+                    {"location": row["location"], "content": row["content"]}
+                )
+
+        for file_id in stale_ids:
+            _upsert_document_fingerprint(
+                cursor,
+                file_id,
+                chunks_by_file.get(file_id, []),
+                source_mtime=registered.get(file_id),
+            )
+        conn.commit()
+
+    rows: List[sqlite3.Row] = []
+    for batch in _batched_values(unique_ids):
+        placeholders = ",".join("?" for _ in batch)
+        cursor.execute(f"SELECT * FROM document_fingerprints WHERE file_id IN ({placeholders})", batch)
+        rows.extend(cursor.fetchall())
+
+    conn.close()
+    return {int(row["file_id"]): dict(row) for row in rows}
 
 
 def search_chunks(

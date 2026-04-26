@@ -4,6 +4,8 @@ import {
   CheckResponse,
   ExcelCheckIssue,
   FileInfo,
+  LibraryGroupDetail,
+  LibraryGroupKind,
   LibraryGroupSummary,
   PptSlideCard,
   WordDiffCard,
@@ -29,13 +31,17 @@ import {
 } from '../ui'
 
 const CHECK_FILE_PAGE_SIZE = 60
-const GROUP_PREVIEW_LIMIT = 20
+const GROUP_PAGE_SIZE = 50
+const GROUP_DETAIL_FILE_LIMIT = 200
+
+type GroupFilter = 'all' | LibraryGroupKind
+type ContentStatus = LibraryGroupSummary['content_status']
 
 const MODE_GUIDE: Record<string, string> = {
   excel: 'Excel은 여러 파일을 동시에 비교합니다. 기준 컬럼이 같은 행에서 값이 다르거나 컬럼·항목이 누락된 경우를 찾습니다.',
   word: 'Word는 2개 파일만 비교합니다. 추가·삭제·수정된 문단과 표 행을 카드 형태로 보여줍니다.',
   ppt: 'PPT는 2개 파일만 비교합니다. 슬라이드 추가/삭제와 슬라이드 내 항목 변경을 보여줍니다.',
-  none: 'Excel은 여러 파일 동시 비교, Word/PPT는 2개 파일 비교가 가능합니다. 텍스트 파일은 검색 등록용입니다.',
+  none: '자동 감지된 묶음에서 바로 비교하거나, 필요할 때만 수동 선택을 열어 직접 고를 수 있습니다.',
 }
 
 const DIFF_TYPE_KO: Record<string, string> = {
@@ -58,10 +64,42 @@ const PPT_TYPE_KO: Record<string, string> = {
   matched_slide_change: '슬라이드 변경',
 }
 
+const CONTENT_STATUS_META: Record<
+  ContentStatus,
+  { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' }
+> = {
+  pending: { label: '내용 판단 대기', tone: 'neutral' },
+  partial: { label: '일부만 판단', tone: 'warning' },
+  not_enough_content: { label: '본문 부족', tone: 'neutral' },
+  same_content: { label: '내용 같음', tone: 'success' },
+  content_differs: { label: '내용 다름', tone: 'danger' },
+}
+
 const isCheckableFile = (file: FileInfo) =>
   ['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(file.file_type))
 
 const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
+
+const groupKindLabel = (kind: LibraryGroupKind) =>
+  kind === 'exact_name_conflict' ? '같은 파일명' : '버전 후보'
+
+const formatDate = (value?: string | number | null) => {
+  if (!value) return '날짜 정보 없음'
+  const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value)
+  if (Number.isNaN(date.getTime())) return '날짜 정보 없음'
+  return date.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+const pathTail = (path: string) => {
+  const parts = path.split(/[\\/]+/).filter(Boolean)
+  return parts.slice(-3).join(' / ') || path
+}
 
 export default function ConsistencyCheck() {
   const snackbar = useSnackbar()
@@ -71,10 +109,16 @@ export default function ConsistencyCheck() {
   const [fileQuery, setFileQuery] = useState('')
   const [fileQueryDraft, setFileQueryDraft] = useState('')
   const [filesLoading, setFilesLoading] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [groups, setGroups] = useState<LibraryGroupSummary[]>([])
   const [groupTotal, setGroupTotal] = useState(0)
+  const [groupCounts, setGroupCounts] = useState<Partial<Record<LibraryGroupKind, number>>>({})
+  const [groupOffset, setGroupOffset] = useState(0)
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>('all')
+  const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
+  const [activeGroupDetail, setActiveGroupDetail] = useState<LibraryGroupDetail | null>(null)
   const [groupDetailFiles, setGroupDetailFiles] = useState<FileInfo[]>([])
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -99,29 +143,46 @@ export default function ConsistencyCheck() {
     }
   }
 
+  const fetchGroups = async (nextOffset = groupOffset, nextFilter = groupFilter) => {
+    setGroupsLoading(true)
+    try {
+      const response = await api.library.groups({
+        limit: GROUP_PAGE_SIZE,
+        offset: nextOffset,
+        kind: nextFilter === 'all' ? undefined : nextFilter,
+      })
+      setGroups(response.data.groups)
+      setGroupTotal(response.data.total)
+      setGroupOffset(response.data.offset)
+      setGroupFilter(nextFilter)
+      setGroupCounts((current) =>
+        nextFilter === 'all'
+          ? response.data.counts_by_kind
+          : { ...current, ...response.data.counts_by_kind },
+      )
+    } catch {
+      /* silent */
+    } finally {
+      setGroupsLoading(false)
+    }
+  }
+
   useEffect(() => {
     void fetchFiles(0, '')
-    api.library
-      .groups({ limit: GROUP_PREVIEW_LIMIT })
-      .then((response) => {
-        setGroups(response.data.groups)
-        setGroupTotal(response.data.total)
-      })
-      .catch(() => {
-        /* silent */
-      })
+    void fetchGroups(0, 'all')
   }, [])
 
   const knownFilesById = useMemo(() => {
     const byId = new Map<number, FileInfo>()
     files.forEach((file) => byId.set(file.id, file))
     groupDetailFiles.forEach((file) => byId.set(file.id, file))
+    activeGroupDetail?.files.forEach((file) => byId.set(file.id, file))
     groups.forEach((group) => {
       if (group.latest_file) byId.set(group.latest_file.id, group.latest_file)
       if (group.previous_file) byId.set(group.previous_file.id, group.previous_file)
     })
     return byId
-  }, [files, groupDetailFiles, groups])
+  }, [activeGroupDetail, files, groupDetailFiles, groups])
 
   const selectedFiles = useMemo(
     () =>
@@ -133,6 +194,46 @@ export default function ConsistencyCheck() {
   const selectedMode = selectedFiles[0]
     ? getCompareMode(undefined, selectedFiles[0].file_type)
     : null
+
+  const validateFilesForCheck = (candidateFiles: FileInfo[]): string | null => {
+    if (candidateFiles.length < 2) return '최소 2개 파일을 선택해 주세요.'
+    if (candidateFiles.some((file) => !isCheckableFile(file))) {
+      return '정합성 검사는 Word, PowerPoint, Excel 파일만 지원합니다.'
+    }
+    const modes = new Set(candidateFiles.map((file) => getCompareMode(undefined, file.file_type)))
+    if (modes.size > 1) return '파일 타입이 섞이면 검사할 수 없습니다.'
+    const mode = getCompareMode(undefined, candidateFiles[0].file_type)
+    if ((mode === 'word' || mode === 'ppt') && candidateFiles.length !== 2) {
+      return `${mode === 'word' ? 'Word' : 'PPT'} 비교는 정확히 2개 파일이 필요합니다.`
+    }
+    return null
+  }
+
+  const runCheckForFiles = async (candidateFiles: FileInfo[]) => {
+    const validationError = validateFilesForCheck(candidateFiles)
+    if (validationError) {
+      snackbar.warn(validationError)
+      return
+    }
+
+    const ids = candidateFiles.map((file) => file.id)
+    setSelectedIds(new Set(ids))
+    setGroupDetailFiles(candidateFiles)
+    setLoading(true)
+    setResult(null)
+    try {
+      const response = await api.check.run({ file_ids: ids })
+      const normalized = normalizeCheckResponse(response.data)
+      setResult(normalized)
+    } catch (error) {
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        '정합성 검사에 실패했습니다.'
+      snackbar.error(detail)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const toggleFile = (file: FileInfo) => {
     if (!isCheckableFile(file)) {
@@ -164,60 +265,48 @@ export default function ConsistencyCheck() {
     setResult(null)
   }
 
-  const validateSelection = (): string | null => {
-    if (selectedFiles.length < 2) return '최소 2개 파일을 선택해 주세요.'
-    const modes = new Set(selectedFiles.map((file) => getCompareMode(undefined, file.file_type)))
-    if (modes.size > 1) return '파일 타입이 섞이면 검사할 수 없습니다.'
-    const mode = selectedMode
-    if (!mode) return '검사할 파일을 선택해 주세요.'
-    if ((mode === 'word' || mode === 'ppt') && selectedFiles.length !== 2) {
-      return `${mode === 'word' ? 'Word' : 'PPT'} 비교는 정확히 2개 파일이 필요합니다.`
-    }
-    return null
+  const handleCheck = () => {
+    void runCheckForFiles(selectedFiles)
   }
 
-  const handleCheck = async () => {
-    const validationError = validateSelection()
-    if (validationError) {
-      snackbar.warn(validationError)
-      return
-    }
-    setLoading(true)
-    setResult(null)
+  const loadGroupDetail = async (group: LibraryGroupSummary): Promise<LibraryGroupDetail | null> => {
+    if (activeGroupDetail?.id === group.id) return activeGroupDetail
+
+    setGroupLoadingId(group.id)
     try {
-      const response = await api.check.run({ file_ids: Array.from(selectedIds) })
-      const normalized = normalizeCheckResponse(response.data)
-      setResult(normalized)
-    } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        '정합성 검사에 실패했습니다.'
-      snackbar.error(detail)
+      const response = await api.library.groupDetail(group.id)
+      const detail = response.data
+      setActiveGroupDetail(detail)
+      setGroupDetailFiles(detail.files)
+      return detail
+    } catch {
+      snackbar.error('문서 묶음 상세 정보를 불러오지 못했습니다.')
+      return null
     } finally {
-      setLoading(false)
+      setGroupLoadingId(null)
     }
   }
 
   const selectGroup = async (group: LibraryGroupSummary) => {
-    if (!['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(group.file_type))) {
-      snackbar.warn('이 묶음은 검색 등록용 파일이라 정합성 검사 대상으로 선택할 수 없습니다.')
-      return
-    }
-    setGroupLoadingId(group.id)
+    await loadGroupDetail(group)
+  }
+
+  const compareGroup = async (group: LibraryGroupSummary, scope: 'latest_two' | 'all') => {
+    const detail = await loadGroupDetail(group)
+    if (!detail) return
+    const normalizedType = normalizeFileType(detail.file_type)
+    const candidateFiles =
+      scope === 'all' && normalizedType === 'Excel'
+        ? detail.files
+        : detail.files.slice(0, 2)
+    await runCheckForFiles(candidateFiles)
+  }
+
+  const openFile = async (file: FileInfo) => {
     try {
-      const response = await api.library.groupDetail(group.id)
-      const detailFiles = response.data.files
-      const ids =
-        normalizeFileType(group.file_type) === 'Excel'
-          ? detailFiles.map((file) => file.id)
-          : detailFiles.slice(0, 2).map((file) => file.id)
-      setGroupDetailFiles(detailFiles)
-      setSelectedIds(new Set(ids))
-      setResult(null)
+      await api.files.open(file.id)
     } catch {
-      snackbar.error('문서 묶음 상세 정보를 불러오지 못했습니다.')
-    } finally {
-      setGroupLoadingId(null)
+      snackbar.error('파일을 열지 못했습니다. 경로가 바뀌었는지 확인해 주세요.')
     }
   }
 
@@ -239,18 +328,42 @@ export default function ConsistencyCheck() {
     void fetchFiles(boundedOffset, fileQuery)
   }
 
+  const changeGroupFilter = (nextFilter: GroupFilter) => {
+    setActiveGroupDetail(null)
+    void fetchGroups(0, nextFilter)
+  }
+
+  const goToGroupPage = (nextOffset: number) => {
+    const boundedOffset = Math.max(0, nextOffset)
+    setActiveGroupDetail(null)
+    void fetchGroups(boundedOffset, groupFilter)
+  }
+
   const visibleFileStart = fileTotal === 0 ? 0 : fileOffset + 1
   const visibleFileEnd = Math.min(fileOffset + files.length, fileTotal)
   const hasPreviousFilePage = fileOffset > 0
   const hasNextFilePage = fileOffset + files.length < fileTotal
+  const visibleGroupStart = groupTotal === 0 ? 0 : groupOffset + 1
+  const visibleGroupEnd = Math.min(groupOffset + groups.length, groupTotal)
+  const hasPreviousGroupPage = groupOffset > 0
+  const hasNextGroupPage = groupOffset + groups.length < groupTotal
+  const exactCount =
+    groupCounts.exact_name_conflict ??
+    groups.filter((group) => group.group_kind === 'exact_name_conflict').length
+  const versionCount =
+    groupCounts.version_family ??
+    groups.filter((group) => group.group_kind === 'version_family').length
+  const contentEvidenceCount = groups.filter(
+    (group) => group.content_status === 'same_content' || group.content_status === 'content_differs',
+  ).length
 
-  if (fileTotal === 0 && groupTotal === 0 && !filesLoading) {
+  if (fileTotal === 0 && groupTotal === 0 && !filesLoading && !groupsLoading) {
     return (
       <Card variant="outlined">
         <EmptyState
           icon="fact_check"
           title="먼저 파일을 등록해 주세요"
-          description="정합성 검사는 등록된 파일 사이의 차이를 탐지합니다."
+          description="정합성 검사는 등록된 Office 파일 사이의 차이를 탐지합니다."
         />
       </Card>
     )
@@ -258,220 +371,149 @@ export default function ConsistencyCheck() {
 
   return (
     <div className="space-y-6">
-      {groups.length > 0 && (
-        <Card variant="elevated">
-          <CardSection
-            title="자동 감지된 유사 파일 묶음"
-            description="같은 파일명 또는 버전/날짜 표시가 있는 Office 문서 후보를 요약만 먼저 보여줍니다. 내용 차이는 실제 비교 후에만 확인합니다."
-            trailing={
-              <Chip
-                label={groupTotal > groups.length ? `표시 ${groups.length}/${groupTotal}개` : `${groups.length}개 묶음`}
-                tone="primary"
-                icon="auto_awesome"
-                as="span"
-              />
-            }
-          >
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {groups.map((group) => (
-                <button
-                  key={group.id}
-                  type="button"
-                  onClick={() => void selectGroup(group)}
-                  disabled={groupLoadingId === group.id}
-                  className="state-host relative text-left rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 hover:border-[var(--md-sys-color-primary)] transition-colors"
-                >
-                  <span className="state-layer" />
-                  <div className="relative space-y-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <FileTypeBadge fileType={group.file_type} />
-                      <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                        {group.base_name}
-                      </span>
-                      <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
-                        {group.group_kind === 'exact_name_conflict' ? '같은 파일명' : '버전 후보'}
-                      </Badge>
-                      <Badge tone="neutral">{group.file_count}개 파일</Badge>
-                    </div>
-                    <div className="space-y-1">
-                      {[group.latest_file, group.previous_file].filter(Boolean).map((file) => (
-                        <p
-                          key={(file as FileInfo).id}
-                          className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate"
-                          title={(file as FileInfo).path}
-                        >
-                          {(file as FileInfo).name}
-                        </p>
-                      ))}
-                    </div>
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                      {group.reason}
-                    </p>
-                    {group.tokens_summary.length > 0 && (
-                      <div className="flex gap-1.5 flex-wrap">
-                        {group.tokens_summary.slice(0, 5).map((token) => (
-                          <Chip key={token} label={token} tone="secondary" as="span" />
-                        ))}
-                      </div>
-                    )}
-                    <p className="type-label-md text-[var(--md-sys-color-primary)]">
-                      {groupLoadingId === group.id
-                        ? '묶음 상세 불러오는 중…'
-                        : normalizeFileType(group.file_type) === 'Excel'
-                        ? '이 묶음 전체를 비교 대상으로 선택'
-                        : '이 묶음에서 최신 2개 파일을 비교 대상으로 선택'}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </CardSection>
-        </Card>
-      )}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <StatCard
+          label="확인할 묶음"
+          value={groupTotal}
+          icon="folder_copy"
+          tone={groupTotal > 0 ? 'primary' : 'neutral'}
+        />
+        <StatCard
+          label="같은 파일명"
+          value={exactCount}
+          icon="content_copy"
+          tone={exactCount > 0 ? 'warning' : 'neutral'}
+        />
+        <StatCard
+          label="버전 후보"
+          value={versionCount}
+          icon="history"
+          tone={versionCount > 0 ? 'primary' : 'neutral'}
+        />
+        <StatCard
+          label="현재 페이지 근거"
+          value={contentEvidenceCount}
+          icon="fingerprint"
+          tone={contentEvidenceCount > 0 ? 'success' : 'neutral'}
+        />
+      </div>
 
       <Card variant="elevated">
         <CardSection
-          title="검사할 파일 선택"
-          description={MODE_GUIDE[selectedMode ?? 'none']}
+          title="자동 감지된 Office 문서 묶음"
+          description="같은 파일명 또는 버전/날짜 표시가 있는 Word, PowerPoint, Excel 후보를 먼저 보여줍니다. 내용 판단은 fingerprint 근거가 있을 때만 표시합니다."
           trailing={
-            <div className="flex gap-2 flex-wrap">
-              <Chip
-                label={`선택 ${selectedFiles.length}개`}
-                tone="primary"
-                icon="task_alt"
-                as="span"
-              />
-              <Chip
-                label={
-                  fileTotal === 0
-                    ? '표시 0개'
-                    : `표시 ${visibleFileStart}-${visibleFileEnd} / ${fileTotal}`
-                }
-                tone="neutral"
-                icon="view_list"
-                as="span"
-              />
-              {selectedMode && (
-                <Chip
-                  label={`모드 · ${selectedMode.toUpperCase()}`}
-                  tone="secondary"
-                  as="span"
-                />
-              )}
-            </div>
+            <Chip
+              label={
+                groupTotal > groups.length
+                  ? `표시 ${visibleGroupStart}-${visibleGroupEnd} / ${groupTotal}`
+                  : `${groupTotal}개 묶음`
+              }
+              tone="primary"
+              icon="auto_awesome"
+              as="span"
+            />
           }
         >
-          <div className="flex gap-2 items-start flex-wrap md:flex-nowrap mb-3">
-            <div className="flex-1 min-w-[240px]">
-              <TextField
-                leadingIcon="search"
-                placeholder="검사할 Office 파일명 또는 경로 검색"
-                value={fileQueryDraft}
-                onChange={(event) => setFileQueryDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') handleFileSearch()
-                }}
-              />
-            </div>
-            <Button variant="filled" leadingIcon="search" onClick={handleFileSearch} disabled={filesLoading}>
-              검색
-            </Button>
-            {fileQuery && (
-              <Button variant="text" leadingIcon="close" onClick={clearFileSearch} disabled={filesLoading}>
-                검색 해제
-              </Button>
-            )}
+          <div className="flex gap-2 flex-wrap">
+            <Chip
+              label="전체"
+              kind="filter"
+              selected={groupFilter === 'all'}
+              onClick={() => changeGroupFilter('all')}
+            />
+            <Chip
+              label={`같은 파일명 ${exactCount}`}
+              kind="filter"
+              selected={groupFilter === 'exact_name_conflict'}
+              onClick={() => changeGroupFilter('exact_name_conflict')}
+            />
+            <Chip
+              label={`버전 후보 ${versionCount}`}
+              kind="filter"
+              selected={groupFilter === 'version_family'}
+              onClick={() => changeGroupFilter('version_family')}
+            />
           </div>
 
-          {filesLoading ? (
+          {groupsLoading ? (
             <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-              <Spinner size={18} /> 불러오는 중…
+              <Spinner size={18} /> 묶음 불러오는 중…
             </div>
-          ) : files.length === 0 ? (
+          ) : groups.length === 0 ? (
             <EmptyState
-              icon="search_off"
-              title="표시할 Office 파일이 없습니다"
-              description="검색어를 바꾸거나 설정에서 Word/PPT/Excel 파일을 등록해 주세요."
+              icon="task_alt"
+              title="자동 감지된 묶음이 없습니다"
+              description="같은 파일명이나 버전/날짜가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
               compact
             />
           ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-            {files.map((file) => {
-              const checked = selectedIds.has(file.id)
-              const fileMode = getCompareMode(undefined, file.file_type)
-              const unsupported = !isCheckableFile(file)
-              const disabled =
-                !checked &&
-                Boolean(
-                  unsupported ||
-                    (selectedMode && fileMode !== selectedMode) ||
-                    ((selectedMode === 'word' || selectedMode === 'ppt') && selectedIds.size >= 2),
-                )
-              return (
-                <label
-                  key={file.id}
-                  className={`flex items-start gap-3 px-3 py-3 rounded-md border transition-colors ${
-                    disabled
-                      ? 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] opacity-50 cursor-not-allowed'
-                      : checked
-                        ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/30 cursor-pointer'
-                        : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-low)] cursor-pointer'
-                  }`}
-                >
-                  <Checkbox
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={() => toggleFile(file)}
-                    aria-label={file.name}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
-                        {file.name}
-                      </p>
-                      <FileTypeBadge fileType={file.file_type} />
-                    </div>
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
-                      {unsupported
-                        ? '검색 등록 가능 · 정합성 검사 제외'
-                        : fileMode === 'excel'
-                          ? `기준 컬럼 ${file.key_column || '미지정'} · 여러 파일 비교`
-                          : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
-                    </p>
-                  </div>
-                </label>
-              )
-            })}
-          </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {groups.map((group) => (
+                <GroupCard
+                  key={group.id}
+                  group={group}
+                  activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
+                  loading={groupLoadingId === group.id}
+                  checking={loading}
+                  onOpen={() => void selectGroup(group)}
+                  onCompareLatest={() => void compareGroup(group, 'latest_two')}
+                  onCompareAll={() => void compareGroup(group, 'all')}
+                  onOpenFile={(file) => void openFile(file)}
+                />
+              ))}
+            </div>
           )}
 
-          {fileTotal > CHECK_FILE_PAGE_SIZE && (
+          {groupTotal > GROUP_PAGE_SIZE && (
             <div className="flex items-center justify-between gap-3 flex-wrap pt-3">
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                {visibleFileStart}-{visibleFileEnd} / {fileTotal}개
+                {visibleGroupStart}-{visibleGroupEnd} / {groupTotal}개 묶음
               </p>
               <div className="flex gap-2">
                 <Button
                   variant="outlined"
                   leadingIcon="chevron_left"
-                  onClick={() => goToFilePage(fileOffset - CHECK_FILE_PAGE_SIZE)}
-                  disabled={!hasPreviousFilePage || filesLoading}
+                  onClick={() => goToGroupPage(groupOffset - GROUP_PAGE_SIZE)}
+                  disabled={!hasPreviousGroupPage || groupsLoading}
                 >
                   이전
                 </Button>
                 <Button
                   variant="outlined"
                   trailingIcon="chevron_right"
-                  onClick={() => goToFilePage(fileOffset + CHECK_FILE_PAGE_SIZE)}
-                  disabled={!hasNextFilePage || filesLoading}
+                  onClick={() => goToGroupPage(groupOffset + GROUP_PAGE_SIZE)}
+                  disabled={!hasNextGroupPage || groupsLoading}
                 >
                   다음
                 </Button>
               </div>
             </div>
           )}
+        </CardSection>
+      </Card>
 
-          <div className="flex items-center gap-3 flex-wrap pt-2">
+      <Card variant="outlined">
+        <CardSection
+          title="수동으로 직접 고르기"
+          description="자동 묶음에 없는 특수 케이스만 열어서 사용하세요. 1만 개 문서에서도 현재 페이지와 검색 결과만 보여줍니다."
+          trailing={
+            <Button
+              variant={manualOpen ? 'tonal' : 'outlined'}
+              leadingIcon={manualOpen ? 'expand_less' : 'expand_more'}
+              onClick={() => setManualOpen((value) => !value)}
+            >
+              {manualOpen ? '접기' : '열기'}
+            </Button>
+          }
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <Chip label={`선택 ${selectedFiles.length}개`} tone="primary" icon="task_alt" as="span" />
+            {selectedMode && <Chip label={`모드 · ${selectedMode.toUpperCase()}`} tone="secondary" as="span" />}
+            {selectedFiles.slice(0, 3).map((file) => (
+              <Chip key={file.id} label={file.name} tone="neutral" as="span" />
+            ))}
+            {selectedFiles.length > 3 && <Chip label={`외 ${selectedFiles.length - 3}개`} tone="neutral" as="span" />}
             <Button
               variant="filled"
               leadingIcon="play_arrow"
@@ -479,18 +521,282 @@ export default function ConsistencyCheck() {
               loading={loading}
               disabled={selectedFiles.length < 2}
             >
-              검사 실행
+              선택 파일 검사
             </Button>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              {MODE_GUIDE[selectedMode ?? 'none']}
-            </p>
           </div>
+
+          {manualOpen && (
+            <div className="space-y-4 pt-2">
+              <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
+                <div className="flex-1 min-w-[240px]">
+                  <TextField
+                    leadingIcon="search"
+                    placeholder="검사할 Office 파일명 또는 경로 검색"
+                    value={fileQueryDraft}
+                    onChange={(event) => setFileQueryDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleFileSearch()
+                    }}
+                  />
+                </div>
+                <Button variant="filled" leadingIcon="search" onClick={handleFileSearch} disabled={filesLoading}>
+                  검색
+                </Button>
+                {fileQuery && (
+                  <Button variant="text" leadingIcon="close" onClick={clearFileSearch} disabled={filesLoading}>
+                    검색 해제
+                  </Button>
+                )}
+              </div>
+
+              <div className="flex gap-2 flex-wrap">
+                <Chip
+                  label={fileTotal === 0 ? '표시 0개' : `표시 ${visibleFileStart}-${visibleFileEnd} / ${fileTotal}`}
+                  tone="neutral"
+                  icon="view_list"
+                  as="span"
+                />
+                <Chip label={MODE_GUIDE[selectedMode ?? 'none']} tone="neutral" as="span" />
+              </div>
+
+              {filesLoading ? (
+                <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+                  <Spinner size={18} /> 불러오는 중…
+                </div>
+              ) : files.length === 0 ? (
+                <EmptyState
+                  icon="search_off"
+                  title="표시할 Office 파일이 없습니다"
+                  description="검색어를 바꾸거나 설정에서 Word/PPT/Excel 파일을 등록해 주세요."
+                  compact
+                />
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                  {files.map((file) => {
+                    const checked = selectedIds.has(file.id)
+                    const fileMode = getCompareMode(undefined, file.file_type)
+                    const unsupported = !isCheckableFile(file)
+                    const disabled =
+                      !checked &&
+                      Boolean(
+                        unsupported ||
+                          (selectedMode && fileMode !== selectedMode) ||
+                          ((selectedMode === 'word' || selectedMode === 'ppt') && selectedIds.size >= 2),
+                      )
+                    return (
+                      <label
+                        key={file.id}
+                        className={`flex items-start gap-3 px-3 py-3 rounded-md border transition-colors ${
+                          disabled
+                            ? 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] opacity-50 cursor-not-allowed'
+                            : checked
+                              ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/30 cursor-pointer'
+                              : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-low)] cursor-pointer'
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleFile(file)}
+                          aria-label={file.name}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
+                              {file.name}
+                            </p>
+                            <FileTypeBadge fileType={file.file_type} />
+                          </div>
+                          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
+                            {unsupported
+                              ? '검색 등록 가능 · 정합성 검사 제외'
+                              : fileMode === 'excel'
+                                ? `기준 컬럼 ${file.key_column || '미지정'} · 여러 파일 비교`
+                                : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
+                          </p>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+
+              {fileTotal > CHECK_FILE_PAGE_SIZE && (
+                <div className="flex items-center justify-between gap-3 flex-wrap pt-3">
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    {visibleFileStart}-{visibleFileEnd} / {fileTotal}개
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outlined"
+                      leadingIcon="chevron_left"
+                      onClick={() => goToFilePage(fileOffset - CHECK_FILE_PAGE_SIZE)}
+                      disabled={!hasPreviousFilePage || filesLoading}
+                    >
+                      이전
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      trailingIcon="chevron_right"
+                      onClick={() => goToFilePage(fileOffset + CHECK_FILE_PAGE_SIZE)}
+                      disabled={!hasNextFilePage || filesLoading}
+                    >
+                      다음
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </CardSection>
       </Card>
 
       {result?.mode === 'excel' && <ExcelCheckResult result={result} />}
       {result?.mode === 'word' && <WordCheckResult diffs={result.diffs} />}
       {result?.mode === 'ppt' && <PptCheckResult slides={result.slides} />}
+    </div>
+  )
+}
+
+function GroupCard({
+  group,
+  activeDetail,
+  loading,
+  checking,
+  onOpen,
+  onCompareLatest,
+  onCompareAll,
+  onOpenFile,
+}: {
+  group: LibraryGroupSummary
+  activeDetail: LibraryGroupDetail | null
+  loading: boolean
+  checking: boolean
+  onOpen: () => void
+  onCompareLatest: () => void
+  onCompareAll: () => void
+  onOpenFile: (file: FileInfo) => void
+}) {
+  const normalizedType = normalizeFileType(group.file_type)
+  const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
+  const excelGroupCompareLabel =
+    group.file_count > GROUP_DETAIL_FILE_LIMIT
+      ? `최신 ${GROUP_DETAIL_FILE_LIMIT}개 비교`
+      : '묶음 전체 비교'
+
+  return (
+    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <FileTypeBadge fileType={group.file_type} />
+          <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+            {group.base_name}
+          </span>
+          <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
+            {groupKindLabel(group.group_kind)}
+          </Badge>
+          <Badge tone="neutral">{group.file_count}개 파일</Badge>
+          <Badge tone={contentMeta.tone}>{contentMeta.label}</Badge>
+        </div>
+
+        <div className="space-y-1">
+          {[group.latest_file, group.previous_file].filter(Boolean).map((file, index) => (
+            <p
+              key={(file as FileInfo).id}
+              className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate"
+              title={(file as FileInfo).path}
+            >
+              {index === 0 ? '최신 후보 · ' : '이전 후보 · '}
+              {(file as FileInfo).name}
+            </p>
+          ))}
+        </div>
+
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          {group.reason}
+        </p>
+        {group.content_evidence && (
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            근거 · {group.content_evidence}
+          </p>
+        )}
+        {group.tokens_summary.length > 0 && (
+          <div className="flex gap-1.5 flex-wrap">
+            {group.tokens_summary.slice(0, 6).map((token) => (
+              <Chip key={token} label={token} tone="secondary" as="span" />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2 flex-wrap">
+        <Button variant="outlined" leadingIcon="timeline" onClick={onOpen} loading={loading}>
+          히스토리 보기
+        </Button>
+        <Button variant="filled" leadingIcon="difference" onClick={onCompareLatest} loading={checking || loading}>
+          최신 2개 비교
+        </Button>
+        {normalizedType === 'Excel' && (
+          <Button variant="tonal" leadingIcon="table_chart" onClick={onCompareAll} loading={checking || loading}>
+            {excelGroupCompareLabel}
+          </Button>
+        )}
+      </div>
+
+      {activeDetail && <GroupTimeline detail={activeDetail} onOpenFile={onOpenFile} />}
+    </div>
+  )
+}
+
+function GroupTimeline({
+  detail,
+  onOpenFile,
+}: {
+  detail: LibraryGroupDetail
+  onOpenFile: (file: FileInfo) => void
+}) {
+  return (
+    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">버전 히스토리</p>
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            파일명 토큰, 등록/수정 시간 기준으로 최신 후보부터 정렬했습니다.
+          </p>
+        </div>
+        <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
+      </div>
+
+      <ol className="space-y-2">
+        {detail.files.map((file, index) => (
+          <li
+            key={file.id}
+            className="flex items-start gap-3 rounded-md bg-[var(--md-sys-color-surface-container-lowest)] border border-[var(--md-sys-color-outline-variant)] p-3"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)] type-label-md">
+              {index + 1}
+            </div>
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
+                  {file.name}
+                </p>
+                {index === 0 && <Badge tone="success">최신 후보</Badge>}
+                <FileTypeBadge fileType={file.file_type} />
+              </div>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                수정/등록 · {formatDate(file.file_mtime ?? file.created_at)}
+              </p>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate" title={file.path}>
+                위치 · {pathTail(file.path)}
+              </p>
+            </div>
+            <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(file)}>
+              열기
+            </Button>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

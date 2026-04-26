@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..database import (
+    ensure_file_fingerprints,
     get_all_files,
     get_setting,
     register_file,
@@ -48,6 +49,7 @@ OFFICE_FILE_TYPES = {"Excel", "Word", "PowerPoint"}
 DEFAULT_GROUP_LIMIT = 50
 MAX_GROUP_LIMIT = 100
 MAX_GROUP_DETAIL_LIMIT = 200
+MAX_GROUP_SUMMARY_FINGERPRINT_FILES = 5
 
 _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
@@ -745,6 +747,80 @@ def _tokens_summary(identities: List[Dict[str, Any]]) -> List[str]:
     return summary
 
 
+def _content_evidence(
+    files: List[FileInfo],
+    fingerprint_by_id: Dict[int, Dict[str, Any]],
+    expected_count: Optional[int] = None,
+) -> Dict[str, Any]:
+    total_count = expected_count if expected_count is not None else len(files)
+    fingerprints = [fingerprint_by_id[file.id] for file in files if file.id in fingerprint_by_id]
+    usable = [
+        fingerprint
+        for fingerprint in fingerprints
+        if int(fingerprint.get("chunk_count") or 0) > 0 and int(fingerprint.get("content_chars") or 0) > 0
+    ]
+    unique_hashes = {str(fingerprint["normalized_hash"]) for fingerprint in usable}
+
+    if not fingerprints:
+        status = "pending"
+        evidence = "내용 fingerprint가 아직 준비되지 않았습니다. 재색인 후 더 정확히 판단합니다."
+    elif not usable:
+        status = "not_enough_content"
+        evidence = "추출된 본문이 부족해 내용 동일 여부를 판단하지 않습니다."
+    elif len(usable) < total_count:
+        status = "partial"
+        evidence = f"{total_count}개 중 {len(usable)}개 파일만 내용 fingerprint가 있어 단정하지 않습니다."
+    elif len(unique_hashes) == 1:
+        status = "same_content"
+        evidence = f"{len(usable)}개 파일의 추출 내용 fingerprint가 같습니다."
+    else:
+        status = "content_differs"
+        evidence = f"{len(usable)}개 파일에서 {len(unique_hashes)}가지 추출 내용 fingerprint가 발견되었습니다."
+
+    return {
+        "content_status": status,
+        "fingerprint_coverage": len(usable),
+        "fingerprint_unique_count": len(unique_hashes),
+        "content_evidence": evidence,
+    }
+
+
+def _reason_with_content_evidence(reason: str, content: Dict[str, Any]) -> str:
+    status = content["content_status"]
+    if status == "same_content":
+        return f"{reason} 내용 fingerprint 기준으로는 같은 내용으로 보입니다."
+    if status == "content_differs":
+        return f"{reason} 내용 fingerprint가 달라 실제 변경 가능성이 있습니다."
+    return reason
+
+
+def _with_content_evidence(
+    group: LibraryGroupDetail,
+    evidence_files: List[FileInfo],
+) -> LibraryGroupDetail:
+    fingerprint_by_id = ensure_file_fingerprints([file.id for file in evidence_files])
+    content = _content_evidence(
+        evidence_files,
+        fingerprint_by_id,
+        expected_count=group.file_count,
+    )
+    return LibraryGroupDetail(
+        **{
+            **group.model_dump(
+                exclude={
+                    "content_status",
+                    "fingerprint_coverage",
+                    "fingerprint_unique_count",
+                    "content_evidence",
+                    "reason",
+                }
+            ),
+            "reason": _reason_with_content_evidence(group.reason, content),
+            **content,
+        }
+    )
+
+
 def _version_file_sort_key(file_info: FileInfo) -> Tuple[Any, ...]:
     identity = parse_document_identity(file_info.name)
     return (*identity["sort_key"], *file_sort_key(file_info))
@@ -759,6 +835,7 @@ def _group_detail(
     confidence: str,
     reason: str,
     tokens_summary: Optional[List[str]] = None,
+    fingerprint_by_id: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> LibraryGroupDetail:
     ordered = sorted(
         files,
@@ -766,6 +843,7 @@ def _group_detail(
         reverse=True,
     )
     group_id = _slug(f"{group_kind}-{file_type}-{base_name}")
+    content = _content_evidence(ordered, fingerprint_by_id or {}, expected_count=len(ordered))
     return LibraryGroupDetail(
         id=group_id,
         group_kind=group_kind,
@@ -775,10 +853,14 @@ def _group_detail(
         title=ordered[0].name,
         file_count=len(ordered),
         confidence=confidence,
-        reason=reason,
+        reason=_reason_with_content_evidence(reason, content),
         latest_file=ordered[0] if ordered else None,
         previous_file=ordered[1] if len(ordered) > 1 else None,
         tokens_summary=tokens_summary or [],
+        content_status=content["content_status"],
+        fingerprint_coverage=content["fingerprint_coverage"],
+        fingerprint_unique_count=content["fingerprint_unique_count"],
+        content_evidence=content["content_evidence"],
         recommended_action=_recommended_action(file_type),
         files=ordered,
     )
@@ -862,6 +944,10 @@ def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
         latest_file=group.latest_file,
         previous_file=group.previous_file,
         tokens_summary=group.tokens_summary,
+        content_status=group.content_status,
+        fingerprint_coverage=group.fingerprint_coverage,
+        fingerprint_unique_count=group.fingerprint_unique_count,
+        content_evidence=group.content_evidence,
         recommended_action=group.recommended_action,
     )
 
@@ -885,7 +971,13 @@ def list_file_groups(
     for group in groups:
         counts_by_kind[group.group_kind] = counts_by_kind.get(group.group_kind, 0) + 1
 
-    page = groups[safe_offset : safe_offset + safe_limit]
+    page = [
+        _with_content_evidence(
+            group,
+            group.files[:MAX_GROUP_SUMMARY_FINGERPRINT_FILES],
+        )
+        for group in groups[safe_offset : safe_offset + safe_limit]
+    ]
     return LibraryGroupsResponse(
         total=len(groups),
         groups=[_group_summary(group) for group in page],
@@ -900,10 +992,12 @@ def get_file_group_detail(group_id: str, *, limit: int = MAX_GROUP_DETAIL_LIMIT)
     for group in _all_file_group_details():
         if group.id != group_id:
             continue
+        page_files = group.files[:safe_limit]
+        enriched = _with_content_evidence(group, page_files)
         return LibraryGroupDetail(
             **{
-                **group.model_dump(exclude={"files"}),
-                "files": group.files[:safe_limit],
+                **enriched.model_dump(exclude={"files"}),
+                "files": page_files,
             }
         )
     return None

@@ -440,6 +440,10 @@ export interface LibraryGroupSummary {
   latest_file?: FileInfo | null
   previous_file?: FileInfo | null
   tokens_summary: string[]
+  content_status: 'pending' | 'partial' | 'not_enough_content' | 'same_content' | 'content_differs'
+  fingerprint_coverage: number
+  fingerprint_unique_count: number
+  content_evidence: string
   recommended_action: 'excel_integrate' | 'compare_latest'
 }
 
