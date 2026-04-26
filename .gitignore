@@ -69,6 +69,7 @@ PLAN.md
 
 # Generated demo inputs (regenerate via scripts/generate_demo_cases.py)
 examples/demo_cases/
+examples/officewhere_test_library/
 
 # Codex local marker
 .codex
