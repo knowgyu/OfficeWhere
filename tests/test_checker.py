@@ -397,6 +397,64 @@ def test_excel_diff_grid_returns_full_small_latest_sheet_without_parser_config(t
     assert highlighted[0]["histories"][0]["before"] == "200"
 
 
+def test_excel_diff_grid_colors_only_latest_vs_previous_but_keeps_older_history(tmp_path):
+    v1 = tmp_path / "budget-v1.xlsx"
+    v2 = tmp_path / "budget-v2.xlsx"
+    v3 = tmp_path / "budget-v3.xlsx"
+    _write_dataframe_excel(v1, {"ID": ["A", "B"], "값": ["초안", "유지"]})
+    _write_dataframe_excel(v2, {"ID": ["A", "B"], "값": ["중간", "유지"]})
+    _write_dataframe_excel(v3, {"ID": ["A", "B"], "값": ["중간", "최신"]})
+
+    result = build_excel_diff_grid(
+        [
+            {
+                "id": 3,
+                "path": str(v3),
+                "name": "budget-v3.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": {},
+            },
+            {
+                "id": 2,
+                "path": str(v2),
+                "name": "budget-v2.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": {},
+            },
+            {
+                "id": 1,
+                "path": str(v1),
+                "name": "budget-v1.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": {},
+            },
+        ],
+        [],
+    )
+
+    cells = {
+        (cell["row_number"], cell["column_letter"]): cell
+        for row in result["sections"][0]["rows"]
+        for cell in row["cells"]
+    }
+
+    older_change = cells[(2, "B")]
+    latest_change = cells[(3, "B")]
+
+    assert older_change["highlight"] is None
+    assert older_change["histories"][0]["label"] == "budget-v1.xlsx → budget-v2.xlsx"
+    assert older_change["histories"][0]["before"] == "초안"
+    assert older_change["histories"][0]["after"] == "중간"
+
+    assert latest_change["highlight"] == "changed"
+    assert latest_change["histories"][0]["label"] == "budget-v2.xlsx → budget-v3.xlsx"
+    assert latest_change["histories"][0]["before"] == "유지"
+    assert latest_change["histories"][0]["after"] == "최신"
+
+
 def test_excel_diff_grid_uses_largest_compared_range_for_removed_cells(tmp_path):
     latest = tmp_path / "smaller-latest.xlsx"
     previous = tmp_path / "larger-previous.xlsx"

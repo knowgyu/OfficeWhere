@@ -595,17 +595,27 @@ def search_chunks(
     limit: int = 100,
     file_types: Optional[Sequence[str]] = None,
     raw_query: Optional[str] = None,
+    modified_from: Optional[float] = None,
+    modified_to: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     filters = [file_type for file_type in (file_types or []) if file_type]
-    type_clause = ""
+    filter_clause = ""
     params: List[Any] = [fts_query]
     if filters:
         placeholders = ",".join("?" for _ in filters)
-        type_clause = f" AND rf.file_type IN ({placeholders})"
+        filter_clause += f" AND rf.file_type IN ({placeholders})"
         params.extend(filters)
+    if modified_from is not None or modified_to is not None:
+        filter_clause += " AND rf.file_mtime IS NOT NULL"
+    if modified_from is not None:
+        filter_clause += " AND rf.file_mtime >= ?"
+        params.append(modified_from)
+    if modified_to is not None:
+        filter_clause += " AND rf.file_mtime <= ?"
+        params.append(modified_to)
     params.append(limit)
     cursor.execute(
         f"""
@@ -613,7 +623,7 @@ def search_chunks(
         FROM file_search_ko
         JOIN file_chunks fc ON fc.id = file_search_ko.rowid
         JOIN registered_files rf ON rf.id = fc.file_id
-        WHERE file_search_ko MATCH ?{type_clause}
+        WHERE file_search_ko MATCH ?{filter_clause}
         ORDER BY rank
         LIMIT ?
         """,

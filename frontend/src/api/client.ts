@@ -438,6 +438,8 @@ export interface SearchRequest {
   limit?: number
   file_types?: string[]
   search_scope?: SearchScope
+  modified_from?: string
+  modified_to?: string
 }
 
 export interface SearchResponse {

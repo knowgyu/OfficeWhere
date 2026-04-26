@@ -765,8 +765,8 @@ export default function ConsistencyCheck() {
           }
         >
           <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
-            <div className="flex gap-2 items-start flex-wrap lg:flex-nowrap">
-              <div className="flex-1 min-w-[240px]">
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(280px,1fr)_190px_220px_auto] xl:items-start">
+              <div className="min-w-0">
                 <TextField
                   leadingIcon="search"
                   placeholder="문서명, 파일명, 폴더명으로 찾기"
@@ -778,7 +778,7 @@ export default function ConsistencyCheck() {
                   helper="예: 사업예산, 주간보고, 프로젝트명, 부서명"
                 />
               </div>
-              <div className="w-full sm:w-[190px]">
+              <div className="min-w-0">
                 <SelectField
                   label="문서 형식"
                   value={groupFileType}
@@ -791,7 +791,7 @@ export default function ConsistencyCheck() {
                   ))}
                 </SelectField>
               </div>
-              <div className="w-full sm:w-[220px]">
+              <div className="min-w-0">
                 <SelectField
                   label="정렬"
                   value={groupSort}
@@ -802,7 +802,7 @@ export default function ConsistencyCheck() {
                   <option value="name">이름순</option>
                 </SelectField>
               </div>
-              <div className="flex gap-2 shrink-0 pt-0 sm:pt-[1.625rem]">
+              <div className="flex gap-2 shrink-0 xl:pt-[1.625rem]">
                 <Button variant="filled" leadingIcon="search" onClick={handleGroupSearch} disabled={groupsLoading}>
                   찾기
                 </Button>
@@ -1693,7 +1693,7 @@ function excelGridHighlightLabel(highlight: ExcelDiffHighlight | null) {
   if (highlight === 'added') return '추가'
   if (highlight === 'removed') return '삭제'
   if (highlight === 'changed') return '변경'
-  return '변경 없음'
+  return '최신 변경 없음'
 }
 
 function excelGridCellTitle(cell: ExcelDiffGridCell) {
@@ -1729,7 +1729,7 @@ function ExcelDiffGridModal({
             <div className="flex items-center gap-2 flex-wrap">
               <Icon name="table_chart" size={22} className="text-[var(--md-sys-color-primary)]" />
               <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 표로 보기</p>
-              <Badge tone="neutral">전체 변경 범위 기준</Badge>
+              <Badge tone="neutral">색상은 최신↔이전 기준</Badge>
             </div>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate mt-1">
               {modal.detail.base_name}
@@ -1785,10 +1785,14 @@ function ExcelDiffGridSummary({ data }: { data: ExcelDiffGridResponse }) {
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        <Badge tone="success">초록 · 추가</Badge>
-        <Badge tone="danger">빨강 · 삭제</Badge>
-        <Badge tone="warning">노랑 · 변경</Badge>
+        <Badge tone="success">초록 · 최신본에 추가</Badge>
+        <Badge tone="danger">빨강 · 최신본에서 삭제</Badge>
+        <Badge tone="warning">노랑 · 최신본에서 변경</Badge>
       </div>
+
+      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+        색상은 최신본과 바로 이전 버전의 차이만 표시합니다. 색이 없는 셀도 누르면 이전 버전들 사이의 변경 이력을 확인할 수 있습니다.
+      </p>
 
       {data.partial && (
         <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 type-body-sm text-amber-950">
@@ -1867,10 +1871,10 @@ function ExcelDiffGridSectionView({
                     <td
                       key={`${cell.row_index}-${cell.column_index}`}
                       title={excelGridCellTitle(cell)}
-                      className={`w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-default ${excelGridHighlightClass(cell.highlight)} ${
+                      className={`w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-pointer hover:ring-1 hover:ring-inset hover:ring-[var(--md-sys-color-primary)] ${excelGridHighlightClass(cell.highlight)} ${
                         selected ? 'outline outline-2 outline-[var(--md-sys-color-primary)] outline-offset-[-2px]' : ''
                       }`}
-                      onClick={() => cell.histories.length > 0 && onSelectCell(cell)}
+                      onClick={() => onSelectCell(cell)}
                     >
                       <div className="truncate">{displayExcelGridValue(cell.value)}</div>
                     </td>
@@ -1891,18 +1895,25 @@ function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell | null }) {
       <aside className="border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경 셀 상세</p>
         <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          노란색/초록색/빨간색 셀을 누르면 원래 값과 변경 후 값을 여기서 확인할 수 있습니다.
+          표의 셀을 누르면 최신본 값과 버전 사이 변경 이력을 여기서 확인할 수 있습니다.
         </p>
       </aside>
     )
   }
 
+  const badgeTone =
+    cell.highlight === 'removed'
+      ? 'danger'
+      : cell.highlight === 'added'
+        ? 'success'
+        : cell.highlight === 'changed'
+          ? 'warning'
+          : 'neutral'
+
   return (
     <aside className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <Badge tone={cell.highlight === 'removed' ? 'danger' : cell.highlight === 'added' ? 'success' : 'warning'}>
-          {excelGridHighlightLabel(cell.highlight)}
-        </Badge>
+        <Badge tone={badgeTone}>{excelGridHighlightLabel(cell.highlight)}</Badge>
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
           {cell.row_number}행 {cell.column_letter}열
         </p>
@@ -1910,6 +1921,11 @@ function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell | null }) {
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
         현재 최신본 값: <span className="font-mono text-[var(--md-sys-color-on-surface)]">{displayExcelGridValue(cell.value)}</span>
       </p>
+      {cell.histories.length === 0 && (
+        <p className="rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          이 셀의 변경 이력은 없습니다.
+        </p>
+      )}
       <div className="space-y-2">
         {cell.histories.map((history, index) => (
           <div

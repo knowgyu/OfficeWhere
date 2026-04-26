@@ -134,10 +134,23 @@ def _sanitize_fts_query(raw: str) -> str:
     return " ".join(f'"{word}"' for word in words)
 
 
-def search(query: str, limit: int = 100, file_types: Optional[Sequence[str]] = None) -> list:
+def search(
+    query: str,
+    limit: int = 100,
+    file_types: Optional[Sequence[str]] = None,
+    modified_from: Optional[float] = None,
+    modified_to: Optional[float] = None,
+) -> list:
     if not query.strip():
         return []
-    return search_chunks(_sanitize_fts_query(query), limit=limit, file_types=file_types, raw_query=query)
+    return search_chunks(
+        _sanitize_fts_query(query),
+        limit=limit,
+        file_types=file_types,
+        raw_query=query,
+        modified_from=modified_from,
+        modified_to=modified_to,
+    )
 
 
 def reindex_all() -> Dict[str, int]:

@@ -298,6 +298,8 @@ class SearchRequest(BaseModel):
     limit: int = 100
     file_types: List[str] = Field(default_factory=list)
     search_scope: Literal["filename_content", "filename", "content"] = "filename_content"
+    modified_from: Optional[str] = None
+    modified_to: Optional[str] = None
 
 
 class SearchResult(BaseModel):

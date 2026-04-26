@@ -205,6 +205,28 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
     histories_by_position: Dict[Position, List[Dict[str, Any]]] = {}
     highlight_by_position: Dict[Position, str] = {}
     omitted_focus_count = 0
+    latest_pair_from_id = used_ranges[1][0]["id"] if len(used_ranges) > 1 else None
+    latest_pair_to_id = used_ranges[0][0]["id"] if len(used_ranges) > 1 else None
+
+    def is_same_file_id(value: Any, expected: Any) -> bool:
+        if value is None or expected is None:
+            return False
+        try:
+            return int(value) == int(expected)
+        except (TypeError, ValueError):
+            return str(value) == str(expected)
+
+    def is_latest_pair_history(history: Dict[str, Any]) -> bool:
+        return is_same_file_id(history.get("from_file_id"), latest_pair_from_id) and is_same_file_id(
+            history.get("to_file_id"),
+            latest_pair_to_id,
+        )
+
+    def set_latest_highlight(position: Position, change_type: str) -> None:
+        normalized_change_type = _normalize_change_type(change_type)
+        existing = highlight_by_position.get(position)
+        if existing is None or _highlight_rank(normalized_change_type) > _highlight_rank(existing):
+            highlight_by_position[position] = normalized_change_type
 
     for raw_focus in focuses:
         focus = _coerce_focus(raw_focus)
@@ -218,6 +240,9 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         histories = [_coerce_history(history) for history in focus.get("histories", [])]
         if histories:
             histories_by_position.setdefault(position, []).extend(histories)
+            for history in histories:
+                if is_latest_pair_history(history):
+                    set_latest_highlight(position, str(history.get("change_type", focus.get("change_type", ""))))
         else:
             histories_by_position.setdefault(position, []).append(
                 {
@@ -225,11 +250,8 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                     "label": "변경 이력",
                 }
             )
-
-        change_type = _normalize_change_type(str(focus.get("change_type", "")))
-        existing = highlight_by_position.get(position)
-        if existing is None or _highlight_rank(change_type) > _highlight_rank(existing):
-            highlight_by_position[position] = change_type
+            if len(used_ranges) == 2:
+                set_latest_highlight(position, str(focus.get("change_type", "")))
 
     if row_count * column_count <= FULL_GRID_CELL_LIMIT:
         for newer_index in range(0, len(used_ranges) - 1):
@@ -261,9 +283,8 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                             }
                         )
 
-                    existing = highlight_by_position.get(position)
-                    if existing is None or _highlight_rank(change_type) > _highlight_rank(existing):
-                        highlight_by_position[position] = change_type
+                    if newer_index == 0:
+                        set_latest_highlight(position, change_type)
 
     focus_positions = list(histories_by_position.keys())
     ranges, partial = _choose_ranges(focus_positions, row_count, column_count)

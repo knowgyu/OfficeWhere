@@ -1,6 +1,7 @@
 import os
 import time
 import tempfile
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -312,3 +313,27 @@ def test_search_api_content_scope_supports_excel_filter(tmp_path):
     assert response.total == 1
     assert response.results[0].file_id == excel_id
     assert response.results[0].file_type == "Excel"
+
+
+def test_search_api_filters_by_file_modified_date(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks, update_file_mtime
+    from backend.models.schemas import SearchRequest
+
+    old_id = register_file(str(tmp_path / "old.docx"), "회의_old.docx", "Word", "", 0)
+    new_id = register_file(str(tmp_path / "new.docx"), "회의_new.docx", "Word", "", 0)
+    save_file_chunks(old_id, [{"location": "본문", "content": "회의 자료"}])
+    save_file_chunks(new_id, [{"location": "본문", "content": "회의 자료"}])
+    update_file_mtime(old_id, datetime(2026, 3, 15).timestamp())
+    update_file_mtime(new_id, datetime(2026, 4, 15).timestamp())
+
+    response = search_files(
+        SearchRequest(
+            query="회의",
+            modified_from="2026-04-01",
+            modified_to="2026-04-30",
+        )
+    )
+
+    matched_ids = {item.file_id for item in response.results}
+    assert matched_ids == {new_id}

@@ -59,6 +59,29 @@ const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: stri
   },
 }
 
+const SEARCH_DEBOUNCE_MS = 600
+
+type ModifiedDateFilter = 'all' | '7d' | '30d' | '90d' | 'custom'
+
+const MODIFIED_DATE_FILTERS: Array<{ label: string; value: ModifiedDateFilter }> = [
+  { label: '전체', value: 'all' },
+  { label: '최근 7일', value: '7d' },
+  { label: '최근 30일', value: '30d' },
+  { label: '최근 90일', value: '90d' },
+  { label: '직접 기간', value: 'custom' },
+]
+
+function formatDateInput(date: Date) {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return localDate.toISOString().slice(0, 10)
+}
+
+function dateDaysAgo(days: number) {
+  const date = new Date()
+  date.setDate(date.getDate() - days)
+  return formatDateInput(date)
+}
+
 function SnippetText({ snippet }: { snippet: string }) {
   const parts = snippet.split('**')
   return (
@@ -111,6 +134,9 @@ export default function FileSearch() {
   const [searched, setSearched] = useState(false)
   const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>([])
   const [searchScope, setSearchScope] = useState<SearchScope>('filename_content')
+  const [modifiedDateFilter, setModifiedDateFilter] = useState<ModifiedDateFilter>('all')
+  const [customModifiedFrom, setCustomModifiedFrom] = useState('')
+  const [customModifiedTo, setCustomModifiedTo] = useState('')
   const [expandedContentFiles, setExpandedContentFiles] = useState<Set<string>>(new Set())
 
   const [settings, setSettings] = useState<SchedulerSettings | null>(null)
@@ -119,6 +145,7 @@ export default function FileSearch() {
   const [reindexing, setReindexing] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchRequestSeq = useRef(0)
 
   useEffect(() => {
     api.search.getSettings().then((response) => {
@@ -127,39 +154,85 @@ export default function FileSearch() {
     })
   }, [])
 
+  const buildModifiedDateParams = useCallback(
+    (
+      filter: ModifiedDateFilter = modifiedDateFilter,
+      customFrom: string = customModifiedFrom,
+      customTo: string = customModifiedTo,
+    ) => {
+      if (filter === 'all') return {}
+      if (filter === 'custom') {
+        return {
+          modified_from: customFrom || undefined,
+          modified_to: customTo || undefined,
+        }
+      }
+
+      const days = filter === '7d' ? 7 : filter === '30d' ? 30 : 90
+      return {
+        modified_from: dateDaysAgo(days),
+        modified_to: formatDateInput(new Date()),
+      }
+    },
+    [customModifiedFrom, customModifiedTo, modifiedDateFilter],
+  )
+
   const doSearch = useCallback(
-    async (q: string, fileTypes = selectedFileTypes, scope = searchScope) => {
+    async (
+      q: string,
+      fileTypes = selectedFileTypes,
+      scope = searchScope,
+      dateFilter = modifiedDateFilter,
+      customFrom = customModifiedFrom,
+      customTo = customModifiedTo,
+    ) => {
+      const requestId = searchRequestSeq.current + 1
+      searchRequestSeq.current = requestId
+
       if (!q.trim()) {
         setResults([])
         setSearched(false)
         setExpandedContentFiles(new Set())
+        setLoading(false)
         return
       }
       setLoading(true)
       try {
+        const modifiedDateParams = buildModifiedDateParams(dateFilter, customFrom, customTo)
         const response = await api.search.query({
           query: q,
           limit: 200,
           file_types: fileTypes.length > 0 ? fileTypes : undefined,
           search_scope: scope,
+          ...modifiedDateParams,
         })
+        if (requestId !== searchRequestSeq.current) return
         setResults(response.data.results)
         setExpandedContentFiles(new Set())
         setSearched(true)
       } catch {
+        if (requestId !== searchRequestSeq.current) return
         setResults([])
         snackbar.error('검색에 실패했습니다.')
       } finally {
-        setLoading(false)
+        if (requestId === searchRequestSeq.current) setLoading(false)
       }
     },
-    [selectedFileTypes, searchScope, snackbar],
+    [
+      buildModifiedDateParams,
+      customModifiedFrom,
+      customModifiedTo,
+      modifiedDateFilter,
+      selectedFileTypes,
+      searchScope,
+      snackbar,
+    ],
   )
 
   const handleQueryChange = (value: string) => {
     setQuery(value)
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => doSearch(value), 300)
+    debounceRef.current = setTimeout(() => doSearch(value), SEARCH_DEBOUNCE_MS)
   }
 
   const toggleFileType = (value: string) => {
@@ -167,12 +240,37 @@ export default function FileSearch() {
       ? selectedFileTypes.filter((item) => item !== value)
       : [...selectedFileTypes, value]
     setSelectedFileTypes(next)
-    if (query.trim()) void doSearch(query, next, searchScope)
+    if (query.trim()) {
+      void doSearch(query, next, searchScope, modifiedDateFilter, customModifiedFrom, customModifiedTo)
+    }
   }
 
   const handleSearchScopeChange = (next: SearchScope) => {
     setSearchScope(next)
-    if (query.trim()) void doSearch(query, selectedFileTypes, next)
+    if (query.trim()) {
+      void doSearch(query, selectedFileTypes, next, modifiedDateFilter, customModifiedFrom, customModifiedTo)
+    }
+  }
+
+  const handleModifiedDateFilterChange = (next: ModifiedDateFilter) => {
+    setModifiedDateFilter(next)
+    if (query.trim()) {
+      void doSearch(query, selectedFileTypes, searchScope, next, customModifiedFrom, customModifiedTo)
+    }
+  }
+
+  const handleCustomModifiedFromChange = (value: string) => {
+    setCustomModifiedFrom(value)
+    if (modifiedDateFilter === 'custom' && query.trim()) {
+      void doSearch(query, selectedFileTypes, searchScope, 'custom', value, customModifiedTo)
+    }
+  }
+
+  const handleCustomModifiedToChange = (value: string) => {
+    setCustomModifiedTo(value)
+    if (modifiedDateFilter === 'custom' && query.trim()) {
+      void doSearch(query, selectedFileTypes, searchScope, 'custom', customModifiedFrom, value)
+    }
   }
 
   const toggleContentMatches = (fileKey: string) => {
@@ -243,6 +341,37 @@ export default function FileSearch() {
     return Array.from(map.entries())
   }, [results])
 
+  const contentFileKeys = useMemo(
+    () =>
+      grouped
+        .filter(([, items]) => items.some((item) => item.location !== '파일명'))
+        .map(([fileName, items]) => `${items[0].file_id}:${fileName}`),
+    [grouped],
+  )
+
+  const activeModifiedDateLabel = useMemo(
+    () =>
+      MODIFIED_DATE_FILTERS.find((filter) => filter.value === modifiedDateFilter)?.label ?? '전체',
+    [modifiedDateFilter],
+  )
+  const allContentMatchesExpanded =
+    contentFileKeys.length > 0 && contentFileKeys.every((key) => expandedContentFiles.has(key))
+
+  const expandAllContentMatches = () => {
+    setExpandedContentFiles(new Set(contentFileKeys))
+  }
+
+  const collapseAllContentMatches = () => {
+    setExpandedContentFiles(new Set())
+  }
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      searchRequestSeq.current += 1
+    }
+  }, [])
+
   const hasResults = !loading && results.length > 0
   const lastReindex = settings?.last_reindex_at
     ? new Date(settings.last_reindex_at).toLocaleString('ko-KR')
@@ -265,10 +394,13 @@ export default function FileSearch() {
                     label="검색어 지우기"
                     size="sm"
                     onClick={() => {
+                      if (debounceRef.current) clearTimeout(debounceRef.current)
+                      searchRequestSeq.current += 1
                       setQuery('')
                       setResults([])
                       setSearched(false)
                       setExpandedContentFiles(new Set())
+                      setLoading(false)
                     }}
                   />
                 ) : null
@@ -340,6 +472,36 @@ export default function FileSearch() {
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
             선택을 모두 해제하면 전체 형식에서 검색합니다.
           </p>
+          <div className="space-y-2">
+            <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">수정일</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              {MODIFIED_DATE_FILTERS.map((filter) => (
+                <Chip
+                  key={filter.value}
+                  label={filter.label}
+                  kind="filter"
+                  selected={modifiedDateFilter === filter.value}
+                  onClick={() => handleModifiedDateFilterChange(filter.value)}
+                />
+              ))}
+            </div>
+            {modifiedDateFilter === 'custom' && (
+              <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,12rem)_minmax(0,12rem)] gap-2">
+                <TextField
+                  label="시작일"
+                  type="date"
+                  value={customModifiedFrom}
+                  onChange={(event) => handleCustomModifiedFromChange(event.target.value)}
+                />
+                <TextField
+                  label="종료일"
+                  type="date"
+                  value={customModifiedTo}
+                  onChange={(event) => handleCustomModifiedToChange(event.target.value)}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </Card>
 
@@ -455,9 +617,34 @@ export default function FileSearch() {
             {selectedFileTypes.length > 0 && (
               <Chip label={`형식 ${selectedFileTypes.length}개 선택`} tone="secondary" as="span" icon="checklist" />
             )}
+            {modifiedDateFilter !== 'all' && (
+              <Chip label={`수정일 ${activeModifiedDateLabel}`} tone="secondary" as="span" icon="event" />
+            )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               {grouped.length}개 파일에서 매칭됨
             </span>
+            {contentFileKeys.length > 0 && (
+              <div className="ml-auto flex gap-2 flex-wrap">
+                <Button
+                  variant="text"
+                  size="sm"
+                  leadingIcon="unfold_more"
+                  onClick={expandAllContentMatches}
+                  disabled={allContentMatchesExpanded}
+                >
+                  본문 전체 열기
+                </Button>
+                <Button
+                  variant="text"
+                  size="sm"
+                  leadingIcon="unfold_less"
+                  onClick={collapseAllContentMatches}
+                  disabled={expandedContentFiles.size === 0}
+                >
+                  본문 전체 접기
+                </Button>
+              </div>
+            )}
           </div>
           {grouped.map(([fileName, items]) => {
             const fileKey = `${items[0].file_id}:${fileName}`
