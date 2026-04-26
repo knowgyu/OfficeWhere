@@ -5,6 +5,7 @@ Use this checklist before publishing a release tag.
 ## Automated verification
 - [ ] `./venv/bin/python -m pytest` passes.
 - [ ] `cd frontend && npm run build` passes.
+- [ ] `cd frontend && npm run build:electron` passes.
 - [ ] `git diff --check` passes.
 - [ ] `./venv/bin/python -m compileall -q backend` passes.
 
@@ -31,7 +32,8 @@ Use this checklist before publishing a release tag.
 - [ ] Settings / Library → 화면 표시 changes app-wide text size across search, settings, version management, and Excel previews.
 - [ ] Version Management keeps the selected group visible after opening another group.
 - [ ] Excel added/removed cell content appears under 추가/삭제된 내용, and missing rows/columns show actual content previews rather than only row/column labels.
-- [ ] Excel version groups show a `표로 보기` button that opens a large modal grid.
+- [ ] Excel version groups show a prominent `표로 보기` button that opens a large modal grid.
+- [ ] Excel `값 변경` and `추가/삭제된 내용` sections are collapsed by default and expand on click.
 - [ ] Excel version history does not show parser_config range errors when a saved table range is stale.
 - [ ] Version Management auto-detected groups remain one column on a wide screen.
 - [ ] Version group cards do not show `최신 후보` / `이전 후보` labels.
@@ -45,6 +47,9 @@ Use this checklist before publishing a release tag.
 
 ## Data safety
 - [ ] App-data safe reset copy says original documents are not deleted.
+- [ ] App-data reset exits the app after cleanup and does not relaunch into a hidden process.
+- [ ] First X-button close asks whether to run in background, quit, or cancel; “remember this choice” persists to Settings.
+- [ ] Tray menu can reopen OfficeWhere and can quit the background process.
 - [ ] Full reset remains behind a stronger warning/advanced path.
 - [ ] Original watched folders and Office documents remain untouched after app-data cleanup.
 - [ ] A mapped/network drive folder can be added when the current OS user can access it.

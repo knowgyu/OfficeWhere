@@ -4,6 +4,7 @@ import {
   api,
   AppDataCandidate,
   ClearAppDataResult,
+  CloseBehavior,
   FileInfo,
   FileInspectResponse,
   LibraryRescanResponse,
@@ -100,6 +101,12 @@ const SAFE_APP_DATA_IDS = new Set([
   'legacy-home-data',
 ])
 
+const CLOSE_BEHAVIOR_LABELS: Record<CloseBehavior, string> = {
+  ask: '닫을 때 물어보기',
+  hide: '트레이로 보내기',
+  quit: '앱 종료',
+}
+
 function existingAppDataIds(candidates: AppDataCandidate[], ids: Set<string>) {
   return candidates
     .filter((candidate) => candidate.exists && ids.has(candidate.id))
@@ -162,9 +169,14 @@ export default function FileManager() {
   const [appDataAdvancedOpen, setAppDataAdvancedOpen] = useState(false)
   const [clearAppDataOpen, setClearAppDataOpen] = useState(false)
   const [clearAppDataResult, setClearAppDataResult] = useState<ClearAppDataResult | null>(null)
+  const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
+  const [closeBehaviorLoading, setCloseBehaviorLoading] = useState(false)
   const appDataAvailable =
     typeof window !== 'undefined' &&
     Boolean(window.officeDataJoiner?.getAppDataPaths && window.officeDataJoiner?.clearAppData)
+  const closeBehaviorAvailable =
+    typeof window !== 'undefined' &&
+    Boolean(window.officeDataJoiner?.getCloseBehavior && window.officeDataJoiner?.setCloseBehavior)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setLoading(true)
@@ -203,10 +215,24 @@ export default function FileManager() {
     }
   }
 
+  const fetchCloseBehavior = async () => {
+    if (!closeBehaviorAvailable) return
+    setCloseBehaviorLoading(true)
+    try {
+      const response = await api.app.getCloseBehavior()
+      setCloseBehavior(response.data)
+    } catch {
+      snackbar.error('창 닫기 동작 설정을 불러오지 못했습니다.')
+    } finally {
+      setCloseBehaviorLoading(false)
+    }
+  }
+
   useEffect(() => {
     void fetchFiles(0, '')
     void fetchLibrarySettings()
     void fetchAppDataPaths()
+    void fetchCloseBehavior()
   }, [])
 
   useEffect(() => {
@@ -292,6 +318,19 @@ export default function FileManager() {
     await saveLibrarySettings({ ...librarySettings, ...patch })
   }
 
+  const handleUpdateCloseBehavior = async (behavior: CloseBehavior) => {
+    setCloseBehaviorLoading(true)
+    try {
+      const response = await api.app.setCloseBehavior(behavior)
+      setCloseBehavior(response.data)
+      snackbar.success(`창 닫기 동작이 "${CLOSE_BEHAVIOR_LABELS[response.data]}"로 저장되었습니다.`)
+    } catch {
+      snackbar.error('창 닫기 동작을 저장하지 못했습니다.')
+    } finally {
+      setCloseBehaviorLoading(false)
+    }
+  }
+
   const normalizeIntervalHours = (value: string | number) => {
     const numeric = Number(value)
     if (!Number.isFinite(numeric) || numeric < 1) {
@@ -354,12 +393,12 @@ export default function FileManager() {
       const response = await api.app.clearData(selectedAppDataIds, true)
       setClearAppDataResult(response.data)
       if (response.data.success) {
-        snackbar.success('앱 데이터를 삭제했습니다. 앱을 재시작합니다.')
+        snackbar.success('앱 데이터를 삭제했습니다. 앱을 종료합니다. 다시 실행해 주세요.')
       } else {
         snackbar.error('일부 앱 데이터 삭제에 실패했습니다.')
       }
       setClearAppDataOpen(false)
-      if (!response.data.restartScheduled) void fetchAppDataPaths()
+      if (!response.data.exitScheduled) void fetchAppDataPaths()
     } catch {
       snackbar.error('앱 데이터 삭제 요청에 실패했습니다.')
     } finally {
@@ -596,6 +635,55 @@ export default function FileManager() {
               </button>
             ))}
           </div>
+        </CardSection>
+      </Card>
+
+      <Card variant="elevated">
+        <CardSection
+          title="창 닫기 동작"
+          description="창의 X 버튼을 눌렀을 때 자동 색인을 계속할지, 앱을 완전히 종료할지 선택합니다. 처음 닫을 때 선택을 기억해도 여기서 다시 바꿀 수 있습니다."
+        >
+          {!closeBehaviorAvailable ? (
+            <EmptyState
+              icon="desktop_windows"
+              title="Electron 앱에서만 사용할 수 있습니다"
+              description="브라우저/개발 서버 모드에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
+              compact
+            />
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,360px)_1fr] gap-4 items-start">
+              <SelectField
+                label="X 버튼 동작"
+                value={closeBehavior}
+                onChange={(event) => void handleUpdateCloseBehavior(event.target.value as CloseBehavior)}
+                disabled={closeBehaviorLoading}
+                helper="트레이로 보내기를 선택하면 창은 사라지지만 OfficeWhere가 백그라운드에서 계속 실행됩니다."
+              >
+                <option value="ask">{CLOSE_BEHAVIOR_LABELS.ask}</option>
+                <option value="hide">{CLOSE_BEHAVIOR_LABELS.hide}</option>
+                <option value="quit">{CLOSE_BEHAVIOR_LABELS.quit}</option>
+              </SelectField>
+              <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 flex items-start gap-3">
+                <Icon
+                  name={closeBehavior === 'quit' ? 'power_settings_new' : 'move_to_inbox'}
+                  size={22}
+                  className="mt-0.5 text-[var(--md-sys-color-primary)]"
+                />
+                <div className="min-w-0 space-y-1">
+                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                    현재 설정 · {CLOSE_BEHAVIOR_LABELS[closeBehavior]}
+                  </p>
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    {closeBehavior === 'ask'
+                      ? '창을 닫을 때마다 백그라운드 실행/종료/취소를 고를 수 있습니다.'
+                      : closeBehavior === 'hide'
+                        ? '창을 닫으면 트레이에 남고, 트레이 메뉴에서 열기 또는 종료를 선택할 수 있습니다.'
+                        : '창을 닫으면 앱과 백그라운드 색인이 함께 종료됩니다.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </CardSection>
       </Card>
       <Card variant="elevated">
@@ -840,7 +928,7 @@ export default function FileManager() {
                         검색/앱 설정 초기화
                       </p>
                       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        검색 색인, 앱 화면 설정, 임시 캐시를 다시 만듭니다. 문제가 생겼을 때 먼저 시도할 안전한 초기화입니다.
+                        검색 색인, 앱 화면 설정, 임시 캐시를 다음 실행 때 새로 만듭니다. 문제가 생겼을 때 먼저 시도할 안전한 초기화입니다.
                       </p>
                     </div>
                     <Badge tone={safeResetIds.length > 0 ? 'success' : 'neutral'}>
@@ -853,7 +941,7 @@ export default function FileManager() {
                     onClick={() => openClearAppDataPreset(safeResetIds)}
                     disabled={safeResetIds.length === 0 || appDataLoading}
                   >
-                    초기화 후 재시작
+                    초기화 후 앱 종료
                   </Button>
                 </div>
 
@@ -864,7 +952,7 @@ export default function FileManager() {
                         문제 해결용 전체 초기화
                       </p>
                       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        앱 프로필 전체를 새로 만듭니다. 원본 문서는 삭제하지 않지만 앱 설정과 세션은 초기화됩니다.
+                        앱 프로필 전체를 다음 실행 때 새로 만듭니다. 원본 문서는 삭제하지 않지만 앱 설정과 세션은 초기화됩니다.
                       </p>
                     </div>
                     <Badge tone={fullResetIds.length > 0 ? 'warning' : 'neutral'}>
@@ -940,7 +1028,7 @@ export default function FileManager() {
             <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-2">
               <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">최근 삭제 결과</p>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                backend 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개
+                backend 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개{clearAppDataResult.exitScheduled ? ' · 앱 종료 예약' : ''}
               </p>
               {clearAppDataResult.failed.map((item) => (
                 <p key={`${item.id}-${item.path}`} className="type-body-sm text-[var(--md-sys-color-error)] break-all">
@@ -1195,7 +1283,7 @@ export default function FileManager() {
               onClick={handleClearAppData}
               loading={appDataLoading}
             >
-              삭제 후 재시작
+              삭제 후 앱 종료
             </Button>
           </>
         }
@@ -1203,8 +1291,8 @@ export default function FileManager() {
         <div className="space-y-4">
           <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
             {selectedFullReset
-              ? '문제 해결용 전체 초기화는 앱 프로필 전체를 삭제해 앱 설정과 세션을 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'
-              : '선택한 앱 소유 데이터만 삭제합니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'}
+              ? '문제 해결용 전체 초기화는 앱 프로필 전체를 삭제합니다. 삭제 후 앱은 종료되며, 다음 실행 때 앱 설정과 세션을 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'
+              : '선택한 앱 소유 데이터만 삭제합니다. 삭제 후 앱은 종료되며, 다음 실행 때 필요한 데이터를 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'}
           </p>
           <Badge tone="warning">삭제 예정 {formatBytes(selectedAppDataSize)}</Badge>
           <div className="space-y-2">

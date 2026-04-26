@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('officeDataJoiner', {
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   getLogPath: () => ipcRenderer.invoke('app:get-log-path'),
   getAppDataPaths: () => ipcRenderer.invoke('app:get-data-paths'),
-  clearAppData: (candidateIds: string[], relaunch = true) =>
-    ipcRenderer.invoke('app:clear-app-data', { candidateIds, relaunch }),
+  clearAppData: (candidateIds: string[], exitAfterClear = true) =>
+    ipcRenderer.invoke('app:clear-app-data', { candidateIds, exitAfterClear }),
+  getCloseBehavior: () => ipcRenderer.invoke('app:get-close-behavior'),
+  setCloseBehavior: (behavior: string) => ipcRenderer.invoke('app:set-close-behavior', { behavior }),
 })

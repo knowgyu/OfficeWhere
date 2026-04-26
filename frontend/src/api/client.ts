@@ -15,8 +15,10 @@ export interface ClearAppDataResult {
   deleted: string[]
   failed: { id: string; path: string; error: string }[]
   backendStopped: boolean
-  restartScheduled: boolean
+  exitScheduled?: boolean
 }
+
+export type CloseBehavior = 'ask' | 'hide' | 'quit'
 
 declare global {
   interface OfficeDataJoinerBridge {
@@ -26,7 +28,9 @@ declare global {
     getAppVersion?: () => Promise<string>
     getLogPath?: () => Promise<string>
     getAppDataPaths?: () => Promise<AppDataCandidate[]>
-    clearAppData?: (candidateIds: string[], relaunch?: boolean) => Promise<ClearAppDataResult>
+    clearAppData?: (candidateIds: string[], exitAfterClear?: boolean) => Promise<ClearAppDataResult>
+    getCloseBehavior?: () => Promise<CloseBehavior>
+    setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
   }
 
   interface Window {
@@ -1347,10 +1351,20 @@ export const api = {
       if (!electron?.getAppDataPaths) desktopError('Electron 앱에서만 앱 데이터 경로를 확인할 수 있습니다.')
       return { data: await electron.getAppDataPaths() }
     },
-    clearData: async (candidateIds: string[], relaunch = true) => {
+    clearData: async (candidateIds: string[], exitAfterClear = true) => {
       const electron = electronApi()
       if (!electron?.clearAppData) desktopError('Electron 앱에서만 앱 데이터를 삭제할 수 있습니다.')
-      return { data: await electron.clearAppData(candidateIds, relaunch) }
+      return { data: await electron.clearAppData(candidateIds, exitAfterClear) }
+    },
+    getCloseBehavior: async () => {
+      const electron = electronApi()
+      if (!electron?.getCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
+      return { data: await electron.getCloseBehavior() }
+    },
+    setCloseBehavior: async (behavior: CloseBehavior) => {
+      const electron = electronApi()
+      if (!electron?.setCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
+      return { data: await electron.setCloseBehavior(behavior) }
     },
   },
   library: {

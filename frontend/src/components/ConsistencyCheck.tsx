@@ -1081,9 +1081,9 @@ function GroupTimeline({
           <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
           {normalizeFileType(detail.file_type) === 'Excel' && (
             <Button
-              variant="outlined"
-              size="sm"
+              variant="filled"
               leadingIcon="table_chart"
+              className="shadow-elev-1"
               onClick={onOpenExcelGrid}
             >
               표로 보기
@@ -1255,7 +1255,7 @@ function isExcelContentChange(issue: ExcelCheckIssue) {
 function excelIssueTitle(issue: ExcelCheckIssue) {
   if (issue.type === 'value_conflict') {
     const location = firstExcelLocation(issue)
-    return location ? `${location} 값 다름` : '셀 값 다름'
+    return location ? `${location} 값 변경` : '셀 값 변경'
   }
   if (issue.type === 'value_added') {
     const location = firstExcelLocation(issue)
@@ -1313,7 +1313,7 @@ function ExcelCheckResult({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <StatCard label="전체 항목" value={result.totalKeys} icon="tag" />
           <StatCard
-            label="값 다름"
+            label="값 변경"
             value={valueConflicts.length}
             icon="report_problem"
             tone={valueConflicts.length > 0 ? 'danger' : 'neutral'}
@@ -1329,9 +1329,9 @@ function ExcelCheckResult({
 
       {(!compact || valueConflicts.length > 0) && (
         <ExcelIssueSection
-          title="값 다름"
+          title="값 변경"
           icon="report_problem"
-          description="같은 행·같은 열인데 파일마다 셀 값이 다릅니다."
+          description="셀 값이 이전 버전과 달라진 항목입니다."
           issues={valueConflicts}
         />
       )}
@@ -1339,7 +1339,7 @@ function ExcelCheckResult({
         <ExcelIssueSection
           title="추가/삭제된 내용"
           icon="difference"
-          description="빈 셀에 값이 생기거나 사라진 경우, 한쪽 파일에만 있는 관련 내용을 묶어 보여줍니다. 행/열 자체의 의미를 단정하지 않고 실제 추가·삭제된 값을 확인합니다."
+          description="새로 생기거나 사라진 셀/행 내용을 필요할 때 펼쳐 확인합니다."
           issues={contentChanges}
         />
       )}
@@ -1358,56 +1358,73 @@ function ExcelIssueSection({
   icon: string
   issues: ExcelCheckIssue[]
 }) {
+  const [open, setOpen] = useState(false)
+
   return (
     <Card variant="outlined" className="overflow-hidden">
-      <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)] flex items-center gap-2">
+      <button
+        type="button"
+        className="state-host relative flex w-full items-center gap-2 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-6 py-3 text-left"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <span className="state-layer" />
         <Icon
           name={icon}
           size={20}
-          className="text-[var(--md-sys-color-on-surface-variant)]"
+          className="relative text-[var(--md-sys-color-on-surface-variant)]"
         />
-        <div className="min-w-0">
+        <div className="relative min-w-0">
           <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{title}</p>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{description}</p>
         </div>
-        <Badge tone={issues.length > 0 ? 'warning' : 'neutral'} className="ml-auto">
-          {issues.length}건
-        </Badge>
-      </header>
+        <span className="relative ml-auto flex items-center gap-2">
+          <Badge tone={issues.length > 0 ? 'warning' : 'neutral'}>
+            {issues.length}건
+          </Badge>
+          <Icon
+            name={open ? 'expand_less' : 'expand_more'}
+            size={20}
+            className="text-[var(--md-sys-color-on-surface-variant)]"
+          />
+        </span>
+      </button>
 
-      {issues.length === 0 ? (
-        <p className="px-6 py-6 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          해당 이슈가 없습니다.
-        </p>
-      ) : (
-        <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-          {issues.map((issue) => (
-            <li key={issue.id} className="px-6 py-4 space-y-3">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                      {excelIssueTitle(issue)}
-                    </span>
-                    <Badge tone={issue.severity === 'conflict' ? 'danger' : 'warning'}>
-                      {issue.severity === 'conflict' ? '확인 필요' : '주의'}
-                    </Badge>
+      {open && (
+        issues.length === 0 ? (
+          <p className="px-6 py-6 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            해당 이슈가 없습니다.
+          </p>
+        ) : (
+          <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
+            {issues.map((issue) => (
+              <li key={issue.id} className="px-6 py-4 space-y-3">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                        {excelIssueTitle(issue)}
+                      </span>
+                      <Badge tone={issue.severity === 'conflict' ? 'danger' : 'warning'}>
+                        {issue.severity === 'conflict' ? '확인 필요' : '주의'}
+                      </Badge>
+                    </div>
+                    {excelIssueSubtext(issue) && (
+                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
+                        {excelIssueSubtext(issue)}
+                      </p>
+                    )}
                   </div>
-                  {excelIssueSubtext(issue) && (
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
-                      {excelIssueSubtext(issue)}
-                    </p>
-                  )}
+                  <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)] max-w-md">
+                    {issue.message}
+                  </p>
                 </div>
-                <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)] max-w-md">
-                  {issue.message}
-                </p>
-              </div>
 
-              <ExcelIssueTable issue={issue} />
-            </li>
-          ))}
-        </ul>
+                <ExcelIssueTable issue={issue} />
+              </li>
+            ))}
+          </ul>
+        )
       )}
     </Card>
   )
@@ -1617,7 +1634,7 @@ function ExcelDiffGridModal({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[92vh] w-full max-w-[min(1500px,96vw)] flex-col overflow-hidden rounded-2xl bg-[var(--md-sys-color-surface)] shadow-2xl border border-[var(--md-sys-color-outline-variant)]"
+        className="flex h-[94vh] min-h-[560px] w-[98vw] max-w-none flex-col overflow-hidden rounded-xl bg-[var(--md-sys-color-surface)] shadow-2xl border border-[var(--md-sys-color-outline-variant)]"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] px-5 py-4">
@@ -1641,7 +1658,7 @@ function ExcelDiffGridModal({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3">
           {modal.loading ? (
             <div className="flex items-center justify-center gap-2 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
               <Spinner size={20} /> Excel 표 범위를 계산하는 중…
@@ -1711,7 +1728,7 @@ function ExcelDiffGridSectionView({
   )
 
   return (
-    <section className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden">
+    <section className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden">
       <div className="px-4 py-3 border-b border-[var(--md-sys-color-outline-variant)]">
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{section.title}</p>
         <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
@@ -1719,7 +1736,7 @@ function ExcelDiffGridSectionView({
         </p>
       </div>
       <div
-        className="max-h-[54vh] overflow-auto overscroll-contain"
+        className="max-h-[68vh] overflow-auto overscroll-contain"
         onWheel={(event) => {
           if (!event.shiftKey) return
           event.currentTarget.scrollLeft += event.deltaY
@@ -1789,7 +1806,7 @@ function ExcelDiffGridSectionView({
 
 function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell }) {
   return (
-    <aside className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
+    <aside className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <Badge tone={cell.highlight === 'removed' ? 'danger' : cell.highlight === 'added' ? 'success' : 'warning'}>
           {excelGridHighlightLabel(cell.highlight)}
@@ -1977,10 +1994,10 @@ function DiffPanel({
 }) {
   const bg =
     tone === 'danger'
-      ? 'bg-[var(--md-sys-color-error-container)]/50 border-[var(--md-sys-color-error-container)]'
-      : 'bg-[var(--md-sys-color-success-container)]/50 border-[var(--md-sys-color-success-container)]'
+      ? 'bg-[var(--md-sys-color-error-container)]/50 border-[var(--md-sys-color-error)]/70'
+      : 'bg-[var(--md-sys-color-success-container)]/50 border-[var(--md-sys-color-success)]/70'
   return (
-    <div className={`rounded-md border p-3 ${bg}`}>
+    <div className={`rounded-md border-2 p-3 ${bg}`}>
       <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
         {title}
       </p>

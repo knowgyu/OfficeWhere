@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, Tray } from 'electron'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
@@ -30,16 +30,20 @@ type ClearAppDataResult = {
   deleted: string[]
   failed: { id: string; path: string; error: string }[]
   backendStopped: boolean
-  restartScheduled: boolean
+  exitScheduled: boolean
 }
 
+type CloseBehavior = 'ask' | 'hide' | 'quit'
+
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
 let backendProcess: ChildProcess | null = null
 const expectedBackendExits = new WeakSet<ChildProcess>()
 let backendBaseUrl = ''
 let backendLogPath = ''
 let isQuitting = false
 let appDataCleanupInProgress = false
+let closePromptInProgress = false
 
 app.setName('OfficeWhere')
 
@@ -48,18 +52,22 @@ if (!hasSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (!mainWindow) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.focus()
+    showMainWindow()
   })
 
   app.on('before-quit', () => {
     isQuitting = true
     stopBackend()
+    tray?.destroy()
+    tray = null
   })
 
   app.on('window-all-closed', () => {
     if (!appDataCleanupInProgress) app.quit()
+  })
+
+  app.on('activate', () => {
+    showMainWindow()
   })
 
   app.whenReady()
@@ -73,6 +81,7 @@ if (!hasSingleInstanceLock) {
 async function startApp() {
   app.setAppLogsPath(path.join(app.getPath('userData'), 'logs'))
   registerIpcHandlers()
+  ensureTray()
   await startBackendWithRetry()
   await createMainWindow()
 }
@@ -83,6 +92,8 @@ function registerIpcHandlers() {
   ipcMain.handle('app:get-log-path', () => backendLogPath)
   ipcMain.handle('app:get-data-paths', async () => getPublicAppDataCandidates())
   ipcMain.handle('app:clear-app-data', async (_event, payload: unknown) => clearAppData(payload))
+  ipcMain.handle('app:get-close-behavior', () => readCloseBehavior())
+  ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
   ipcMain.handle('dialog:pick-file', async () => pickFile())
   ipcMain.handle('dialog:pick-folder', async () => pickFolder())
 }
@@ -105,6 +116,14 @@ async function createMainWindow() {
 
   mainWindow.removeMenu()
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('close', (event) => {
+    if (isQuitting || appDataCleanupInProgress) return
+    event.preventDefault()
+    void handleMainWindowClose()
+  })
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
@@ -137,6 +156,126 @@ function getAppIconPath(): string {
     return path.join(process.resourcesPath, 'renderer', 'officewhere-logo.png')
   }
   return path.join(app.getAppPath(), 'dist', 'officewhere-logo.png')
+}
+
+function getTrayIconPath(): string {
+  const iconName = process.platform === 'win32' ? 'officewhere-icon.ico' : 'officewhere-logo.png'
+  const basePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'renderer')
+    : path.join(app.getAppPath(), 'dist')
+  const iconPath = path.join(basePath, iconName)
+  return fs.existsSync(iconPath) ? iconPath : getAppIconPath()
+}
+
+function settingsPath(): string {
+  return path.join(app.getPath('userData'), 'settings.json')
+}
+
+function readSettings(): { closeBehavior?: CloseBehavior } {
+  try {
+    const raw = fs.readFileSync(settingsPath(), 'utf-8')
+    const parsed = JSON.parse(raw) as { closeBehavior?: unknown }
+    return parsed.closeBehavior === 'hide' || parsed.closeBehavior === 'quit' || parsed.closeBehavior === 'ask'
+      ? { closeBehavior: parsed.closeBehavior }
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeSettings(patch: { closeBehavior?: CloseBehavior }) {
+  const next = { ...readSettings(), ...patch }
+  fs.mkdirSync(path.dirname(settingsPath()), { recursive: true })
+  fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2), 'utf-8')
+}
+
+function readCloseBehavior(): CloseBehavior {
+  return readSettings().closeBehavior ?? 'ask'
+}
+
+function setCloseBehavior(payload: unknown): CloseBehavior {
+  const value =
+    typeof payload === 'object' && payload && 'behavior' in payload
+      ? (payload as { behavior?: unknown }).behavior
+      : payload
+  if (value !== 'ask' && value !== 'hide' && value !== 'quit') {
+    throw new Error('unknown close behavior')
+  }
+  writeSettings({ closeBehavior: value })
+  return value
+}
+
+function ensureTray() {
+  if (tray) return
+  tray = new Tray(getTrayIconPath())
+  tray.setToolTip('OfficeWhere')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'OfficeWhere 열기', click: () => showMainWindow() },
+      { type: 'separator' },
+      {
+        label: '종료',
+        click: () => {
+          isQuitting = true
+          app.quit()
+        },
+      },
+    ])
+  )
+  tray.on('double-click', () => showMainWindow())
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    void createMainWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+async function handleMainWindowClose() {
+  if (!mainWindow || mainWindow.isDestroyed() || closePromptInProgress) return
+
+  const behavior = readCloseBehavior()
+  if (behavior === 'hide') {
+    mainWindow.hide()
+    return
+  }
+  if (behavior === 'quit') {
+    isQuitting = true
+    app.quit()
+    return
+  }
+
+  closePromptInProgress = true
+  try {
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: 'OfficeWhere 닫기',
+      message: '창을 닫으면 어떻게 할까요?',
+      detail: '백그라운드에서 계속 실행하면 트레이에 남아 자동 색인을 계속 수행할 수 있습니다.',
+      buttons: ['백그라운드에서 계속 실행', '종료', '취소'],
+      defaultId: 0,
+      cancelId: 2,
+      checkboxLabel: '이 선택 기억하기',
+      checkboxChecked: false,
+    })
+
+    if (result.response === 0) {
+      if (result.checkboxChecked) writeSettings({ closeBehavior: 'hide' })
+      mainWindow?.hide()
+      return
+    }
+    if (result.response === 1) {
+      if (result.checkboxChecked) writeSettings({ closeBehavior: 'quit' })
+      isQuitting = true
+      app.quit()
+    }
+  } finally {
+    closePromptInProgress = false
+  }
 }
 
 async function startBackendWithRetry() {
@@ -512,10 +651,14 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
   if (!payload || typeof payload !== 'object') {
     throw new Error('clear payload is required')
   }
-  const { candidateIds, relaunch } = payload as { candidateIds?: unknown; relaunch?: unknown }
+  const { candidateIds, exitAfterClear } = payload as {
+    candidateIds?: unknown
+    exitAfterClear?: unknown
+  }
   if (!Array.isArray(candidateIds) || !candidateIds.every((id) => typeof id === 'string')) {
     throw new Error('candidateIds must be a string array')
   }
+  const shouldExitAfterClear = exitAfterClear !== false
 
   const candidates = await buildAppDataCandidates()
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]))
@@ -534,7 +677,7 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
     deleted: [],
     failed: [],
     backendStopped: false,
-    restartScheduled: false,
+    exitScheduled: false,
   }
 
   appDataCleanupInProgress = true
@@ -554,17 +697,17 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
       }
     }
 
-    if (result.success && relaunch === true) {
-      result.restartScheduled = true
+    if (result.success && shouldExitAfterClear) {
+      result.exitScheduled = true
       setTimeout(() => {
-        app.relaunch()
+        isQuitting = true
         app.exit(0)
       }, 250)
     }
 
     return result
   } finally {
-    if (!result.restartScheduled) {
+    if (!result.exitScheduled) {
       appDataCleanupInProgress = false
     }
   }
