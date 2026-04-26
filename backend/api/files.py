@@ -2,18 +2,21 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List
+from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from ..core.file_access import inspect_file_path, pick_local_file, pick_local_folder, scan_folder
 from ..core.indexer import inspect_and_chunk
 from ..core.normalizer import suggest_key_column
 from ..core.parser import SUPPORTED_EXTENSIONS, get_file_schema
 from ..database import (
+    count_files,
+    count_files_by_type,
     delete_file,
     get_all_files,
     get_file_by_id,
+    list_files_page,
     register_file,
     save_file_chunks,
     update_file_mtime,
@@ -26,6 +29,7 @@ from ..models.schemas import (
     FileInfo,
     FileInspectRequest,
     FileInspectResponse,
+    FileListResponse,
     FilePickResponse,
     FileRegisterRequest,
     FileRegisterResponse,
@@ -38,6 +42,9 @@ from ..models.schemas import (
 from ..runtime import get_worker_count
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+DEFAULT_FILE_PAGE_LIMIT = 50
+MAX_FILE_PAGE_LIMIT = 100
 
 
 def _validate_registration_payload(
@@ -60,6 +67,26 @@ def _validate_registration_payload(
             )
         return requested_key_column
     return requested_key_column or ""
+
+
+def _normalize_file_page_limit(limit: int) -> int:
+    if limit < 1:
+        return DEFAULT_FILE_PAGE_LIMIT
+    return min(limit, MAX_FILE_PAGE_LIMIT)
+
+
+def _file_info_from_row(row: dict) -> FileInfo:
+    return FileInfo(
+        id=row["id"],
+        name=row["name"],
+        path=row["path"],
+        file_type=row["file_type"],
+        key_column=row["key_column"],
+        column_count=row["column_count"],
+        parser_config=row.get("parser_config", {}),
+        created_at=row["created_at"],
+        file_mtime=row.get("file_mtime"),
+    )
 
 
 @router.post("/inspect", response_model=FileInspectResponse)
@@ -148,20 +175,34 @@ def register(req: FileRegisterRequest):
 @router.get("", response_model=List[FileInfo])
 def list_files():
     rows = get_all_files()
-    return [
-        FileInfo(
-            id=row["id"],
-            name=row["name"],
-            path=row["path"],
-            file_type=row["file_type"],
-            key_column=row["key_column"],
-            column_count=row["column_count"],
-            parser_config=row.get("parser_config", {}),
-            created_at=row["created_at"],
-            file_mtime=row.get("file_mtime"),
-        )
-        for row in rows
-    ]
+    return [_file_info_from_row(row) for row in rows]
+
+
+@router.get("/page", response_model=FileListResponse)
+def list_files_bounded(
+    q: str = "",
+    file_types: Annotated[Optional[List[str]], Query()] = None,
+    limit: int = DEFAULT_FILE_PAGE_LIMIT,
+    offset: int = 0,
+    sort: str = "created_at_desc",
+):
+    safe_limit = _normalize_file_page_limit(limit)
+    safe_offset = max(0, offset)
+    filters = [file_type for file_type in (file_types or []) if file_type]
+    rows = list_files_page(
+        query=q,
+        file_types=filters,
+        limit=safe_limit,
+        offset=safe_offset,
+        sort=sort,
+    )
+    return FileListResponse(
+        total=count_files(q, filters),
+        items=[_file_info_from_row(row) for row in rows],
+        counts_by_type=count_files_by_type(q, filters),
+        limit=safe_limit,
+        offset=safe_offset,
+    )
 
 
 @router.get("/{file_id}/schema", response_model=SchemaResponse)

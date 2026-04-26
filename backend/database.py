@@ -3,7 +3,7 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 def _default_db_dir() -> Path:
@@ -181,6 +181,100 @@ def get_all_files() -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [_decode_parser_config(dict(row)) for row in rows]
+
+
+def _build_file_list_filters(
+    query: str = "",
+    file_types: Optional[Sequence[str]] = None,
+) -> Tuple[str, List[Any]]:
+    clauses: List[str] = []
+    params: List[Any] = []
+    normalized_query = query.strip()
+    if normalized_query:
+        like_query = f"%{normalized_query}%"
+        clauses.append("(name LIKE ? OR path LIKE ?)")
+        params.extend([like_query, like_query])
+
+    filters = [file_type for file_type in (file_types or []) if file_type]
+    if filters:
+        placeholders = ",".join("?" for _ in filters)
+        clauses.append(f"file_type IN ({placeholders})")
+        params.extend(filters)
+
+    if not clauses:
+        return "", params
+    return f" WHERE {' AND '.join(clauses)}", params
+
+
+def _file_list_order_by(sort: str) -> str:
+    sort_options = {
+        "created_at_desc": "created_at DESC, id DESC",
+        "created_at_asc": "created_at ASC, id ASC",
+        "name_asc": "name COLLATE NOCASE ASC, id DESC",
+        "name_desc": "name COLLATE NOCASE DESC, id DESC",
+        "file_mtime_desc": "file_mtime DESC, created_at DESC, id DESC",
+    }
+    return sort_options.get(sort, sort_options["created_at_desc"])
+
+
+def list_files_page(
+    query: str = "",
+    file_types: Optional[Sequence[str]] = None,
+    limit: int = 50,
+    offset: int = 0,
+    sort: str = "created_at_desc",
+) -> List[Dict[str, Any]]:
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    where_clause, params = _build_file_list_filters(query, file_types)
+    cursor.execute(
+        f"""
+        SELECT *
+        FROM registered_files
+        {where_clause}
+        ORDER BY {_file_list_order_by(sort)}
+        LIMIT ? OFFSET ?
+        """,
+        [*params, limit, offset],
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_parser_config(dict(row)) for row in rows]
+
+
+def count_files(
+    query: str = "",
+    file_types: Optional[Sequence[str]] = None,
+) -> int:
+    conn = _connect()
+    cursor = conn.cursor()
+    where_clause, params = _build_file_list_filters(query, file_types)
+    cursor.execute(f"SELECT COUNT(*) FROM registered_files{where_clause}", params)
+    total = int(cursor.fetchone()[0])
+    conn.close()
+    return total
+
+
+def count_files_by_type(
+    query: str = "",
+    file_types: Optional[Sequence[str]] = None,
+) -> Dict[str, int]:
+    conn = _connect()
+    cursor = conn.cursor()
+    where_clause, params = _build_file_list_filters(query, file_types)
+    cursor.execute(
+        f"""
+        SELECT file_type, COUNT(*) AS count
+        FROM registered_files
+        {where_clause}
+        GROUP BY file_type
+        """,
+        params,
+    )
+    counts = {str(row[0]): int(row[1]) for row in cursor.fetchall()}
+    conn.close()
+    return counts
 
 
 def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:

@@ -80,6 +80,22 @@ export interface FileInfo {
   compare_capabilities?: string[]
 }
 
+export interface FileListResponse {
+  total: number
+  items: FileInfo[]
+  counts_by_type: Record<string, number>
+  limit: number
+  offset: number
+}
+
+export interface FileListParams {
+  query?: string
+  fileTypes?: string[]
+  limit?: number
+  offset?: number
+  sort?: string
+}
+
 export interface PreviewBlock {
   id: string
   blockType: string
@@ -458,6 +474,19 @@ async function pickFolderWithBestAvailableDialog() {
   }
 
   return axios.post<FolderPickResponse>(await apiPath('/api/files/pick-folder'))
+}
+
+async function getFilePage(params: FileListParams = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.query) searchParams.set('q', params.query)
+  params.fileTypes?.forEach((fileType) => searchParams.append('file_types', fileType))
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
+  if (params.sort) searchParams.set('sort', params.sort)
+
+  const url = await apiPath('/api/files/page')
+  const suffix = searchParams.toString()
+  return axios.get<FileListResponse>(suffix ? `${url}?${suffix}` : url)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1092,6 +1121,7 @@ export function normalizeCheckResponse(payload: unknown): CheckResponse {
 export const api = {
   files: {
     list: async () => axios.get<FileInfo[]>(await apiPath('/api/files')),
+    page: getFilePage,
     inspect: (data: FileInspectRequest) =>
       apiPath('/api/files/inspect').then((url) => axios.post<FileInspectResponse>(url, data)),
     pick: pickFileWithBestAvailableDialog,

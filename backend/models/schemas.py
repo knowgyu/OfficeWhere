@@ -23,6 +23,14 @@ class FileInfo(BaseModel):
     file_mtime: Optional[float] = None
 
 
+class FileListResponse(BaseModel):
+    total: int
+    items: List[FileInfo]
+    counts_by_type: Dict[str, int] = Field(default_factory=dict)
+    limit: int
+    offset: int
+
+
 class FileRegisterResponse(BaseModel):
     id: int
     name: str

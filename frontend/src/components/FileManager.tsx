@@ -84,9 +84,39 @@ function formatBytes(bytes?: number) {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
+const REGISTERED_FILE_PAGE_SIZE = 50
+const SAFE_APP_DATA_IDS = new Set([
+  'backend-data',
+  'chromium-cache',
+  'chromium-code-cache',
+  'chromium-local-storage',
+  'chromium-session-storage',
+  'chromium-gpu-cache',
+  'legacy-home-data',
+])
+
+function existingAppDataIds(candidates: AppDataCandidate[], ids: Set<string>) {
+  return candidates
+    .filter((candidate) => candidate.exists && ids.has(candidate.id))
+    .map((candidate) => candidate.id)
+}
+
+function appDataSize(candidates: AppDataCandidate[], ids: string[]) {
+  const selected = new Set(ids)
+  return candidates.reduce(
+    (total, candidate) => total + (selected.has(candidate.id) ? candidate.sizeBytes ?? 0 : 0),
+    0,
+  )
+}
+
 export default function FileManager() {
   const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
+  const [fileTotal, setFileTotal] = useState(0)
+  const [fileCountsByType, setFileCountsByType] = useState<Record<string, number>>({})
+  const [fileOffset, setFileOffset] = useState(0)
+  const [fileQuery, setFileQuery] = useState('')
+  const [fileQueryDraft, setFileQueryDraft] = useState('')
   const [loading, setLoading] = useState(false)
 
   const [filePath, setFilePath] = useState('')
@@ -123,17 +153,26 @@ export default function FileManager() {
   const [appDataPaths, setAppDataPaths] = useState<AppDataCandidate[]>([])
   const [appDataLoading, setAppDataLoading] = useState(false)
   const [selectedAppDataIds, setSelectedAppDataIds] = useState<string[]>([])
+  const [appDataAdvancedOpen, setAppDataAdvancedOpen] = useState(false)
   const [clearAppDataOpen, setClearAppDataOpen] = useState(false)
   const [clearAppDataResult, setClearAppDataResult] = useState<ClearAppDataResult | null>(null)
   const appDataAvailable =
     typeof window !== 'undefined' &&
     Boolean(window.officeDataJoiner?.getAppDataPaths && window.officeDataJoiner?.clearAppData)
 
-  const fetchFiles = async () => {
+  const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setLoading(true)
     try {
-      const response = await api.files.list()
-      setFiles(response.data)
+      const response = await api.files.page({
+        limit: REGISTERED_FILE_PAGE_SIZE,
+        offset: nextOffset,
+        query: nextQuery,
+      })
+      setFiles(response.data.items)
+      setFileTotal(response.data.total)
+      setFileCountsByType(response.data.counts_by_type ?? {})
+      setFileOffset(response.data.offset)
+      setFileQuery(nextQuery)
     } catch {
       snackbar.error('파일 목록을 불러오지 못했습니다.')
     } finally {
@@ -149,9 +188,7 @@ export default function FileManager() {
       setAppDataPaths(response.data)
       setSelectedAppDataIds((current) => {
         if (current.length > 0) return current.filter((id) => response.data.some((item) => item.id === id))
-        return response.data
-          .filter((item) => item.exists && !item.dangerous && !item.id.startsWith('chromium-'))
-          .map((item) => item.id)
+        return existingAppDataIds(response.data, SAFE_APP_DATA_IDS)
       })
     } catch {
       snackbar.error('앱 데이터 경로를 불러오지 못했습니다.')
@@ -161,14 +198,14 @@ export default function FileManager() {
   }
 
   useEffect(() => {
-    fetchFiles()
+    void fetchFiles(0, '')
     void fetchLibrarySettings()
     void fetchAppDataPaths()
   }, [])
 
   useEffect(() => {
     if (rescanCompletionKey === 0) return
-    void fetchFiles()
+    void fetchFiles(0, fileQuery)
     void fetchLibrarySettings()
   }, [rescanCompletionKey])
 
@@ -268,10 +305,37 @@ export default function FileManager() {
     await startRescan('manual')
   }
 
+  const openClearAppDataPreset = (candidateIds: string[]) => {
+    if (candidateIds.length === 0) {
+      snackbar.warn('삭제할 앱 데이터가 없습니다.')
+      return
+    }
+    setSelectedAppDataIds(candidateIds)
+    setClearAppDataOpen(true)
+  }
+
   const toggleAppDataCandidate = (id: string) => {
     setSelectedAppDataIds((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
     )
+  }
+
+  const handleFileSearch = () => {
+    const nextQuery = fileQueryDraft.trim()
+    setFileOffset(0)
+    void fetchFiles(0, nextQuery)
+  }
+
+  const clearFileSearch = () => {
+    setFileQueryDraft('')
+    setFileOffset(0)
+    void fetchFiles(0, '')
+  }
+
+  const goToFilePage = (nextOffset: number) => {
+    const boundedOffset = Math.max(0, nextOffset)
+    setFileOffset(boundedOffset)
+    void fetchFiles(boundedOffset, fileQuery)
   }
 
   const handleClearAppData = async () => {
@@ -342,7 +406,21 @@ export default function FileManager() {
   const hasPendingNewFolder =
     Boolean(normalizedFolderDraft) &&
     !librarySettings.watched_folders.some((folder) => folder.path === normalizedFolderDraft)
+  const safeResetIds = useMemo(() => existingAppDataIds(appDataPaths, SAFE_APP_DATA_IDS), [appDataPaths])
+  const fullResetIds = useMemo(
+    () => appDataPaths.filter((candidate) => candidate.exists && candidate.id === 'user-data-root').map((candidate) => candidate.id),
+    [appDataPaths],
+  )
+  const safeResetSize = appDataSize(appDataPaths, safeResetIds)
+  const fullResetSize = appDataSize(appDataPaths, fullResetIds)
   const selectedAppDataPaths = appDataPaths.filter((item) => selectedAppDataIds.includes(item.id))
+  const selectedAppDataSize = appDataSize(appDataPaths, selectedAppDataIds)
+  const selectedFullReset = selectedAppDataIds.includes('user-data-root')
+  const visibleFileStart = fileTotal === 0 ? 0 : fileOffset + 1
+  const visibleFileEnd = Math.min(fileOffset + files.length, fileTotal)
+  const hasPreviousFilePage = fileOffset > 0
+  const hasNextFilePage = fileOffset + files.length < fileTotal
+  const fileTypeCounts = Object.entries(fileCountsByType)
 
   const handleInspectPath = async () => {
     if (!filePath.trim()) {
@@ -423,7 +501,7 @@ export default function FileManager() {
       snackbar.success(`"${inspectedFile.name}" 등록 완료.`)
       setFilePath('')
       resetInspection()
-      await fetchFiles()
+      await fetchFiles(0, fileQuery)
     } catch (error) {
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
@@ -438,7 +516,11 @@ export default function FileManager() {
     try {
       await api.files.delete(file.id)
       snackbar.success(`"${file.name}" 등록 해제됨.`)
-      await fetchFiles()
+      const nextOffset =
+        files.length === 1 && fileOffset > 0
+          ? Math.max(0, fileOffset - REGISTERED_FILE_PAGE_SIZE)
+          : fileOffset
+      await fetchFiles(nextOffset, fileQuery)
     } catch {
       snackbar.error('파일 삭제에 실패했습니다.')
     } finally {
@@ -680,7 +762,7 @@ export default function FileManager() {
       <Card variant="elevated">
         <CardSection
           title="앱 데이터 관리"
-          description="Electron userData, backend-data, 로그, Chromium cache/localStorage, legacy ~/.officewhere 등 앱 소유 데이터만 삭제합니다. 원본 문서와 대상 폴더는 삭제하지 않습니다."
+          description="검색 색인과 앱 설정처럼 앱이 만든 데이터만 초기화합니다. 원본 문서와 대상 폴더는 삭제하지 않습니다."
           trailing={
             appDataAvailable ? (
               <div className="flex gap-2 flex-wrap">
@@ -691,15 +773,6 @@ export default function FileManager() {
                   loading={appDataLoading}
                 >
                   경로 새로고침
-                </Button>
-                <Button
-                  variant="filled"
-                  leadingIcon="delete_sweep"
-                  className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
-                  onClick={() => setClearAppDataOpen(true)}
-                  disabled={selectedAppDataIds.length === 0 || appDataLoading}
-                >
-                  선택 삭제
                 </Button>
               </div>
             ) : null
@@ -716,39 +789,113 @@ export default function FileManager() {
             <EmptyState
               icon="folder_managed"
               title="앱 데이터 경로를 불러오세요"
-              description="경로 새로고침을 누르면 삭제 가능한 앱 소유 데이터 후보를 확인합니다."
+              description="경로 새로고침을 누르면 초기화 가능한 앱 데이터를 확인합니다."
               compact
             />
           ) : (
-            <div className="space-y-2">
-              {appDataPaths.map((candidate) => (
-                <div
-                  key={candidate.id}
-                  className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-4 py-3 flex items-start gap-3"
-                >
-                  <Checkbox
-                    checked={selectedAppDataIds.includes(candidate.id)}
-                    onChange={() => toggleAppDataCandidate(candidate.id)}
-                    disabled={!candidate.exists || appDataLoading}
-                    label=""
-                  />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{candidate.label}</p>
-                      <Badge tone={candidate.exists ? 'success' : 'neutral'}>
-                        {candidate.exists ? formatBytes(candidate.sizeBytes) : '없음'}
-                      </Badge>
-                      {candidate.dangerous && <Badge tone="warning">전체 초기화</Badge>}
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="type-title-md text-[var(--md-sys-color-on-surface)]">
+                        검색/앱 설정 초기화
+                      </p>
+                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                        검색 색인, 앱 화면 설정, 임시 캐시를 다시 만듭니다. 문제가 생겼을 때 먼저 시도할 안전한 초기화입니다.
+                      </p>
                     </div>
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                      {candidate.description}
-                    </p>
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] break-all">
-                      {candidate.path}
-                    </p>
+                    <Badge tone={safeResetIds.length > 0 ? 'success' : 'neutral'}>
+                      {safeResetIds.length > 0 ? formatBytes(safeResetSize) : '삭제할 항목 없음'}
+                    </Badge>
                   </div>
+                  <Button
+                    variant="filled"
+                    leadingIcon="restart_alt"
+                    onClick={() => openClearAppDataPreset(safeResetIds)}
+                    disabled={safeResetIds.length === 0 || appDataLoading}
+                  >
+                    초기화 후 재시작
+                  </Button>
                 </div>
-              ))}
+
+                <div className="rounded-md border border-[var(--md-sys-color-error)]/50 bg-[var(--md-sys-color-error-container)]/20 p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="type-title-md text-[var(--md-sys-color-on-surface)]">
+                        문제 해결용 전체 초기화
+                      </p>
+                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                        앱 프로필 전체를 새로 만듭니다. 원본 문서는 삭제하지 않지만 앱 설정과 세션은 초기화됩니다.
+                      </p>
+                    </div>
+                    <Badge tone={fullResetIds.length > 0 ? 'warning' : 'neutral'}>
+                      {fullResetIds.length > 0 ? formatBytes(fullResetSize) : '삭제할 항목 없음'}
+                    </Badge>
+                  </div>
+                  <Button
+                    variant="outlined"
+                    leadingIcon="warning"
+                    className="!text-[var(--md-sys-color-error)]"
+                    onClick={() => openClearAppDataPreset(fullResetIds)}
+                    disabled={fullResetIds.length === 0 || appDataLoading}
+                  >
+                    전체 초기화
+                  </Button>
+                </div>
+              </div>
+
+              <details
+                className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4"
+                open={appDataAdvancedOpen}
+                onToggle={(event) => setAppDataAdvancedOpen(event.currentTarget.open)}
+              >
+                <summary className="type-label-lg text-[var(--md-sys-color-primary)] cursor-pointer">
+                  고급 보기: 삭제 대상 직접 선택
+                </summary>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-2">
+                  문제 해결을 위해 세부 항목을 직접 고를 때만 사용하세요.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {appDataPaths.map((candidate) => (
+                    <div
+                      key={candidate.id}
+                      className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-4 py-3 flex items-start gap-3"
+                    >
+                      <Checkbox
+                        checked={selectedAppDataIds.includes(candidate.id)}
+                        onChange={() => toggleAppDataCandidate(candidate.id)}
+                        disabled={!candidate.exists || appDataLoading}
+                        label=""
+                      />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{candidate.label}</p>
+                          <Badge tone={candidate.exists ? 'success' : 'neutral'}>
+                            {candidate.exists ? formatBytes(candidate.sizeBytes) : '없음'}
+                          </Badge>
+                          {candidate.dangerous && <Badge tone="warning">전체 초기화</Badge>}
+                        </div>
+                        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                          {candidate.description}
+                        </p>
+                        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] break-all">
+                          {candidate.path}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    variant="outlined"
+                    leadingIcon="delete_sweep"
+                    className="!text-[var(--md-sys-color-error)]"
+                    onClick={() => setClearAppDataOpen(true)}
+                    disabled={selectedAppDataIds.length === 0 || appDataLoading}
+                  >
+                    선택한 항목 삭제
+                  </Button>
+                </div>
+              </details>
             </div>
           )}
           {clearAppDataResult && (
@@ -835,25 +982,64 @@ export default function FileManager() {
         </CardSection>
       </Card>
 
-      <FolderScanner onRegistered={fetchFiles} />
+      <FolderScanner onRegistered={() => void fetchFiles(0, fileQuery)} />
 
       <Card variant="outlined" className="overflow-hidden">
-        <header className="px-6 py-4 flex items-center justify-between gap-4 border-b border-[var(--md-sys-color-outline-variant)]">
-          <div>
+        <header className="px-6 py-4 space-y-4 border-b border-[var(--md-sys-color-outline-variant)]">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
             <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
-              등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({files.length})</span>
+              등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({fileTotal})</span>
             </h3>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              파일명을 누르면 미리보기를 볼 수 있습니다. 등록 해제는 목록에서만 제거하며 원본 파일은 삭제하지 않습니다.
+              전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 목록에서만 제거하며 원본 파일은 삭제하지 않습니다.
             </p>
+            </div>
+            <IconButton
+              icon="refresh"
+              label="새로고침"
+              variant="tonal"
+              onClick={() => void fetchFiles(fileOffset, fileQuery)}
+              disabled={loading}
+            />
           </div>
-          <IconButton
-            icon="refresh"
-            label="새로고침"
-            variant="tonal"
-            onClick={fetchFiles}
-            disabled={loading}
-          />
+          <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
+            <div className="flex-1 min-w-[240px]">
+              <TextField
+                leadingIcon="search"
+                placeholder="파일명 또는 경로로 검색"
+                value={fileQueryDraft}
+                onChange={(event) => setFileQueryDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') handleFileSearch()
+                }}
+              />
+            </div>
+            <Button variant="filled" leadingIcon="search" onClick={handleFileSearch} disabled={loading}>
+              검색
+            </Button>
+            {fileQuery && (
+              <Button variant="text" leadingIcon="close" onClick={clearFileSearch} disabled={loading}>
+                검색 해제
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Chip
+              label={
+                fileTotal === 0
+                  ? '표시 0개'
+                  : `표시 ${visibleFileStart}-${visibleFileEnd} / 전체 ${fileTotal}`
+              }
+              tone="primary"
+              icon="view_list"
+              as="span"
+            />
+            {fileQuery && <Chip label={`검색어 · ${fileQuery}`} tone="secondary" icon="search" as="span" />}
+            {fileTypeCounts.map(([fileType, count]) => (
+              <Chip key={fileType} label={`${fileType} ${count}`} tone="neutral" as="span" />
+            ))}
+          </div>
         </header>
 
         {loading ? (
@@ -923,6 +1109,31 @@ export default function FileManager() {
             ))}
           </ul>
         )}
+        {fileTotal > REGISTERED_FILE_PAGE_SIZE && (
+          <footer className="px-6 py-4 flex items-center justify-between gap-3 border-t border-[var(--md-sys-color-outline-variant)] flex-wrap">
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {visibleFileStart}-{visibleFileEnd} / {fileTotal}개
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outlined"
+                leadingIcon="chevron_left"
+                onClick={() => goToFilePage(fileOffset - REGISTERED_FILE_PAGE_SIZE)}
+                disabled={!hasPreviousFilePage || loading}
+              >
+                이전
+              </Button>
+              <Button
+                variant="outlined"
+                trailingIcon="chevron_right"
+                onClick={() => goToFilePage(fileOffset + REGISTERED_FILE_PAGE_SIZE)}
+                disabled={!hasNextFilePage || loading}
+              >
+                다음
+              </Button>
+            </div>
+          </footer>
+        )}
       </Card>
 
       <Dialog
@@ -931,7 +1142,11 @@ export default function FileManager() {
         size="lg"
         icon="warning"
         title="앱 데이터 삭제 확인"
-        description="이 작업은 되돌릴 수 없습니다. 원본 문서와 대상 폴더 파일은 삭제하지 않습니다."
+        description={
+          selectedFullReset
+            ? '앱 프로필 전체를 새로 만드는 초기화입니다. 원본 문서와 대상 폴더 파일은 삭제하지 않습니다.'
+            : '선택한 앱 데이터만 삭제합니다. 원본 문서와 대상 폴더 파일은 삭제하지 않습니다.'
+        }
         actions={
           <>
             <Button variant="text" onClick={() => setClearAppDataOpen(false)}>
@@ -951,8 +1166,11 @@ export default function FileManager() {
       >
         <div className="space-y-4">
           <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
-            선택한 앱 소유 데이터만 삭제합니다. 등록된 대상 폴더의 실제 문서 파일, 사용자의 작업 폴더, appData 루트는 삭제 대상이 아닙니다.
+            {selectedFullReset
+              ? '문제 해결용 전체 초기화는 앱 프로필 전체를 삭제해 앱 설정과 세션을 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'
+              : '선택한 앱 소유 데이터만 삭제합니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'}
           </p>
+          <Badge tone="warning">삭제 예정 {formatBytes(selectedAppDataSize)}</Badge>
           <div className="space-y-2">
             {selectedAppDataPaths.map((candidate) => (
               <div key={candidate.id} className="rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-3">

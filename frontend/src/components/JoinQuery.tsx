@@ -4,7 +4,6 @@ import {
   api,
   FileInfo,
   JoinResponse,
-  getFileTypeLabel,
   getSchemaColumns,
   isExcelFile,
 } from '../api/client'
@@ -21,11 +20,13 @@ import {
   Radio,
   SegmentedButton,
   Spinner,
+  TextField,
   useSnackbar,
 } from '../ui'
 import ResultTable from './ResultTable'
 
 type JoinType = 'left' | 'outer' | 'inner'
+const JOIN_FILE_PAGE_SIZE = 50
 
 const JOIN_TYPE_HELP: Record<JoinType, string> = {
   outer: '모든 파일의 기준 컬럼 값을 빠짐없이 모읍니다. 누락된 값은 빈칸으로 표시됩니다.',
@@ -35,6 +36,7 @@ const JOIN_TYPE_HELP: Record<JoinType, string> = {
 
 interface FileSelection {
   fileId: number
+  fileName: string
   selectedColumns: Set<string>
   allColumns: string[]
 }
@@ -42,6 +44,11 @@ interface FileSelection {
 export default function JoinQuery() {
   const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
+  const [fileTotal, setFileTotal] = useState(0)
+  const [fileOffset, setFileOffset] = useState(0)
+  const [fileQuery, setFileQuery] = useState('')
+  const [fileQueryDraft, setFileQueryDraft] = useState('')
+  const [filesLoading, setFilesLoading] = useState(false)
   const [selections, setSelections] = useState<Map<number, FileSelection>>(new Map())
   const [joinType, setJoinType] = useState<JoinType>('outer')
   const [baseFileId, setBaseFileId] = useState<number | null>(null)
@@ -49,21 +56,32 @@ export default function JoinQuery() {
   const [loading, setLoading] = useState(false)
   const [columnsLoading, setColumnsLoading] = useState<Set<number>>(new Set())
 
-  useEffect(() => {
-    api.files
-      .list()
-      .then((response) => setFiles(response.data))
-      .catch(() => {
-        /* silent */
+  const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
+    setFilesLoading(true)
+    try {
+      const response = await api.files.page({
+        limit: JOIN_FILE_PAGE_SIZE,
+        offset: nextOffset,
+        query: nextQuery,
+        fileTypes: ['Excel'],
       })
+      setFiles(response.data.items)
+      setFileTotal(response.data.total)
+      setFileOffset(response.data.offset)
+      setFileQuery(nextQuery)
+    } catch {
+      /* silent */
+    } finally {
+      setFilesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchFiles(0, '')
   }, [])
 
   const excelFiles = useMemo(
     () => files.filter((file) => isExcelFile(file.file_type)),
-    [files],
-  )
-  const compareOnlyFiles = useMemo(
-    () => files.filter((file) => !isExcelFile(file.file_type)),
     [files],
   )
 
@@ -87,6 +105,7 @@ export default function JoinQuery() {
       const columns = getSchemaColumns(response.data, file.file_type)
       next.set(file.id, {
         fileId: file.id,
+        fileName: file.name,
         selectedColumns: new Set(columns),
         allColumns: columns,
       })
@@ -184,7 +203,30 @@ export default function JoinQuery() {
     }
   }
 
-  if (files.length === 0) {
+  const handleFileSearch = () => {
+    const nextQuery = fileQueryDraft.trim()
+    setFileOffset(0)
+    void fetchFiles(0, nextQuery)
+  }
+
+  const clearFileSearch = () => {
+    setFileQueryDraft('')
+    setFileOffset(0)
+    void fetchFiles(0, '')
+  }
+
+  const goToFilePage = (nextOffset: number) => {
+    const boundedOffset = Math.max(0, nextOffset)
+    setFileOffset(boundedOffset)
+    void fetchFiles(boundedOffset, fileQuery)
+  }
+
+  const visibleFileStart = fileTotal === 0 ? 0 : fileOffset + 1
+  const visibleFileEnd = Math.min(fileOffset + files.length, fileTotal)
+  const hasPreviousFilePage = fileOffset > 0
+  const hasNextFilePage = fileOffset + files.length < fileTotal
+
+  if (fileTotal === 0 && !fileQuery && !filesLoading) {
     return (
       <Card variant="outlined">
         <EmptyState
@@ -205,25 +247,46 @@ export default function JoinQuery() {
           trailing={
             <div className="flex gap-2 flex-wrap">
               <Chip
-                label={`선택 가능 ${excelFiles.length}개`}
+                label={`표시 ${visibleFileStart}-${visibleFileEnd} / ${fileTotal}개`}
                 tone="success"
                 icon="table_chart"
                 as="span"
               />
-              <Chip
-                label={`통합 제외 ${compareOnlyFiles.length}개`}
-                tone="neutral"
-                icon="do_not_disturb_on"
-                as="span"
-              />
+              {fileQuery && <Chip label={`검색어 · ${fileQuery}`} tone="secondary" icon="search" as="span" />}
             </div>
           }
         >
-          {excelFiles.length === 0 ? (
+          <div className="flex gap-2 items-start flex-wrap md:flex-nowrap mb-3">
+            <div className="flex-1 min-w-[240px]">
+              <TextField
+                leadingIcon="search"
+                placeholder="통합할 Excel 파일명 또는 경로 검색"
+                value={fileQueryDraft}
+                onChange={(event) => setFileQueryDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') handleFileSearch()
+                }}
+              />
+            </div>
+            <Button variant="filled" leadingIcon="search" onClick={handleFileSearch} disabled={filesLoading}>
+              검색
+            </Button>
+            {fileQuery && (
+              <Button variant="text" leadingIcon="close" onClick={clearFileSearch} disabled={filesLoading}>
+                검색 해제
+              </Button>
+            )}
+          </div>
+
+          {filesLoading ? (
+            <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+              <Spinner size={18} /> 불러오는 중…
+            </div>
+          ) : excelFiles.length === 0 ? (
             <EmptyState
               icon="warning"
-              title="등록된 Excel 파일이 없습니다"
-              description="설정 탭에서 대상 폴더를 추가하고 자동 등록을 실행해 주세요."
+              title="표시할 Excel 파일이 없습니다"
+              description="검색어를 바꾸거나 설정 탭에서 대상 폴더를 추가하고 자동 등록을 실행해 주세요."
               compact
             />
           ) : (
@@ -332,21 +395,28 @@ export default function JoinQuery() {
             </div>
           )}
 
-          {compareOnlyFiles.length > 0 && (
-            <div className="rounded-md bg-[var(--md-sys-color-surface-container-high)] p-4">
-              <p className="type-title-sm text-[var(--md-sys-color-on-surface)] mb-2">
-                통합 제외 파일
+          {fileTotal > JOIN_FILE_PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-3 flex-wrap pt-3">
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                {visibleFileStart}-{visibleFileEnd} / {fileTotal}개
               </p>
-              <div className="flex gap-2 flex-wrap">
-                {compareOnlyFiles.map((file) => (
-                  <Chip
-                    key={file.id}
-                    label={`${file.name} · ${getFileTypeLabel(file.file_type)}`}
-                    tone="neutral"
-                    as="span"
-                    icon="block"
-                  />
-                ))}
+              <div className="flex gap-2">
+                <Button
+                  variant="outlined"
+                  leadingIcon="chevron_left"
+                  onClick={() => goToFilePage(fileOffset - JOIN_FILE_PAGE_SIZE)}
+                  disabled={!hasPreviousFilePage || filesLoading}
+                >
+                  이전
+                </Button>
+                <Button
+                  variant="outlined"
+                  trailingIcon="chevron_right"
+                  onClick={() => goToFilePage(fileOffset + JOIN_FILE_PAGE_SIZE)}
+                  disabled={!hasNextFilePage || filesLoading}
+                >
+                  다음
+                </Button>
               </div>
             </div>
           )}
@@ -398,16 +468,14 @@ export default function JoinQuery() {
               기준 파일 선택
             </p>
             <div className="flex gap-2 flex-wrap">
-              {Array.from(selections.keys()).map((fileId) => {
-                const file = excelFiles.find((item) => item.id === fileId)
-                if (!file) return null
+              {Array.from(selections.values()).map((selection) => {
                 return (
                   <Radio
-                    key={file.id}
+                    key={selection.fileId}
                     name="baseFile"
-                    checked={baseFileId === file.id}
-                    onChange={() => setBaseFileId(file.id)}
-                    label={file.name}
+                    checked={baseFileId === selection.fileId}
+                    onChange={() => setBaseFileId(selection.fileId)}
+                    label={selection.fileName}
                   />
                 )
               })}

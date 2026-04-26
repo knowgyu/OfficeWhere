@@ -22,9 +22,14 @@ import {
   EmptyState,
   FileTypeBadge,
   Icon,
+  Spinner,
   StatCard,
+  TextField,
   useSnackbar,
 } from '../ui'
+
+const CHECK_FILE_PAGE_SIZE = 60
+const GROUP_PREVIEW_LIMIT = 20
 
 const MODE_GUIDE: Record<string, string> = {
   excel: 'Excel은 여러 파일을 동시에 비교합니다. 기준 컬럼이 같은 행에서 값이 다르거나 컬럼·항목이 누락된 경우를 찾습니다.',
@@ -61,29 +66,63 @@ const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
 export default function ConsistencyCheck() {
   const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
+  const [fileTotal, setFileTotal] = useState(0)
+  const [fileOffset, setFileOffset] = useState(0)
+  const [fileQuery, setFileQuery] = useState('')
+  const [fileQueryDraft, setFileQueryDraft] = useState('')
+  const [filesLoading, setFilesLoading] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [groups, setGroups] = useState<LibraryFileGroup[]>([])
+  const [groupTotal, setGroupTotal] = useState(0)
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    api.files
-      .list()
-      .then((response) => setFiles(response.data))
-      .catch(() => {
-        /* silent */
+  const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
+    setFilesLoading(true)
+    try {
+      const response = await api.files.page({
+        limit: CHECK_FILE_PAGE_SIZE,
+        offset: nextOffset,
+        query: nextQuery,
+        fileTypes: ['Excel', 'Word', 'PowerPoint'],
       })
+      setFiles(response.data.items)
+      setFileTotal(response.data.total)
+      setFileOffset(response.data.offset)
+      setFileQuery(nextQuery)
+    } catch {
+      /* silent */
+    } finally {
+      setFilesLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void fetchFiles(0, '')
     api.library
       .groups()
-      .then((response) => setGroups(response.data.groups))
+      .then((response) => {
+        setGroups(response.data.groups.slice(0, GROUP_PREVIEW_LIMIT))
+        setGroupTotal(response.data.groups.length)
+      })
       .catch(() => {
         /* silent */
       })
   }, [])
 
+  const knownFilesById = useMemo(() => {
+    const byId = new Map<number, FileInfo>()
+    files.forEach((file) => byId.set(file.id, file))
+    groups.forEach((group) => group.files.forEach((file) => byId.set(file.id, file)))
+    return byId
+  }, [files, groups])
+
   const selectedFiles = useMemo(
-    () => files.filter((file) => selectedIds.has(file.id)),
-    [files, selectedIds],
+    () =>
+      Array.from(selectedIds)
+        .map((id) => knownFilesById.get(id))
+        .filter((file): file is FileInfo => Boolean(file)),
+    [knownFilesById, selectedIds],
   )
   const selectedMode = selectedFiles[0]
     ? getCompareMode(undefined, selectedFiles[0].file_type)
@@ -166,7 +205,30 @@ export default function ConsistencyCheck() {
     setResult(null)
   }
 
-  if (files.length === 0) {
+  const handleFileSearch = () => {
+    const nextQuery = fileQueryDraft.trim()
+    setFileOffset(0)
+    void fetchFiles(0, nextQuery)
+  }
+
+  const clearFileSearch = () => {
+    setFileQueryDraft('')
+    setFileOffset(0)
+    void fetchFiles(0, '')
+  }
+
+  const goToFilePage = (nextOffset: number) => {
+    const boundedOffset = Math.max(0, nextOffset)
+    setFileOffset(boundedOffset)
+    void fetchFiles(boundedOffset, fileQuery)
+  }
+
+  const visibleFileStart = fileTotal === 0 ? 0 : fileOffset + 1
+  const visibleFileEnd = Math.min(fileOffset + files.length, fileTotal)
+  const hasPreviousFilePage = fileOffset > 0
+  const hasNextFilePage = fileOffset + files.length < fileTotal
+
+  if (fileTotal === 0 && groupTotal === 0 && !filesLoading) {
     return (
       <Card variant="outlined">
         <EmptyState
@@ -184,8 +246,15 @@ export default function ConsistencyCheck() {
         <Card variant="elevated">
           <CardSection
             title="자동 감지된 유사 파일 묶음"
-            description="파일명에서 날짜, 버전, 최종 같은 표현을 걷어내고 같은 문서로 보이는 파일을 묶어 보여줍니다."
-            trailing={<Chip label={`${groups.length}개 묶음`} tone="primary" icon="auto_awesome" as="span" />}
+            description="Phase 2 전까지는 첫 화면에 최대 20개만 보여줍니다. 전체 그룹 요약/상세 API는 다음 단계에서 bounded로 바꿉니다."
+            trailing={
+              <Chip
+                label={groupTotal > groups.length ? `표시 ${groups.length}/${groupTotal}개` : `${groups.length}개 묶음`}
+                tone="primary"
+                icon="auto_awesome"
+                as="span"
+              />
+            }
           >
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {groups.map((group) => (
@@ -240,6 +309,16 @@ export default function ConsistencyCheck() {
                 icon="task_alt"
                 as="span"
               />
+              <Chip
+                label={
+                  fileTotal === 0
+                    ? '표시 0개'
+                    : `표시 ${visibleFileStart}-${visibleFileEnd} / ${fileTotal}`
+                }
+                tone="neutral"
+                icon="view_list"
+                as="span"
+              />
               {selectedMode && (
                 <Chip
                   label={`모드 · ${selectedMode.toUpperCase()}`}
@@ -250,6 +329,40 @@ export default function ConsistencyCheck() {
             </div>
           }
         >
+          <div className="flex gap-2 items-start flex-wrap md:flex-nowrap mb-3">
+            <div className="flex-1 min-w-[240px]">
+              <TextField
+                leadingIcon="search"
+                placeholder="검사할 Office 파일명 또는 경로 검색"
+                value={fileQueryDraft}
+                onChange={(event) => setFileQueryDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') handleFileSearch()
+                }}
+              />
+            </div>
+            <Button variant="filled" leadingIcon="search" onClick={handleFileSearch} disabled={filesLoading}>
+              검색
+            </Button>
+            {fileQuery && (
+              <Button variant="text" leadingIcon="close" onClick={clearFileSearch} disabled={filesLoading}>
+                검색 해제
+              </Button>
+            )}
+          </div>
+
+          {filesLoading ? (
+            <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+              <Spinner size={18} /> 불러오는 중…
+            </div>
+          ) : files.length === 0 ? (
+            <EmptyState
+              icon="search_off"
+              title="표시할 Office 파일이 없습니다"
+              description="검색어를 바꾸거나 설정에서 Word/PPT/Excel 파일을 등록해 주세요."
+              compact
+            />
+          ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
             {files.map((file) => {
               const checked = selectedIds.has(file.id)
@@ -298,6 +411,33 @@ export default function ConsistencyCheck() {
               )
             })}
           </div>
+          )}
+
+          {fileTotal > CHECK_FILE_PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-3 flex-wrap pt-3">
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                {visibleFileStart}-{visibleFileEnd} / {fileTotal}개
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outlined"
+                  leadingIcon="chevron_left"
+                  onClick={() => goToFilePage(fileOffset - CHECK_FILE_PAGE_SIZE)}
+                  disabled={!hasPreviousFilePage || filesLoading}
+                >
+                  이전
+                </Button>
+                <Button
+                  variant="outlined"
+                  trailingIcon="chevron_right"
+                  onClick={() => goToFilePage(fileOffset + CHECK_FILE_PAGE_SIZE)}
+                  disabled={!hasNextFilePage || filesLoading}
+                >
+                  다음
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center gap-3 flex-wrap pt-2">
             <Button
