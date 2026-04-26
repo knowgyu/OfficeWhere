@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-from .excel_analysis import extract_excel_table, normalize_excel_parser_config
+from .excel_analysis import extract_excel_used_range
 from .excel_compare import _column_letter, _stringify_cell
 from .normalizer import normalize_key
 
@@ -162,25 +162,17 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         raise ValueError("표로 보기는 최소 2개 Excel 파일이 필요합니다.")
 
     latest_info = file_infos[0]
-    parser_config = normalize_excel_parser_config(
-        latest_info["path"],
-        latest_info.get("parser_config"),
-    )
-    latest_df = extract_excel_table(latest_info["path"], parser_config)
-    key_column = latest_info.get("key_column") or ""
-    if key_column and key_column not in latest_df.columns:
-        raise ValueError(f"최신 파일에 key 컬럼 '{key_column}'이(가) 없습니다.")
+    latest_df, parser_config = extract_excel_used_range(latest_info["path"])
+    key_column = ""
 
     columns = [str(column) for column in latest_df.columns.tolist()]
     column_indexes = {column: index for index, column in enumerate(columns)}
-    key_col_index = column_indexes.get(key_column, 0)
+    key_col_index = 0
     latest_rows = list(latest_df.iterrows())
-    key_to_row_index: Dict[str, int] = {}
-    if key_column:
-        for display_index, (_, row) in enumerate(latest_rows):
-            normalized = normalize_key(row[key_column])
-            if normalized and normalized not in key_to_row_index:
-                key_to_row_index[normalized] = display_index
+    key_to_row_index: Dict[str, int] = {
+        normalize_key(str(int(source_index) + 1)): display_index
+        for display_index, (source_index, _row) in enumerate(latest_rows)
+    }
 
     histories_by_position: Dict[Position, List[Dict[str, Any]]] = {}
     highlight_by_position: Dict[Position, str] = {}
@@ -226,7 +218,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         section_columns = [
             {
                 "index": column_index,
-                "letter": _column_letter(int(parser_config["start_col"]) + column_index),
+                "letter": _column_letter(column_index + 1),
                 "name": columns[column_index],
                 "is_key": column_index == key_col_index,
             }
@@ -236,7 +228,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         rows = []
         for row_index in range(row_start, row_end + 1):
             source_index, row = latest_rows[row_index]
-            row_number = int(parser_config["header_row"]) + 1 + int(source_index)
+            row_number = int(source_index) + 1
             cells = []
             for column_index in column_range:
                 column_name = columns[column_index]
@@ -246,7 +238,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                         "row_index": row_index,
                         "row_number": row_number,
                         "column_index": column_index,
-                        "column_letter": _column_letter(int(parser_config["start_col"]) + column_index),
+                        "column_letter": _column_letter(column_index + 1),
                         "column_name": column_name,
                         "value": _stringify_cell(row[column_name]),
                         "highlight": highlight_by_position.get(position),
@@ -257,7 +249,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                 {
                     "row_index": row_index,
                     "row_number": row_number,
-                    "key_value": _stringify_cell(row[key_column]) if key_column else "",
+                    "key_value": _stringify_cell(row[columns[key_col_index]]) if columns else "",
                     "cells": cells,
                 }
             )

@@ -85,6 +85,7 @@ class JoinResponse(BaseModel):
 
 class CheckRequest(BaseModel):
     file_ids: List[int]
+    comparison_scope: Literal["registered_table", "version_history"] = "registered_table"
 
 
 class ExcelDiffFocusHistory(BaseModel):

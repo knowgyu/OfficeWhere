@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -377,6 +378,58 @@ def extract_excel_table(path: str, parser_config: Optional[ParserConfig]) -> "pd
     ]
     data = data.fillna("")
     return data
+
+
+def extract_excel_used_range(path: str, sheet_name: Optional[str] = None) -> Tuple["pd.DataFrame", ParserConfig]:
+    """Return the actual visible sheet area as an Excel-coordinate table.
+
+    This intentionally ignores the saved parser_config used by Excel integration.
+    Version Management needs a read-only, source-coordinate view of the sheet so
+    stale registration-time table ranges do not block comparison.
+    """
+    import pandas as pd
+
+    sheet_names = list_sheet_names(path)
+    if not sheet_names:
+        raise ValueError("Excel 파일에 시트가 없습니다.")
+
+    selected_sheet = sheet_name if sheet_name in sheet_names else sheet_names[0]
+    raw = _read_excel_sheet(path, selected_sheet).copy()
+    if raw.empty:
+        return pd.DataFrame(), {
+            "sheet_name": selected_sheet,
+            "header_row": 0,
+            "start_col": 1,
+            "end_col": 1,
+            "end_row": 0,
+        }
+
+    raw = raw.fillna("")
+    non_empty = raw.map(_is_non_empty)
+    non_empty_rows = non_empty.any(axis=1)
+    non_empty_cols = non_empty.any(axis=0)
+
+    if not bool(non_empty_rows.any()) or not bool(non_empty_cols.any()):
+        return pd.DataFrame(), {
+            "sheet_name": selected_sheet,
+            "header_row": 0,
+            "start_col": 1,
+            "end_col": 1,
+            "end_row": 0,
+        }
+
+    last_row_position = int(non_empty_rows[non_empty_rows].index[-1])
+    last_col_position = int(non_empty_cols[non_empty_cols].index[-1])
+    used = raw.iloc[: last_row_position + 1, : last_col_position + 1].copy()
+    used.columns = [get_column_letter(index) for index in range(1, len(used.columns) + 1)]
+
+    return used, {
+        "sheet_name": selected_sheet,
+        "header_row": 0,
+        "start_col": 1,
+        "end_col": len(used.columns),
+        "end_row": len(used.index),
+    }
 
 
 def inspect_excel_file(path: str, parser_config: Optional[ParserConfig] = None) -> Dict[str, Any]:

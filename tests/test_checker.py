@@ -281,12 +281,62 @@ def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
         assert entry["row_count"] == 1
 
 
-def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
+def test_excel_version_history_ignores_stale_parser_config(tmp_path):
+    previous = tmp_path / "budget-v1.xlsx"
+    latest = tmp_path / "budget-v2.xlsx"
+    _write_dataframe_excel(previous, {"과제명": ["A"], "예산": ["100"]})
+    _write_dataframe_excel(latest, {"과제명": ["A"], "예산": ["999"]})
+    stale_parser_config = {
+        "sheet_name": "Sheet1",
+        "header_row": 1,
+        "start_col": 1,
+        "end_col": 99,
+        "end_row": 99,
+    }
+
+    result = run_consistency_check(
+        [
+            {
+                "id": 1,
+                "path": str(previous),
+                "name": "budget-v1.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": stale_parser_config,
+            },
+            {
+                "id": 2,
+                "path": str(latest),
+                "name": "budget-v2.xlsx",
+                "file_type": "Excel",
+                "key_column": "과제명",
+                "parser_config": stale_parser_config,
+            },
+        ],
+        comparison_scope="version_history",
+    )
+
+    issue = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
+    assert issue["key"] == "2"
+    assert issue["column"] == "B"
+    assert issue["message"] == "2행 B열 값이 변경되었습니다."
+    assert [entry["cell_refs"] for entry in issue["values"]] == [["B2"], ["B2"]]
+    assert [entry["values"] for entry in issue["values"]] == [["100"], ["999"]]
+
+
+def test_excel_diff_grid_returns_full_small_latest_sheet_without_parser_config(tmp_path):
     latest = tmp_path / "grid-latest.xlsx"
     previous = tmp_path / "grid-previous.xlsx"
     _write_dataframe_excel(latest, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
     _write_dataframe_excel(previous, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "200"]})
 
+    stale_parser_config = {
+        "sheet_name": "Sheet1",
+        "header_row": 1,
+        "start_col": 1,
+        "end_col": 99,
+        "end_row": 99,
+    }
     result = build_excel_diff_grid(
         [
             {
@@ -295,7 +345,7 @@ def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
                 "name": "grid-latest.xlsx",
                 "file_type": "Excel",
                 "key_column": "과제명",
-                "parser_config": _make_parser_config(columns=3, rows=2),
+                "parser_config": stale_parser_config,
             },
             {
                 "id": 1,
@@ -303,13 +353,13 @@ def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
                 "name": "grid-previous.xlsx",
                 "file_type": "Excel",
                 "key_column": "과제명",
-                "parser_config": _make_parser_config(columns=3, rows=2),
+                "parser_config": stale_parser_config,
             },
         ],
         [
             {
-                "key": "B",
-                "column": "예산",
+                "key": "3",
+                "column": "C",
                 "change_type": "changed",
                 "histories": [
                     {
@@ -328,11 +378,11 @@ def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
     )
 
     assert result["partial"] is False
-    assert result["row_count"] == 2
+    assert result["row_count"] == 3
     assert result["column_count"] == 3
     section = result["sections"][0]
     assert section["row_start"] == 1
-    assert section["row_end"] == 2
+    assert section["row_end"] == 3
     highlighted = [
         cell
         for row in section["rows"]
@@ -340,7 +390,9 @@ def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
         if cell["highlight"] == "changed"
     ]
     assert len(highlighted) == 1
-    assert highlighted[0]["column_name"] == "예산"
+    assert highlighted[0]["column_name"] == "C"
+    assert highlighted[0]["column_letter"] == "C"
+    assert highlighted[0]["row_number"] == 3
     assert highlighted[0]["value"] == "250"
     assert highlighted[0]["histories"][0]["before"] == "200"
 
@@ -374,15 +426,15 @@ def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
                 "parser_config": _make_parser_config(columns=120, rows=rows),
             },
         ],
-        [{"key": "K100", "column": "C100", "change_type": "added", "histories": []}],
+        [{"key": "101", "column": "CW", "change_type": "added", "histories": []}],
     )
 
     assert result["partial"] is True
     section = result["sections"][0]
     assert section["row_start"] > 1
-    assert section["row_end"] - section["row_start"] + 1 < rows
+    assert section["row_end"] - section["row_start"] + 1 < rows + 1
     assert section["col_start"] > 1
-    assert any(column["name"] == "ID" and column["is_key"] for column in section["columns"])
+    assert any(column["name"] == "A" and column["is_key"] for column in section["columns"])
     highlighted = [
         cell
         for row in section["rows"]
@@ -390,7 +442,7 @@ def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
         if cell["highlight"] == "added"
     ]
     assert highlighted
-    assert highlighted[0]["column_name"] == "C100"
+    assert highlighted[0]["column_name"] == "CW"
 
 
 def test_word_diff_reports_paragraph_and_table_changes(tmp_path):

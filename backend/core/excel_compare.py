@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     import pandas as pd
 
-from .excel_analysis import extract_excel_table, normalize_excel_parser_config
+from .excel_analysis import extract_excel_table, extract_excel_used_range, normalize_excel_parser_config
 from .normalizer import normalize_key, values_equal
 
 
 EXCEL_PREVIEW_ROW_LIMIT = 25
 EMPTY_VALUE_LABEL = "(빈 값)"
+EXCEL_VERSION_CELL_ISSUE_LIMIT = 500
 
 
 def _is_missing(value: Any) -> bool:
@@ -222,7 +223,113 @@ def _missing_column_message(
     return f'"{column}" 관련 내용이 일부 파일에만 있습니다.'
 
 
-def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _cell_value_at(rows: "pd.DataFrame", row_index: int, column_index: int) -> str:
+    if row_index >= len(rows.index) or column_index >= len(rows.columns):
+        return ""
+    return _stringify_cell(rows.iat[row_index, column_index])
+
+
+def _version_cell_issue_type(before: str, after: str) -> str:
+    before_empty = not before.strip()
+    after_empty = not after.strip()
+    if before_empty and not after_empty:
+        return "value_added"
+    if not before_empty and after_empty:
+        return "value_removed"
+    return "value_conflict"
+
+
+def _version_cell_message(row_number: int, column_letter: str, issue_type: str) -> str:
+    location = f"{row_number}행 {column_letter}열"
+    if issue_type == "value_added":
+        return f"{location} 값이 추가되었습니다."
+    if issue_type == "value_removed":
+        return f"{location} 값이 삭제되었습니다."
+    return f"{location} 값이 변경되었습니다."
+
+
+def _version_cell_entry(file_info: Dict[str, Any], row_number: int, column_letter: str, value: str) -> Dict[str, Any]:
+    return {
+        "file_id": file_info["id"],
+        "file_name": file_info["name"],
+        "columns": [column_letter],
+        "values": [value or EMPTY_VALUE_LABEL],
+        "row_numbers": [row_number],
+        "column_letters": [column_letter],
+        "cell_refs": [f"{column_letter}{row_number}"],
+        "row_count": 1,
+        "row_values": [[value]],
+    }
+
+
+def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if len(file_infos) != 2:
+        raise ValueError("Excel 버전 관리는 두 버전씩 순서대로 비교합니다.")
+
+    before_info, after_info = file_infos
+    before_df, _before_config = extract_excel_used_range(before_info["path"])
+    after_df, _after_config = extract_excel_used_range(after_info["path"])
+
+    row_count = max(len(before_df.index), len(after_df.index))
+    column_count = max(len(before_df.columns), len(after_df.columns))
+    issues: List[Dict[str, Any]] = []
+    changed_rows: set[int] = set()
+    truncated = False
+
+    for row_index in range(row_count):
+        for column_index in range(column_count):
+            column_letter = _column_letter(column_index + 1)
+            before = _cell_value_at(before_df, row_index, column_index)
+            after = _cell_value_at(after_df, row_index, column_index)
+            if values_equal(before, after):
+                continue
+
+            if len(issues) >= EXCEL_VERSION_CELL_ISSUE_LIMIT:
+                truncated = True
+                break
+
+            row_number = row_index + 1
+            issue_type = _version_cell_issue_type(before, after)
+            changed_rows.add(row_number)
+            issues.append(
+                {
+                    "issue_type": issue_type,
+                    "severity": "warning" if issue_type != "value_conflict" else "conflict",
+                    "key": str(row_number),
+                    "column": column_letter,
+                    "message": _version_cell_message(row_number, column_letter, issue_type),
+                    "values": [
+                        _version_cell_entry(before_info, row_number, column_letter, before),
+                        _version_cell_entry(after_info, row_number, column_letter, after),
+                    ],
+                }
+            )
+        if truncated:
+            break
+
+    if truncated:
+        issues.append(
+            {
+                "issue_type": "missing_key",
+                "severity": "warning",
+                "key": "truncated",
+                "column": "",
+                "message": f"변경점이 많아 처음 {EXCEL_VERSION_CELL_ISSUE_LIMIT}개 셀만 표시했습니다.",
+                "values": [],
+            }
+        )
+
+    return {
+        "total_keys": row_count,
+        "matched_keys": max(row_count - len(changed_rows), 0),
+        "issues": issues,
+    }
+
+
+def compare_excel_files(file_infos: List[Dict[str, Any]], comparison_scope: str = "registered_table") -> Dict[str, Any]:
+    if comparison_scope == "version_history":
+        return compare_excel_versions_by_cells(file_infos)
+
     prepared_files: List[Dict[str, Any]] = []
     all_keys: set[str] = set()
 

@@ -225,6 +225,7 @@ export interface JoinResponse {
 
 export interface CheckRequest {
   file_ids: number[]
+  comparison_scope?: 'registered_table' | 'version_history'
 }
 
 export type ExcelDiffHighlight = 'added' | 'removed' | 'changed'

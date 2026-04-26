@@ -111,27 +111,6 @@ const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
 const groupKindLabel = (kind: LibraryGroupKind) =>
   kind === 'exact_name_conflict' ? '같은 이름 문서' : '버전/날짜 문서'
 
-const sanitizeGroupReason = (reason: string) =>
-  reason
-    .replace(/fingerprint/gi, '추출 내용')
-    .replace(/후보입니다\./g, '문서로 보입니다.')
-
-const contentStatusHint = (group: LibraryGroupSummary) => {
-  if (group.content_status === 'same_content') {
-    return `${group.fingerprint_coverage}개 문서에서 추출한 내용이 같아 보입니다.`
-  }
-  if (group.content_status === 'content_differs') {
-    return `${group.fingerprint_unique_count}가지 내용이 있어 변경 가능성이 있습니다.`
-  }
-  if (group.content_status === 'partial') {
-    return `${group.file_count}개 중 ${group.fingerprint_coverage}개 문서만 내용 확인이 끝났습니다.`
-  }
-  if (group.content_status === 'not_enough_content') {
-    return '추출할 본문이 부족해 내용 차이를 단정하지 않습니다.'
-  }
-  return '재스캔 후 내용 확인 정확도가 올라갑니다.'
-}
-
 const excelChangeTypeFromIssue = (
   issue: ExcelCheckIssue,
   beforeValue: string,
@@ -275,6 +254,28 @@ const formatDate = (value?: string | number | null) => {
 const pathTail = (path: string) => {
   const parts = path.split(/[\\/]+/).filter(Boolean)
   return parts.slice(-3).join(' / ') || path
+}
+
+const versionTokensFromName = (name: string) => {
+  const tokens = new Set<string>()
+  const withoutExtension = name.replace(/\.[^.]+$/, '')
+  for (const match of withoutExtension.matchAll(/(?:^|[^A-Za-z0-9가-힣])(?:v|ver|version|rev)\s*\.?\s*(\d+(?:\.\d+)*)(?=$|[^A-Za-z0-9가-힣])/gi)) {
+    tokens.add(`v${match[1]}`)
+  }
+  for (const match of withoutExtension.matchAll(/(?:^|[^0-9])(\d{6}|\d{8})(?=$|[^0-9])/g)) {
+    tokens.add(match[1])
+  }
+  for (const match of withoutExtension.matchAll(/(?:^|[^A-Za-z0-9가-힣])(초안|draft|final|최종|수정본)(?=$|[^A-Za-z0-9가-힣])/gi)) {
+    tokens.add(match[1])
+  }
+  return Array.from(tokens)
+}
+
+const fileVersionMarkers = (file: FileInfo) => {
+  const tokens = versionTokensFromName(file.name)
+  if (tokens.length > 0) return tokens
+  const date = file.file_mtime ?? file.created_at
+  return date ? [formatDate(date).slice(0, 12).trim()] : []
 }
 
 const versionGroupAnchorId = (groupId: string) =>
@@ -525,6 +526,7 @@ export default function ConsistencyCheck() {
       try {
         const response = await api.check.run({
           file_ids: [transition.fromFile.id, transition.toFile.id],
+          comparison_scope: 'version_history',
         })
         const normalized = normalizeCheckResponse(response.data)
         setHistoryState((current) =>
@@ -718,7 +720,6 @@ export default function ConsistencyCheck() {
       <Card variant="elevated">
         <CardSection
           title="자동 감지된 버전 관리"
-          description="같은 이름이거나 v1.0, v1.1, 260426처럼 버전/날짜가 붙은 Office 문서를 묶어 보여줍니다. 버전 관리를 열면 그 묶음의 변경점만 계산합니다."
           trailing={
             <Chip
               label={
@@ -765,7 +766,7 @@ export default function ConsistencyCheck() {
               compact
             />
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <div className="space-y-3">
               {groups.map((group) => (
                 <GroupCard
                   key={group.id}
@@ -999,6 +1000,7 @@ function GroupCard({
 }) {
   const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
+  const summaryTokens = group.tokens_summary.slice(0, 8)
 
   return (
     <div
@@ -1018,28 +1020,9 @@ function GroupCard({
           <Badge tone={contentMeta.tone}>{contentMeta.label}</Badge>
         </div>
 
-        <div className="space-y-1">
-          {[group.latest_file, group.previous_file].filter(Boolean).map((file, index) => (
-            <p
-              key={(file as FileInfo).id}
-              className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate"
-              title={(file as FileInfo).path}
-            >
-              {index === 0 ? '최신 후보 · ' : '이전 후보 · '}
-              {(file as FileInfo).name}
-            </p>
-          ))}
-        </div>
-
-        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          {sanitizeGroupReason(group.reason)}
-        </p>
-        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          내용 확인 · {contentStatusHint(group)}
-        </p>
-        {group.tokens_summary.length > 0 && (
+        {summaryTokens.length > 0 && (
           <div className="flex gap-1.5 flex-wrap">
-            {group.tokens_summary.slice(0, 6).map((token) => (
+            {summaryTokens.map((token) => (
               <Chip key={token} label={token} tone="secondary" as="span" />
             ))}
           </div>
@@ -1093,9 +1076,6 @@ function GroupTimeline({
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">버전 목록</p>
-          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            파일명 토큰, 등록/수정 시간 기준으로 최신 후보부터 정렬했습니다.
-          </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
@@ -1146,8 +1126,10 @@ function GroupTimeline({
                 <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
                   {file.name}
                 </p>
-                {index === 0 && <Badge tone="success">최신 후보</Badge>}
                 <FileTypeBadge fileType={file.file_type} />
+                {fileVersionMarkers(file).map((token) => (
+                  <Chip key={`${file.id}-${token}`} label={token} tone="secondary" as="span" />
+                ))}
               </div>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                 수정/등록 · {formatDate(file.file_mtime ?? file.created_at)}

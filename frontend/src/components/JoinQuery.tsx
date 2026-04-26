@@ -240,6 +240,19 @@ export default function JoinQuery() {
 
   return (
     <div className="space-y-6">
+      <Card variant="outlined" className="border-amber-300 bg-amber-50/70">
+        <div className="flex items-start gap-3 p-4">
+          <Icon name="warning" size={22} className="mt-0.5 text-amber-700" />
+          <div className="space-y-1">
+            <p className="type-title-sm text-amber-950">Excel 통합은 아직 개발 진행 중입니다.</p>
+            <p className="type-body-sm text-amber-900">
+              현재는 같은 기준 컬럼을 가진 단순한 양식 위주로 확인해 주세요. 중요한 업무 파일은 결과를 검토한 뒤 사용하시고,
+              원본 Excel 파일은 앱에서 읽기만 하며 수정하지 않습니다.
+            </p>
+          </div>
+        </div>
+      </Card>
+
       <Card variant="elevated">
         <CardSection
           title="통합할 Excel 파일 선택"

@@ -37,7 +37,7 @@ def consistency_check(req: CheckRequest):
         )
 
     try:
-        result = run_consistency_check(file_infos)
+        result = run_consistency_check(file_infos, comparison_scope=req.comparison_scope)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

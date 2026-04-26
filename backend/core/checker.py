@@ -7,7 +7,7 @@ from .ppt_compare import compare_ppt_files
 from .word_compare import compare_word_files
 
 
-def run_consistency_check(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
+def run_consistency_check(file_infos: List[Dict[str, Any]], comparison_scope: str = "registered_table") -> Dict[str, Any]:
     if len(file_infos) < 2:
         raise ValueError("정합성 검사는 최소 2개 파일이 필요합니다.")
 
@@ -19,7 +19,7 @@ def run_consistency_check(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
     if file_type == "Excel":
         return {
             "mode": "excel",
-            "excel": compare_excel_files(file_infos),
+            "excel": compare_excel_files(file_infos, comparison_scope=comparison_scope),
             "word": None,
             "ppt": None,
         }

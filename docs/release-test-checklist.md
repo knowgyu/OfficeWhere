@@ -32,6 +32,10 @@ Use this checklist before publishing a release tag.
 - [ ] Version Management keeps the selected group visible after opening another group.
 - [ ] Excel added/removed cell content appears under 추가/삭제된 내용, and missing rows/columns show actual content previews rather than only row/column labels.
 - [ ] Excel version groups show a `표로 보기` button that opens a large modal grid.
+- [ ] Excel version history does not show parser_config range errors when a saved table range is stale.
+- [ ] Version Management auto-detected groups remain one column on a wide screen.
+- [ ] Version group cards do not show `최신 후보` / `이전 후보` labels.
+- [ ] Excel Integration shows a visible development-warning notice at the top.
 - [ ] The Excel grid highlights added/removed/changed cells in green/red/yellow and cell click shows detailed history.
 - [ ] Large Excel grids show partial-range guidance and keep horizontal scrolling, including Shift + mouse wheel.
 - [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.
