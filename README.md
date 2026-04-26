@@ -24,12 +24,12 @@ OfficeWhere는 회사 폴더, 연구 자료, 수업 과제, 프로젝트 산출�
 
 ## 지원 파일
 
-| 형식 | 검색 | 버전 관리 | Excel 통합 |
-| --- | --- | --- | --- |
-| `.xlsx`, `.xls` | 파일명 + 셀 내용 | 셀 값 추가/삭제/변경 | 개발 진행 중 |
-| `.docx` | 파일명 + 문단 + 표 | 문단·표 변경 | 미지원 |
-| `.pptx` | 파일명 + 슬라이드 + 표 | 슬라이드·항목 변경 | 미지원 |
-| `.md`, `.txt` | 파일명 + 단락/줄 | 미지원 | 미지원 |
+| 형식            | 검색                   | 버전 관리            | Excel 통합   |
+| --------------- | ---------------------- | -------------------- | ------------ |
+| `.xlsx`, `.xls` | 파일명 + 셀 내용       | 셀 값 추가/삭제/변경 | 개발 진행 중 |
+| `.docx`         | 파일명 + 문단 + 표     | 문단·표 변경         | 미지원       |
+| `.pptx`         | 파일명 + 슬라이드 + 표 | 슬라이드·항목 변경   | 미지원       |
+| `.md`, `.txt`   | 파일명 + 단락/줄       | 미지원               | 미지원       |
 
 ## 다운로드해서 사용하기
 
@@ -121,15 +121,18 @@ chmod +x setup.sh build.sh
 결과:
 
 - frontend / Electron main / backend 패키징 검증
-- Windows 배포 zip은 생성하지 않음
+- macOS에서 실행 시 `dist/electron/` 에 `.dmg` 와 `.zip` 생성 (arm64 + x64)
+  - 산출물 예: `dist/electron/officewhere-0.2.0-mac-arm64.dmg`
+- Windows zip은 build.bat 또는 GitHub Actions에서 별도 생성
 
-현재 GitHub Release 자동 빌드는 Windows zip만 생성합니다.
-macOS 데스크톱 앱 배포본은 아직 정식 검증 대상이 아니며, 별도 작업이 필요합니다.
+처음 macOS 빌드를 실행할 때는 ad-hoc 서명만 적용되므로 Gatekeeper가 경고를 띄울 수 있습니다.
+첫 실행은 우클릭 → "열기" 로 진행하거나 다음 명령으로 quarantine 속성을 제거하세요.
 
-- Electron mac target 설정
-- macOS에서 backend 실행 파일 빌드
-- 앱 서명 및 공증 설정
-- macOS 파일 선택/앱 데이터 경로 검증
+```bash
+xattr -dr com.apple.quarantine /Applications/OfficeWhere.app
+```
+
+정식 코드 사이닝/공증(notarization) 은 아직 적용되어 있지 않습니다.
 
 ## 데이터 저장 위치
 

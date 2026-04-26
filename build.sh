@@ -25,4 +25,17 @@ venv/bin/python -m PyInstaller office_data_joiner_backend.spec --clean -y
 
 echo ""
 echo "[완료] dist/officewhere-backend/ 폴더에 backend 실행파일이 생성되었습니다."
-echo "Windows Electron zip은 Windows에서 build.bat 또는 GitHub Actions로 생성하세요."
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo ""
+    echo "[officewhere] macOS Electron 패키징 중..."
+    cd frontend
+    npm run package:mac
+    cd ..
+    echo ""
+    echo "[완료] dist/electron/ 폴더에 .dmg / .zip 이 생성되었습니다."
+    echo "처음 실행 시 Gatekeeper 경고가 뜨면 우클릭 → 열기 또는"
+    echo "  xattr -dr com.apple.quarantine /Applications/OfficeWhere.app"
+else
+    echo "Windows Electron zip은 Windows에서 build.bat 또는 GitHub Actions로 생성하세요."
+fi
