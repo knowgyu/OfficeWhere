@@ -33,9 +33,9 @@ OfficeWhere는 회사 폴더, 연구 자료, 수업 과제, 프로젝트 산출�
 
 ## 다운로드해서 사용하기
 
-- [Releases](../../releases) 페이지에서 최신 Windows zip 다운로드
-- 파일명 예시: `officewhere-vX.Y.Z-windows-x64.zip`
-- 압축 해제 후 `OfficeWhere.exe` 실행
+- [Releases](../../releases) 페이지에서 최신 배포 파일 다운로드
+- Windows: `officewhere-vX.Y.Z-windows-x64.zip` 압축 해제 후 `OfficeWhere.exe` 실행
+- macOS Apple Silicon: `officewhere-vX.Y.Z-mac-arm64.dmg` 또는 `.zip` 다운로드
 - 별도 설치 과정 없음
 
 ## 웹 브라우저에서 빠르게 테스트하기
@@ -121,8 +121,8 @@ chmod +x setup.sh build.sh
 결과:
 
 - frontend / Electron main / backend 패키징 검증
-- macOS에서 실행 시 `dist/electron/` 에 `.dmg` 와 `.zip` 생성 (arm64 + x64)
-  - 산출물 예: `dist/electron/officewhere-0.2.0-mac-arm64.dmg`
+- macOS에서 실행 시 `dist/electron/` 에 Apple Silicon용 `.dmg` 와 `.zip` 생성
+  - 산출물 예: `dist/electron/officewhere-<앱버전>-mac-arm64.dmg`
 - Windows zip은 build.bat 또는 GitHub Actions에서 별도 생성
 
 처음 macOS 빌드를 실행할 때는 ad-hoc 서명만 적용되므로 Gatekeeper가 경고를 띄울 수 있습니다.

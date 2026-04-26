@@ -1,4 +1,4 @@
-name: Build Windows Release
+name: Build Desktop Release
 
 on:
   push:
@@ -24,7 +24,66 @@ permissions:
   contents: write
 
 jobs:
+  release-metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      release_name: ${{ steps.meta.outputs.release_name }}
+      draft: ${{ steps.meta.outputs.draft }}
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        env:
+          INPUT_DRAFT: ${{ github.event.inputs.draft }}
+          INPUT_RELEASE_NAME: ${{ github.event.inputs.release_name }}
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          dispatch_tag="${INPUT_RELEASE_TAG:-}"
+
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            tag="$REF_NAME"
+          elif [[ -n "$dispatch_tag" ]]; then
+            tag="$(echo "$dispatch_tag" | xargs)"
+          else
+            tag=""
+          fi
+
+          if [[ -n "$tag" ]]; then
+            version="$tag"
+          else
+            version="manual-${GITHUB_SHA:0:7}"
+          fi
+
+          release_name_input="${INPUT_RELEASE_NAME:-}"
+          if [[ -n "$release_name_input" ]]; then
+            release_name="$(echo "$release_name_input" | xargs)"
+          elif [[ -n "$tag" ]]; then
+            release_name="OfficeWhere $tag"
+          else
+            release_name="OfficeWhere $version"
+          fi
+
+          draft="${INPUT_DRAFT:-false}"
+          if [[ "$draft" != "true" ]]; then
+            draft="false"
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "release_name=$release_name"
+            echo "draft=$draft"
+          } >> "$GITHUB_OUTPUT"
+
   windows-release:
+    name: Windows x64
+    needs: release-metadata
     runs-on: windows-latest
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -48,41 +107,6 @@ jobs:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: "frontend/package-lock.json"
-
-      - name: Resolve release metadata
-        id: meta
-        shell: pwsh
-        run: |
-          $dispatchTag = "${{ github.event.inputs.release_tag }}"
-          $refType = "${{ github.ref_type }}"
-          $refName = "${{ github.ref_name }}"
-
-          if ($refType -eq "tag") {
-            $tag = $refName
-          } elseif ($dispatchTag) {
-            $tag = $dispatchTag.Trim()
-          } else {
-            $tag = ""
-          }
-
-          if ($tag) {
-            $version = $tag
-          } else {
-            $version = "manual-$($env:GITHUB_SHA.Substring(0, 7))"
-          }
-
-          $releaseNameInput = "${{ github.event.inputs.release_name }}"
-          if ($releaseNameInput) {
-            $releaseName = $releaseNameInput.Trim()
-          } elseif ($tag) {
-            $releaseName = "OfficeWhere $tag"
-          } else {
-            $releaseName = "OfficeWhere $version"
-          }
-
-          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "release_name=$releaseName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install Python dependencies
         shell: pwsh
@@ -122,11 +146,11 @@ jobs:
         shell: pwsh
         run: npm run package:win
 
-      - name: Package release bundle
+      - name: Package Windows release bundle
         id: bundle
         shell: pwsh
         run: |
-          $bundleName = "officewhere-${{ steps.meta.outputs.version }}-windows-x64"
+          $bundleName = "officewhere-${{ needs.release-metadata.outputs.version }}-windows-x64"
 
           if (Test-Path "$bundleName.zip") {
             Remove-Item "$bundleName.zip" -Force
@@ -152,7 +176,7 @@ jobs:
           "zip_path=$bundleName.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "sha_path=$bundleName.sha256.txt" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Upload workflow artifact
+      - name: Upload Windows workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.bundle.outputs.bundle_name }}
@@ -161,38 +185,146 @@ jobs:
             ${{ steps.bundle.outputs.sha_path }}
           if-no-files-found: error
 
-      - name: Publish GitHub Release assets
-        if: steps.meta.outputs.tag != ''
+  macos-arm64-release:
+    name: macOS arm64
+    needs: release-metadata
+    runs-on: macos-latest
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUTF8: "1"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "frontend/package-lock.json"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Build Electron main process
+        working-directory: frontend
+        run: npm run build:electron
+
+      - name: Run backend tests
+        run: pytest -q
+
+      - name: Run demo checks
+        run: python scripts/run_demo_checks.py
+
+      - name: Build backend executable
+        run: python -m PyInstaller office_data_joiner_backend.spec --clean -y
+
+      - name: Build Electron macOS arm64 bundle
+        working-directory: frontend
+        run: npm run package:mac
+
+      - name: Package macOS release bundle
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_name="officewhere-${{ needs.release-metadata.outputs.version }}-mac-arm64"
+          rm -f "$bundle_name.dmg" "$bundle_name.zip" "$bundle_name.sha256.txt"
+
+          source_dmg="$(find dist/electron -maxdepth 1 -name 'officewhere-*-mac-arm64.dmg' -print | sort | tail -n 1)"
+          source_zip="$(find dist/electron -maxdepth 1 -name 'officewhere-*-mac-arm64.zip' -print | sort | tail -n 1)"
+
+          if [[ -z "$source_dmg" || -z "$source_zip" ]]; then
+            echo "macOS artifacts were not created." >&2
+            find dist/electron -maxdepth 1 -type f -print >&2 || true
+            exit 1
+          fi
+
+          cp "$source_dmg" "$bundle_name.dmg"
+          cp "$source_zip" "$bundle_name.zip"
+          shasum -a 256 "$bundle_name.dmg" "$bundle_name.zip" > "$bundle_name.sha256.txt"
+
+          {
+            echo "bundle_name=$bundle_name"
+            echo "dmg_path=$bundle_name.dmg"
+            echo "zip_path=$bundle_name.zip"
+            echo "sha_path=$bundle_name.sha256.txt"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bundle.outputs.bundle_name }}
+          path: |
+            ${{ steps.bundle.outputs.dmg_path }}
+            ${{ steps.bundle.outputs.zip_path }}
+            ${{ steps.bundle.outputs.sha_path }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release assets
+    if: needs.release-metadata.outputs.tag != ''
+    needs:
+      - release-metadata
+      - windows-release
+      - macos-arm64-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: officewhere-*
+          merge-multiple: true
+
+      - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_DRAFT: ${{ github.event.inputs.draft }}
-          RELEASE_NAME: ${{ steps.meta.outputs.release_name }}
-          RELEASE_SHA: ${{ steps.bundle.outputs.sha_path }}
-          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
-          RELEASE_ZIP: ${{ steps.bundle.outputs.zip_path }}
-        shell: pwsh
+          RELEASE_DRAFT: ${{ needs.release-metadata.outputs.draft }}
+          RELEASE_NAME: ${{ needs.release-metadata.outputs.release_name }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.tag }}
+        shell: bash
         run: |
-          $tag = $env:RELEASE_TAG
-          $releaseName = $env:RELEASE_NAME
-          $zipPath = $env:RELEASE_ZIP
-          $shaPath = $env:RELEASE_SHA
-          $draft = $env:RELEASE_DRAFT -eq "true"
+          set -euo pipefail
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f -print | sort)
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No release assets were downloaded." >&2
+            exit 1
+          fi
 
-          gh release view $tag 1>$null 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zipPath $shaPath --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
             exit 0
-          }
+          fi
 
-          $args = @(
-            "release", "create", $tag, $zipPath, $shaPath,
-            "--title", $releaseName,
-            "--target", $env:GITHUB_SHA,
-            "--notes", "Windows build generated by GitHub Actions."
+          args=(
+            release create "$RELEASE_TAG" "${assets[@]}"
+            --title "$RELEASE_NAME"
+            --target "$GITHUB_SHA"
+            --notes "Desktop builds generated by GitHub Actions."
           )
 
-          if ($draft) {
-            $args += "--draft"
-          }
+          if [[ "$RELEASE_DRAFT" == "true" ]]; then
+            args+=(--draft)
+          fi
 
-          gh @args
+          gh "${args[@]}"
