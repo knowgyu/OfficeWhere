@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Set
+from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -32,8 +32,7 @@ def _file_ref(file_info: Dict[str, Any]) -> Dict[str, Any]:
 
 def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
     prepared_files: List[Dict[str, Any]] = []
-    all_columns: Set[str] = set()
-    all_keys: Set[str] = set()
+    all_keys: set[str] = set()
 
     for file_info in file_infos:
         df = extract_excel_table(file_info["path"], file_info.get("parser_config"))
@@ -54,7 +53,6 @@ def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
             all_keys.add(key)
 
         columns = [column for column in df.columns if column != key_column]
-        all_columns.update(columns)
         prepared_files.append(
             {
                 "info": file_info,
@@ -65,19 +63,6 @@ def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
         )
 
     issues: List[Dict[str, Any]] = []
-
-    for column in sorted(all_columns):
-        present_in = [_file_ref(item["info"]) for item in prepared_files if column in item["columns"]]
-        missing_in = [_file_ref(item["info"]) for item in prepared_files if column not in item["columns"]]
-        if missing_in:
-            issues.append(
-                {
-                    "issue_type": "missing_column",
-                    "column": column,
-                    "present_in": present_in,
-                    "missing_in": missing_in,
-                }
-            )
 
     matched_keys = 0
     for key in sorted(all_keys):

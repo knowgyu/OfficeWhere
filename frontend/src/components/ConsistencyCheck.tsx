@@ -38,7 +38,7 @@ type GroupFilter = 'all' | LibraryGroupKind
 type ContentStatus = LibraryGroupSummary['content_status']
 
 const MODE_GUIDE: Record<string, string> = {
-  excel: 'Excel은 여러 파일을 동시에 비교합니다. 기준 컬럼이 같은 행에서 값이 다르거나 컬럼·항목이 누락된 경우를 찾습니다.',
+  excel: 'Excel은 여러 파일을 동시에 비교합니다. 기준 컬럼이 같은 행에서 값이 다르거나 일부 파일에 항목이 없는 경우를 찾습니다.',
   word: 'Word는 2개 파일만 비교합니다. 추가·삭제·수정된 문단과 표 행을 카드 형태로 보여줍니다.',
   ppt: 'PPT는 2개 파일만 비교합니다. 슬라이드 추가/삭제와 슬라이드 내 항목 변경을 보여줍니다.',
   none: '자동 감지된 묶음에서 바로 비교하거나, 필요할 때만 수동 선택을 열어 직접 고를 수 있습니다.',
@@ -804,11 +804,10 @@ function GroupTimeline({
 function ExcelCheckResult({ result }: { result: Extract<CheckResponse, { mode: 'excel' }> }) {
   const valueConflicts = result.issues.filter((issue) => issue.type === 'value_conflict')
   const missingKeys = result.issues.filter((issue) => issue.type === 'missing_key')
-  const missingColumns = result.issues.filter((issue) => issue.type === 'missing_column')
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <StatCard label="전체 항목" value={result.totalKeys} icon="tag" />
         <StatCard label="공통 항목" value={result.matchedKeys} icon="check_circle" tone="success" />
         <StatCard
@@ -823,12 +822,6 @@ function ExcelCheckResult({ result }: { result: Extract<CheckResponse, { mode: '
           icon="pending"
           tone={missingKeys.length > 0 ? 'warning' : 'neutral'}
         />
-        <StatCard
-          label="컬럼 누락"
-          value={missingColumns.length}
-          icon="view_column_off"
-          tone={missingColumns.length > 0 ? 'warning' : 'neutral'}
-        />
       </div>
 
       <ExcelIssueSection
@@ -842,12 +835,6 @@ function ExcelCheckResult({ result }: { result: Extract<CheckResponse, { mode: '
         icon="pending"
         description="일부 파일에 같은 기준 컬럼 값을 가진 행이 없습니다."
         issues={missingKeys}
-      />
-      <ExcelIssueSection
-        title="컬럼 누락"
-        icon="view_column_off"
-        description="일부 파일에 해당 컬럼이 아예 없습니다."
-        issues={missingColumns}
       />
     </div>
   )

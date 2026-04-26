@@ -234,7 +234,7 @@ export interface ExcelConflictEntry {
   rowCount: number
 }
 
-export type ExcelIssueType = 'value_conflict' | 'missing_key' | 'missing_column'
+export type ExcelIssueType = 'value_conflict' | 'missing_key'
 
 export interface ExcelCheckIssue {
   id: string
@@ -891,16 +891,14 @@ function normalizeExcelFileRefs(value: unknown, column: string, fallbackValue: s
 function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
   if (!Array.isArray(value)) return []
 
-  return value.map((entry, index) => {
+  return value.flatMap((entry, index) => {
     const record = isRecord(entry) ? entry : {}
     const rawType = toStringValue(record.type ?? record.issue_type).toLowerCase()
+    if (rawType === 'missing_column' || rawType === 'missing column') {
+      return []
+    }
     const type: ExcelIssueType =
-      rawType === 'missing_key' || rawType === 'missing key'
-        ? 'missing_key'
-        : rawType === 'missing_column'
-          || rawType === 'missing column'
-          ? 'missing_column'
-          : 'value_conflict'
+      rawType === 'missing_key' || rawType === 'missing key' ? 'missing_key' : 'value_conflict'
     const columnGroup = toStringValue(record.column_group ?? record.column ?? record.column_name)
     const conflicts = [
       ...normalizeExcelConflictEntries(record.conflicts ?? record.entries ?? record.values),
@@ -920,9 +918,7 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
         toStringValue(record.message) ||
         (type === 'missing_key'
           ? '일부 파일에 기준 항목이 없습니다.'
-          : type === 'missing_column'
-            ? '일부 파일에 컬럼이 없습니다.'
-            : '같은 기준 항목에서 값 차이가 발견되었습니다.'),
+          : '같은 기준 항목에서 값 차이가 발견되었습니다.'),
       conflicts,
     }
   })

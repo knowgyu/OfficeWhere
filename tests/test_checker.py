@@ -99,7 +99,7 @@ def test_excel_inspect_detects_table_not_at_top_left(tmp_path):
     }
 
 
-def test_excel_consistency_reports_missing_column_missing_key_and_value_conflict(tmp_path):
+def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
     file_a = tmp_path / "a.xlsx"
     file_b = tmp_path / "b.xlsx"
     _write_dataframe_excel(file_a, {"과제명": ["A", "B"], "예산": ["100", "200"], "담당자": ["Kim", "Lee"]})
@@ -128,11 +128,8 @@ def test_excel_consistency_reports_missing_column_missing_key_and_value_conflict
 
     assert result["mode"] == "excel"
     issue_types = {issue["issue_type"] for issue in result["excel"]["issues"]}
-    assert {"missing_column", "missing_key", "value_conflict"} <= issue_types
-
-    missing_column = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "missing_column")
-    assert missing_column["column"] == "담당자"
-    assert [item["file_name"] for item in missing_column["missing_in"]] == ["b.xlsx"]
+    assert "missing_column" not in issue_types
+    assert {"missing_key", "value_conflict"} <= issue_types
 
     conflict = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
     assert conflict["key"] == "a"
