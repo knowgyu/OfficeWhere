@@ -181,6 +181,23 @@ def test_search_api_filename_scope_excludes_content_only_matches(tmp_path):
     assert response.results[0].location == "파일명"
 
 
+def test_search_api_content_scope_excludes_filename_only_matches(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    filename_id = register_file(str(tmp_path / "bodyonly.docx"), "bodyonly.docx", "Word", "", 0)
+    content_id = register_file(str(tmp_path / "note.docx"), "note.docx", "Word", "", 0)
+    save_file_chunks(filename_id, [{"location": "본문", "content": "다른 내용"}])
+    save_file_chunks(content_id, [{"location": "본문", "content": "bodyonly 본문"}])
+
+    response = search_files(SearchRequest(query="bodyonly", search_scope="content"))
+
+    assert response.total == 1
+    assert response.results[0].file_id == content_id
+    assert response.results[0].location == "본문"
+
+
 def test_search_api_filename_scope_respects_file_type_filter(tmp_path):
     from backend.api.search import search_files
     from backend.models.schemas import SearchRequest
@@ -193,3 +210,20 @@ def test_search_api_filename_scope_respects_file_type_filter(tmp_path):
     assert response.total == 1
     assert response.results[0].file_id == text_id
     assert response.results[0].file_type == "Text"
+
+
+def test_search_api_content_scope_supports_excel_filter(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    excel_id = register_file(str(tmp_path / "sheet.xlsx"), "sheet.xlsx", "Excel", "", 0)
+    word_id = register_file(str(tmp_path / "sheet.docx"), "sheet.docx", "Word", "", 0)
+    save_file_chunks(excel_id, [{"location": "Sheet1 행 1", "content": "엑셀검색 키워드"}])
+    save_file_chunks(word_id, [{"location": "본문", "content": "엑셀검색 키워드"}])
+
+    response = search_files(SearchRequest(query="엑셀검색", file_types=["xlsx"], search_scope="content"))
+
+    assert response.total == 1
+    assert response.results[0].file_id == excel_id
+    assert response.results[0].file_type == "Excel"

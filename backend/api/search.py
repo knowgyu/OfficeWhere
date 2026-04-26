@@ -69,11 +69,14 @@ def _content_matches(query: str, limit: int, file_types: list[str]) -> list[dict
 @router.post("", response_model=SearchResponse)
 def search_files(req: SearchRequest):
     file_types = normalize_file_type_filters(req.file_types)
-    name_matches = _filename_matches(req.query, file_types)
 
     if req.search_scope == "filename":
+        name_matches = _filename_matches(req.query, file_types)
         results = name_matches[: req.limit]
+    elif req.search_scope == "content":
+        results = _content_matches(req.query, limit=req.limit, file_types=file_types)[: req.limit]
     else:
+        name_matches = _filename_matches(req.query, file_types)
         seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
         content_results = []
         for item in _content_matches(req.query, limit=req.limit, file_types=file_types):

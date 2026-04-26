@@ -321,7 +321,7 @@ export interface SearchResult {
   snippet: string
 }
 
-export type SearchScope = 'filename_content' | 'filename'
+export type SearchScope = 'filename_content' | 'filename' | 'content'
 
 export interface SearchRequest {
   query: string

@@ -19,11 +19,45 @@ import {
 
 
 const FILE_TYPE_FILTERS = [
+  { label: 'Excel / XLSX·XLS', value: 'xlsx', icon: 'table_chart' },
   { label: 'Word / DOCX', value: 'docx', icon: 'article' },
   { label: 'PPT / PPTX', value: 'pptx', icon: 'slideshow' },
   { label: 'Markdown / MD', value: 'md', icon: 'docs' },
   { label: 'Text / TXT', value: 'txt', icon: 'description' },
 ]
+
+const SEARCH_SCOPE_STATUS: Record<SearchScope, string> = {
+  filename_content: '파일명과 본문을 함께 검색',
+  filename: '파일명만 검색',
+  content: '본문만 검색',
+}
+
+const SEARCH_SCOPE_DESCRIPTION: Record<SearchScope, string> = {
+  filename_content: '파일 이름과 색인된 문서 본문을 함께 찾습니다.',
+  filename: '파일 이름에 검색어가 포함된 문서만 찾습니다.',
+  content: '색인된 문서 본문에서만 검색어를 찾고, 파일명 매칭은 제외합니다.',
+}
+
+const SEARCH_SCOPE_EMPTY: Record<SearchScope, string> = {
+  filename_content: '오탈자를 확인하거나 더 짧은 키워드로 다시 시도해 보세요.',
+  filename: '파일명만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.',
+  content: '본문만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.',
+}
+
+const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: string }> = {
+  filename_content: {
+    title: '파일명과 문서 내용을 한 번에 검색',
+    description: '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT, 텍스트 파일 안의 단어까지 검색할 수 있습니다.',
+  },
+  filename: {
+    title: '파일명으로 빠르게 검색',
+    description: '파일명만 찾거나 검색 범위를 파일명+본문으로 바꿔 문서 안의 단어까지 검색할 수 있습니다.',
+  },
+  content: {
+    title: '문서 본문만 정밀 검색',
+    description: '파일명 매칭을 제외하고 Excel, Word, PPT, 텍스트 파일의 색인된 본문에서만 검색합니다.',
+  },
+}
 
 function SnippetText({ snippet }: { snippet: string }) {
   const parts = snippet.split('**')
@@ -222,7 +256,7 @@ export default function FileSearch() {
 
         <div className="flex items-center gap-4 flex-wrap type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
           <span className="inline-flex items-center gap-1.5">
-            <Icon name="bolt" size={16} /> {searchScope === 'filename' ? '파일명만 검색' : '파일명과 본문을 함께 검색'}
+            <Icon name="bolt" size={16} /> {SEARCH_SCOPE_STATUS[searchScope]}
           </span>
           {lastReindex && (
             <span className="inline-flex items-center gap-1.5">
@@ -242,13 +276,12 @@ export default function FileSearch() {
                 options={[
                   { value: 'filename_content', label: '파일명 + 본문', icon: 'article' },
                   { value: 'filename', label: '파일명만', icon: 'drive_file_rename_outline' },
+                  { value: 'content', label: '본문만', icon: 'subject' },
                 ]}
               />
             </div>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              {searchScope === 'filename'
-                ? '파일 이름에 검색어가 포함된 문서만 찾습니다.'
-                : '파일 이름과 색인된 문서 본문을 함께 찾습니다.'}
+              {SEARCH_SCOPE_DESCRIPTION[searchScope]}
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -363,15 +396,15 @@ export default function FileSearch() {
         <EmptyState
           icon="search_off"
           title={`"${query}"에 대한 결과가 없습니다.`}
-          description={searchScope === 'filename' ? '파일명만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.' : '오탈자를 확인하거나 더 짧은 키워드로 다시 시도해 보세요.'}
+          description={SEARCH_SCOPE_EMPTY[searchScope]}
         />
       )}
 
       {!loading && !searched && !query && (
         <EmptyState
           icon="manage_search"
-          title={searchScope === 'filename' ? '파일명으로 빠르게 검색' : '파일명과 문서 내용을 한 번에 검색'}
-          description={searchScope === 'filename' ? '파일명만 찾거나 검색 범위를 파일명+본문으로 바꿔 문서 안의 단어까지 검색할 수 있습니다.' : '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT, 텍스트 파일 안의 단어까지 검색할 수 있습니다.'}
+          title={SEARCH_SCOPE_READY[searchScope].title}
+          description={SEARCH_SCOPE_READY[searchScope].description}
         />
       )}
 
