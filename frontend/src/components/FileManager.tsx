@@ -562,7 +562,7 @@ export default function FileManager() {
       <Card variant="elevated">
         <CardSection
           title="대상 폴더"
-          description="자주 쓰는 문서 폴더를 등록하면 검색과 히스토리 확인에 바로 사용할 수 있습니다. K:/ 같은 네트워크 드라이브도 접근 가능하면 추가할 수 있고, 앱은 원본 문서를 읽기만 합니다."
+          description="자주 쓰는 문서 폴더를 등록하면 검색과 버전 관리에 바로 사용할 수 있습니다. K:/ 같은 네트워크 드라이브도 접근 가능하면 추가할 수 있고, 앱은 원본 문서를 읽기만 합니다."
           trailing={
             <Button
               variant="filled"

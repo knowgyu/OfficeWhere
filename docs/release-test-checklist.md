@@ -20,14 +20,14 @@ Use this checklist before publishing a release tag.
 - [ ] File Manager search narrows the file page.
 - [ ] Join Query can find Excel files through the paged picker.
 
-## Version grouping / consistency
+## Version management
 - [ ] Same Office filename in two folders appears as a “same filename” group.
 - [ ] `v1.0`, `v1.1`, `260426`, or `2026-04-26` filename variants appear as a version-family group.
-- [ ] Text and Markdown files do not appear in consistency/version groups.
+- [ ] Text and Markdown files do not appear in version-management groups.
 - [ ] Opening a group loads a timeline/detail view and calculates only that group’s adjacent version changes on demand.
 - [ ] While version changes are calculated, progress is visible as completed/total comparisons.
-- [ ] Word changes render in red `-` / green `+` diff style.
-- [ ] Excel value changes show row/cell evidence such as `E5` / `5행 E열`.
+- [ ] Word changes render in solid red deletion / green addition diff backgrounds.
+- [ ] Excel search and value changes show worksheet coordinates such as `5행 E열`.
 - [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.
 - [ ] If a group exceeds the latest-file detail limit, the UI explains only the displayed/latest files were analyzed.
 - [ ] Content-evidence wording avoids internal terms such as “fingerprint”.
@@ -37,7 +37,7 @@ Use this checklist before publishing a release tag.
 - [ ] Full reset remains behind a stronger warning/advanced path.
 - [ ] Original watched folders and Office documents remain untouched after app-data cleanup.
 - [ ] A mapped/network drive folder can be added when the current OS user can access it.
-- [ ] Search, indexing, and history comparison read source documents only; they do not delete, move, rename, or save originals.
+- [ ] Search, indexing, and version management read source documents only; they do not delete, move, rename, or save originals.
 - [ ] The OS “open file” action is understood as handing the document to Office; manual user edits in Office are outside app-controlled read-only scanning.
 
 ## Release

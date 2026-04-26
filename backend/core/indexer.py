@@ -30,21 +30,42 @@ _MAX_WORKERS = get_worker_count()
 
 def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     inspection = inspect_excel_file(path, parser_config=parser_config)
-    df = extract_excel_table(path, inspection["parser_config"])
+    config = inspection["parser_config"]
+    df = extract_excel_table(path, config)
     chunks: List[Dict[str, str]] = []
 
     header_text = " ".join(column for column in df.columns if str(column).strip())
     if header_text:
-        sheet_name = inspection["parser_config"]["sheet_name"]
+        sheet_name = config["sheet_name"]
         chunks.append({"location": f"{sheet_name} | 컬럼 헤더", "content": header_text})
 
-    for row_idx, row in enumerate(df.itertuples(index=False), start=inspection["parser_config"]["header_row"] + 1):
-        for column, value in zip(df.columns, row):
+    start_col = int(config["start_col"])
+    header_row = int(config["header_row"])
+    sheet_name = config["sheet_name"]
+    for dataframe_index, row in df.iterrows():
+        excel_row = header_row + 1 + int(dataframe_index)
+        for column_index, (column, value) in enumerate(row.items()):
             text = str(value).strip()
             if text:
-                chunks.append({"location": f"행 {row_idx}, 열 {column}", "content": text})
+                column_letter = _excel_column_letter(start_col + column_index)
+                chunks.append(
+                    {
+                        "location": f"{sheet_name} | {excel_row}행 {column_letter}열",
+                        "content": text,
+                    }
+                )
 
     return inspection, chunks
+
+
+def _excel_column_letter(index: int) -> str:
+    if index < 1:
+        return ""
+    letters = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
 
 
 def _inspect_and_chunk_word(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:

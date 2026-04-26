@@ -45,7 +45,7 @@ def test_search_returns_location(tmp_path):
 
     results = search("알파")
     assert len(results) > 0
-    assert results[0]["location"] != ""
+    assert results[0]["location"] == "Sheet1 | 2행 A열"
 
 
 def test_search_no_results_for_missing_term(tmp_path):

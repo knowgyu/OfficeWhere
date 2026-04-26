@@ -13,6 +13,12 @@ def _is_missing(value: Any) -> bool:
     return isinstance(value, float) and value != value
 
 
+def _stringify_cell(value: Any) -> str:
+    if value is None or _is_missing(value):
+        return ""
+    return str(value)
+
+
 def _column_letter(index: int) -> str:
     if index < 1:
         return ""
@@ -69,6 +75,27 @@ def _excel_location_metadata(
     }
 
 
+def _excel_row_metadata(
+    rows: "pd.DataFrame",
+    parser_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    row_numbers: List[int] = []
+    row_values: List[List[str]] = []
+    for dataframe_index, row in rows.iterrows():
+        excel_row = int(parser_config["header_row"]) + 1 + int(dataframe_index)
+        row_numbers.append(excel_row)
+        row_values.append([_stringify_cell(row[column]) for column in rows.columns])
+
+    return {
+        "columns": [str(column) for column in rows.columns],
+        "row_numbers": _unique_in_order(row_numbers),
+        "column_letters": [],
+        "cell_refs": [],
+        "row_count": len(row_numbers),
+        "row_values": row_values,
+    }
+
+
 def _distinct_non_empty(values: List[Any]) -> List[str]:
     distinct: List[str] = []
     for value in values:
@@ -82,8 +109,34 @@ def _distinct_non_empty(values: List[Any]) -> List[str]:
     return distinct
 
 
-def _file_ref(file_info: Dict[str, Any]) -> Dict[str, Any]:
-    return {"file_id": file_info["id"], "file_name": file_info["name"]}
+def _missing_row_message(key: str, prepared_files: List[Dict[str, Any]], present_files: List[Dict[str, Any]]) -> str:
+    present_ids = {item["info"]["id"] for item in present_files}
+    if len(prepared_files) == 2:
+        left, right = prepared_files
+        left_has = left["info"]["id"] in present_ids
+        right_has = right["info"]["id"] in present_ids
+        if not left_has and right_has:
+            return f'기준값 "{key}" 행이 추가되었습니다.'
+        if left_has and not right_has:
+            return f'기준값 "{key}" 행이 삭제되었습니다.'
+    return f'기준값 "{key}" 행이 일부 파일에만 있습니다.'
+
+
+def _missing_column_message(
+    column: str,
+    prepared_files: List[Dict[str, Any]],
+    present_files: List[Dict[str, Any]],
+) -> str:
+    present_ids = {item["info"]["id"] for item in present_files}
+    if len(prepared_files) == 2:
+        left, right = prepared_files
+        left_has = left["info"]["id"] in present_ids
+        right_has = right["info"]["id"] in present_ids
+        if not left_has and right_has:
+            return f'"{column}" 열이 추가되었습니다.'
+        if left_has and not right_has:
+            return f'"{column}" 열이 삭제되었습니다.'
+    return f'"{column}" 열이 일부 파일에만 있습니다.'
 
 
 def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -128,18 +181,79 @@ def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     issues: List[Dict[str, Any]] = []
 
+    all_columns = sorted(
+        set().union(*(set(item["columns"]) for item in prepared_files))
+    ) if prepared_files else []
+    for column in all_columns:
+        present_files = [item for item in prepared_files if column in item["columns"]]
+        if len(present_files) == len(prepared_files):
+            continue
+        values = []
+        for item in prepared_files:
+            has_column = item in present_files
+            values.append(
+                {
+                    "file_id": item["info"]["id"],
+                    "file_name": item["info"]["name"],
+                    "columns": [column],
+                    "values": ["열 있음" if has_column else "열 없음"],
+                    "row_numbers": [],
+                    "column_letters": [],
+                    "cell_refs": [],
+                    "row_count": 0,
+                    "row_values": [],
+                }
+            )
+        issues.append(
+            {
+                "issue_type": "missing_column",
+                "column": column,
+                "message": _missing_column_message(column, prepared_files, present_files),
+                "values": values,
+            }
+        )
+
     matched_keys = 0
     for key in sorted(all_keys):
         present_files = [item for item in prepared_files if key in item["key_rows"]]
         if len(present_files) == len(prepared_files):
             matched_keys += 1
         if len(present_files) != len(prepared_files):
+            missing_ids = {
+                item["info"]["id"] for item in prepared_files if item not in present_files
+            }
+            values: List[Dict[str, Any]] = []
+            for item in prepared_files:
+                if item["info"]["id"] in missing_ids:
+                    values.append(
+                        {
+                            "file_id": item["info"]["id"],
+                            "file_name": item["info"]["name"],
+                            "columns": [],
+                            "values": ["행 없음"],
+                            "row_numbers": [],
+                            "column_letters": [],
+                            "cell_refs": [],
+                            "row_count": 0,
+                            "row_values": [],
+                        }
+                    )
+                    continue
+                rows = item["key_rows"][key]
+                values.append(
+                    {
+                        "file_id": item["info"]["id"],
+                        "file_name": item["info"]["name"],
+                        "values": ["행 있음"],
+                        **_excel_row_metadata(rows, item["parser_config"]),
+                    }
+                )
             issues.append(
                 {
                     "issue_type": "missing_key",
                     "key": key,
-                    "present_in": [_file_ref(item["info"]) for item in present_files],
-                    "missing_in": [_file_ref(item["info"]) for item in prepared_files if item not in present_files],
+                    "message": _missing_row_message(key, prepared_files, present_files),
+                    "values": values,
                 }
             )
 
@@ -157,6 +271,7 @@ def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
                     {
                         "file_id": item["info"]["id"],
                         "file_name": item["info"]["name"],
+                        "columns": [column],
                         "values": values,
                         **_excel_location_metadata(
                             rows,
@@ -180,6 +295,7 @@ def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
                         "issue_type": "value_conflict",
                         "key": key,
                         "column": column,
+                        "message": f"{column} 값이 파일마다 다릅니다.",
                         "values": distinct_values,
                     }
                 )

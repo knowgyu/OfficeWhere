@@ -29,8 +29,8 @@ const TABS: TabDef[] = [
   },
   {
     id: 'check',
-    label: '문서 히스토리',
-    short: '히스토리',
+    label: '버전 관리',
+    short: '버전',
     icon: 'history',
     iconFilled: 'history',
     hint: '같은 문서의 여러 버전에서 무엇이 바뀌었는지 확인합니다',

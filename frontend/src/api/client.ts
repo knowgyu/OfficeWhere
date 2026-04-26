@@ -235,9 +235,10 @@ export interface ExcelConflictEntry {
   columnLetters: string[]
   cellRefs: string[]
   rowCount: number
+  rowValues: string[][]
 }
 
-export type ExcelIssueType = 'value_conflict' | 'missing_key'
+export type ExcelIssueType = 'value_conflict' | 'missing_key' | 'missing_column'
 
 export interface ExcelCheckIssue {
   id: string
@@ -640,7 +641,7 @@ export function formatParserConfigSummary(parserConfig: ParserConfig | null | un
 
 function buildCapabilitySummary(mode: CompareMode, fileType: FileType): string[] {
   if (fileType === 'Text' || fileType === 'Markdown') {
-    return ['본문 검색 가능', '내용 미리보기 가능', '정합성 검사 제외']
+    return ['본문 검색 가능', '내용 미리보기 가능', '버전 관리 제외']
   }
   if (mode === 'excel') return ['Excel 통합 가능', '여러 파일 비교 가능', '표 영역 자동 저장']
   if (mode === 'word') return ['2개 문서 비교', '문단/표 행 변경 확인', '기준 컬럼 불필요']
@@ -884,6 +885,7 @@ function normalizeExcelConflictEntries(value: unknown): ExcelConflictEntry[] {
       ),
       cellRefs: toStringArray(record.cell_refs ?? record.cellRefs ?? record.cell_ref ?? record.cellRef),
       rowCount: toNumberValue(record.row_count ?? record.rowCount, 0),
+      rowValues: toMatrix(record.row_values ?? record.rowValues),
     }
   })
 }
@@ -902,6 +904,7 @@ function normalizeExcelFileRefs(value: unknown, column: string, fallbackValue: s
       columnLetters: [],
       cellRefs: [],
       rowCount: 0,
+      rowValues: [],
     }
   })
 }
@@ -912,11 +915,12 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
   return value.flatMap((entry, index) => {
     const record = isRecord(entry) ? entry : {}
     const rawType = toStringValue(record.type ?? record.issue_type).toLowerCase()
-    if (rawType === 'missing_column' || rawType === 'missing column') {
-      return []
-    }
     const type: ExcelIssueType =
-      rawType === 'missing_key' || rawType === 'missing key' ? 'missing_key' : 'value_conflict'
+      rawType === 'missing_key' || rawType === 'missing key'
+        ? 'missing_key'
+        : rawType === 'missing_column' || rawType === 'missing column'
+          ? 'missing_column'
+          : 'value_conflict'
     const columnGroup = toStringValue(record.column_group ?? record.column ?? record.column_name)
     const conflicts = [
       ...normalizeExcelConflictEntries(record.conflicts ?? record.entries ?? record.values),

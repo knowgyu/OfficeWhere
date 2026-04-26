@@ -147,8 +147,7 @@ def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
 
     assert result["mode"] == "excel"
     issue_types = {issue["issue_type"] for issue in result["excel"]["issues"]}
-    assert "missing_column" not in issue_types
-    assert {"missing_key", "value_conflict"} <= issue_types
+    assert {"missing_column", "missing_key", "value_conflict"} <= issue_types
 
     conflict = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
     assert conflict["key"] == "a"
@@ -162,6 +161,16 @@ def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
     assert values_by_file[2]["column_letters"] == ["B"]
     assert values_by_file[2]["cell_refs"] == ["B2"]
     assert values_by_file[2]["row_count"] == 1
+
+    missing_column = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "missing_column")
+    assert missing_column["column"] == "담당자"
+    assert "열" in missing_column["message"]
+
+    missing_key = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "missing_key")
+    assert "행" in missing_key["message"]
+    present_rows = [entry for entry in missing_key["values"] if entry["row_values"]]
+    assert present_rows
+    assert present_rows[0]["columns"]
 
 
 def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
