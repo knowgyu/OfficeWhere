@@ -29,7 +29,6 @@ import {
   EmptyState,
   FileTypeBadge,
   Icon,
-  SelectField,
   Spinner,
   StatCard,
   TextField,
@@ -74,7 +73,7 @@ const MODE_GUIDE: Record<string, string> = {
   excel: 'Excel은 여러 파일을 동시에 비교합니다. 같은 항목의 행을 맞춰 값 차이와 행/열 추가·삭제를 찾습니다.',
   word: 'Word는 2개 파일만 비교합니다. 추가·삭제·수정된 문단과 표 행을 카드 형태로 보여줍니다.',
   ppt: 'PPT는 2개 파일만 비교합니다. 슬라이드 추가/삭제와 슬라이드 내 항목 변경을 보여줍니다.',
-  none: '자동 감지된 묶음에서 바로 비교하거나, 필요할 때만 수동 선택을 열어 직접 고를 수 있습니다.',
+  none: '자동 감지된 문서 그룹에서 바로 비교하거나, 필요할 때만 수동 선택을 열어 직접 고를 수 있습니다.',
 }
 
 const DIFF_TYPE_KO: Record<string, string> = {
@@ -114,19 +113,25 @@ const isCheckableFile = (file: FileInfo) =>
 const blockTypeLabel = (type: string) => BLOCK_TYPE_KO[type] ?? type
 
 const groupKindLabel = (kind: LibraryGroupKind) =>
-  kind === 'exact_name_conflict' ? '같은 이름 문서' : '버전/날짜 문서'
+  kind === 'exact_name_conflict' ? '같은 제목' : '버전명 감지'
 
 const GROUP_FILTER_OPTIONS: { value: GroupFilter; label: string }[] = [
-  { value: 'all', label: '전체 묶음' },
-  { value: 'exact_name_conflict', label: '이름이 같은 문서' },
-  { value: 'version_family', label: '버전 후보' },
+  { value: 'all', label: '전체 보기' },
+  { value: 'exact_name_conflict', label: '같은 제목' },
+  { value: 'version_family', label: '버전명 감지' },
 ]
 
 const GROUP_FILE_TYPE_OPTIONS: { value: GroupFileTypeFilter; label: string }[] = [
-  { value: 'all', label: '전체 형식' },
+  { value: 'all', label: '모든 형식' },
   { value: 'Excel', label: 'Excel 문서' },
   { value: 'Word', label: 'Word 문서' },
   { value: 'PowerPoint', label: 'PowerPoint 문서' },
+]
+
+const GROUP_SORT_OPTIONS: { value: GroupSort; label: string }[] = [
+  { value: 'recent', label: '최근 수정순' },
+  { value: 'count', label: '파일 많은 순' },
+  { value: 'name', label: '이름순' },
 ]
 
 const excelChangeTypeFromIssue = (
@@ -311,6 +316,7 @@ export default function ConsistencyCheck({
   const [groupQueryDraft, setGroupQueryDraft] = useState('')
   const [groupFileType, setGroupFileType] = useState<GroupFileTypeFilter>('all')
   const [groupSort, setGroupSort] = useState<GroupSort>('recent')
+  const [groupFilterOpen, setGroupFilterOpen] = useState(false)
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
   const [activeGroupDetail, setActiveGroupDetail] = useState<LibraryGroupDetail | null>(null)
@@ -821,6 +827,16 @@ export default function ConsistencyCheck({
   const visibleGroupEnd = Math.min(groupOffset + groups.length, groupTotal)
   const hasPreviousGroupPage = groupOffset > 0
   const hasNextGroupPage = groupOffset + groups.length < groupTotal
+  const groupFilterLabel =
+    GROUP_FILTER_OPTIONS.find((option) => option.value === groupFilter)?.label ?? '전체 보기'
+  const groupFileTypeLabel =
+    GROUP_FILE_TYPE_OPTIONS.find((option) => option.value === groupFileType)?.label ?? '모든 형식'
+  const groupSortLabel =
+    GROUP_SORT_OPTIONS.find((option) => option.value === groupSort)?.label ?? '최근 수정순'
+  const activeFilterCount =
+    (groupFilter === 'all' ? 0 : 1) +
+    (groupFileType === 'all' ? 0 : 1) +
+    (groupSort === 'recent' ? 0 : 1)
 
   if (fileTotal === 0 && groupTotal === 0 && !filesLoading && !groupsLoading) {
     return (
@@ -839,13 +855,13 @@ export default function ConsistencyCheck({
       <Card variant="elevated">
         <CardSection
           title="문서 비교"
-          description="검토가 필요한 문서 묶음을 찾아 확인하세요. 문서가 많으면 문서명, 폴더명, 형식으로 좁혀볼 수 있습니다."
+          description="검토가 필요한 문서 그룹을 찾아 확인하세요. 문서가 많으면 문서명, 폴더명, 형식으로 좁혀볼 수 있습니다."
           trailing={
             <Chip
               label={
                 groupTotal > groups.length
                   ? `표시 ${visibleGroupStart}-${visibleGroupEnd} / ${groupTotal}`
-                  : `${groupTotal}개 묶음`
+                  : `${groupTotal}개 그룹`
               }
               tone="primary"
               icon="view_list"
@@ -854,8 +870,8 @@ export default function ConsistencyCheck({
           }
         >
           <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(280px,1fr)_190px_220px_auto] xl:items-start">
-              <div className="min-w-0">
+            <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
+              <div className="min-w-[260px] flex-1">
                 <TextField
                   leadingIcon="search"
                   placeholder="문서명, 파일명, 폴더명으로 찾기"
@@ -867,52 +883,79 @@ export default function ConsistencyCheck({
                   helper="예: 사업예산, 주간보고, 프로젝트명, 부서명"
                 />
               </div>
-              <div className="min-w-0">
-                <SelectField
-                  aria-label="문서 형식"
-                  value={groupFileType}
-                  onChange={(event) => changeGroupFileType(event.target.value as GroupFileTypeFilter)}
-                >
-                  {GROUP_FILE_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectField>
-              </div>
-              <div className="min-w-0">
-                <SelectField
-                  aria-label="정렬"
-                  value={groupSort}
-                  onChange={(event) => changeGroupSort(event.target.value as GroupSort)}
-                >
-                  <option value="recent">최근 변경된 문서 먼저</option>
-                  <option value="count">파일 많은 묶음 먼저</option>
-                  <option value="name">이름순</option>
-                </SelectField>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <Button variant="filled" leadingIcon="search" onClick={handleGroupSearch} disabled={groupsLoading}>
-                  찾기
+              <Button variant="filled" leadingIcon="search" onClick={handleGroupSearch} disabled={groupsLoading}>
+                찾기
+              </Button>
+              <Button
+                variant={groupFilterOpen || activeFilterCount > 0 ? 'tonal' : 'outlined'}
+                leadingIcon="tune"
+                onClick={() => setGroupFilterOpen((value) => !value)}
+                aria-expanded={groupFilterOpen}
+              >
+                필터{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
+              </Button>
+              {groupQuery && (
+                <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
+                  지우기
                 </Button>
-                {groupQuery && (
-                  <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
-                    지우기
-                  </Button>
-                )}
-              </div>
+              )}
             </div>
+            {groupFilterOpen && (
+              <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 p-3 shadow-elev-1">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div>
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">문서 구분</p>
+                    <div className="mt-2 flex gap-2 flex-wrap">
+                      {GROUP_FILTER_OPTIONS.map((option) => (
+                        <Button
+                          key={option.value}
+                          size="sm"
+                          variant={groupFilter === option.value ? 'tonal' : 'outlined'}
+                          onClick={() => changeGroupFilter(option.value)}
+                        >
+                          {option.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">문서 형식</p>
+                    <div className="mt-2 flex gap-2 flex-wrap">
+                      {GROUP_FILE_TYPE_OPTIONS.map((option) => (
+                        <Button
+                          key={option.value}
+                          size="sm"
+                          variant={groupFileType === option.value ? 'tonal' : 'outlined'}
+                          onClick={() => changeGroupFileType(option.value)}
+                        >
+                          {option.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">정렬 기준</p>
+                    <div className="mt-2 flex gap-2 flex-wrap">
+                      {GROUP_SORT_OPTIONS.map((option) => (
+                        <Button
+                          key={option.value}
+                          size="sm"
+                          variant={groupSort === option.value ? 'tonal' : 'outlined'}
+                          onClick={() => changeGroupSort(option.value)}
+                        >
+                          {option.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex gap-2 flex-wrap">
-                {GROUP_FILTER_OPTIONS.map((option) => (
-                  <Chip
-                    key={option.value}
-                    label={option.label}
-                    kind="filter"
-                    selected={groupFilter === option.value}
-                    onClick={() => changeGroupFilter(option.value)}
-                  />
-                ))}
+                <Chip label={`구분 · ${groupFilterLabel}`} tone="neutral" as="span" />
+                <Chip label={`형식 · ${groupFileTypeLabel}`} tone="neutral" as="span" />
+                <Chip label={`정렬 · ${groupSortLabel}`} tone="neutral" as="span" />
               </div>
               <Button
                 variant="outlined"
@@ -922,23 +965,25 @@ export default function ConsistencyCheck({
                 직접 파일 고르기
               </Button>
             </div>
-            {(groupQuery || groupFileType !== 'all') && (
+            {(groupQuery || groupFilter !== 'all' || groupFileType !== 'all' || groupSort !== 'recent') && (
               <div className="flex gap-2 flex-wrap">
                 {groupQuery && <Chip label={`검색어 · ${groupQuery}`} tone="secondary" icon="search" as="span" />}
-                {groupFileType !== 'all' && <Chip label={`형식 · ${groupFileType}`} tone="neutral" as="span" />}
+                {groupFilter !== 'all' && <Chip label={`구분 · ${groupFilterLabel}`} tone="primary" as="span" />}
+                {groupFileType !== 'all' && <Chip label={`형식 · ${groupFileTypeLabel}`} tone="neutral" as="span" />}
+                {groupSort !== 'recent' && <Chip label={`정렬 · ${groupSortLabel}`} tone="neutral" as="span" />}
               </div>
             )}
           </div>
 
           {groupsLoading ? (
             <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-              <Spinner size={18} /> 묶음 불러오는 중…
+              <Spinner size={18} /> 그룹 불러오는 중…
             </div>
           ) : groups.length === 0 ? (
             <EmptyState
               icon="task_alt"
-              title="자동 감지된 버전 묶음이 없습니다"
-              description="같은 이름이거나 버전/날짜가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
+              title="자동 감지된 버전 그룹이 없습니다"
+              description="같은 제목이거나 파일명에 버전/날짜가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
               compact
             />
           ) : (
@@ -970,7 +1015,7 @@ export default function ConsistencyCheck({
           {groupTotal > GROUP_PAGE_SIZE && (
             <div className="flex items-center justify-between gap-3 flex-wrap pt-3">
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                {visibleGroupStart}-{visibleGroupEnd} / {groupTotal}개 묶음
+                {visibleGroupStart}-{visibleGroupEnd} / {groupTotal}개 그룹
               </p>
               <div className="flex gap-2">
                 <Button
@@ -998,7 +1043,7 @@ export default function ConsistencyCheck({
       <Card id="manual-version-picker" variant="outlined">
         <CardSection
           title="수동으로 직접 고르기"
-          description="자동 묶음에 없는 특수 케이스만 열어서 사용하세요. 1만 개 문서에서도 현재 페이지와 검색 결과만 보여줍니다."
+          description="자동 그룹에 없는 특수 케이스만 열어서 사용하세요. 1만 개 문서에서도 현재 페이지와 검색 결과만 보여줍니다."
           trailing={
             <Button
               variant={manualOpen ? 'tonal' : 'outlined'}
@@ -1212,7 +1257,7 @@ function GroupCard({
           <div className="min-w-0 space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
-                진단 묶음
+                비교 대상
               </span>
               <FileTypeBadge fileType={group.file_type} />
               <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
