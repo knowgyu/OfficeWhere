@@ -155,3 +155,39 @@ def test_rescan_excel_refreshes_parser_config_and_indexes_used_range(tmp_path, m
     updated_row = get_all_files()[0]
     assert updated_row["parser_config"]["end_col"] == 3
     assert search("새값")[0]["location"] == "Sheet1 시트 | 2행 C열"
+
+
+def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path, monkeypatch):
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    target = tmp_path / "layout-only.xlsx"
+    target.write_bytes(b"placeholder")
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    monkeypatch.setattr(library, "_collect_supported_paths", lambda _path, _recursive: [str(target)])
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda _path, parser_config=None: (
+            {
+                "name": target.name,
+                "file_type": "Excel",
+                "columns": [],
+                "parser_config": {},
+            },
+            [{"location": "Sheet1 시트 | 1행 A열", "content": "표가 아닌 메모"}],
+        ),
+    )
+
+    response = library.rescan_library()
+
+    assert response.failed == 0
+    assert response.registered == 1
+    row = get_all_files()[0]
+    assert row["key_column"] == ""

@@ -532,9 +532,9 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
             else:
                 parser_config = existing.get("parser_config") if existing else None
             info, chunks = inspect_and_chunk(path, parser_config=parser_config)
-            key_column = suggest_key_column(info["columns"]) if info["file_type"] == "Excel" else ""
-            if info["file_type"] == "Excel" and not key_column:
-                raise ValueError("Excel 자동 등록에 사용할 key 컬럼을 찾지 못했습니다.")
+            key_column = ""
+            if info["file_type"] == "Excel":
+                key_column = suggest_key_column(info["columns"]) or ""
 
             file_id = register_file(
                 path=path,

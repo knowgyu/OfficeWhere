@@ -324,6 +324,40 @@ def test_excel_version_history_ignores_stale_parser_config(tmp_path):
     assert [entry["values"] for entry in issue["values"]] == [["100"], ["999"]]
 
 
+def test_excel_version_history_does_not_require_key_column(tmp_path):
+    previous = tmp_path / "budget-v1.xlsx"
+    latest = tmp_path / "budget-v2.xlsx"
+    _write_dataframe_excel(previous, {"과제명": ["A"], "예산": ["100"]})
+    _write_dataframe_excel(latest, {"과제명": ["A"], "예산": ["120"]})
+
+    result = run_consistency_check(
+        [
+            {
+                "id": 1,
+                "path": str(previous),
+                "name": "budget-v1.xlsx",
+                "file_type": "Excel",
+                "key_column": "",
+                "parser_config": {},
+            },
+            {
+                "id": 2,
+                "path": str(latest),
+                "name": "budget-v2.xlsx",
+                "file_type": "Excel",
+                "key_column": "",
+                "parser_config": {},
+            },
+        ],
+        comparison_scope="version_history",
+    )
+
+    issue = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
+    assert issue["key"] == "2"
+    assert issue["column"] == "B"
+    assert [entry["values"] for entry in issue["values"]] == [["100"], ["120"]]
+
+
 def test_excel_diff_grid_returns_full_small_latest_sheet_without_parser_config(tmp_path):
     latest = tmp_path / "grid-latest.xlsx"
     previous = tmp_path / "grid-previous.xlsx"
