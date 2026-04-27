@@ -369,14 +369,20 @@ body,
   animation: attention-ring 1.1s var(--md-motion-standard) infinite;
 }
 
-.onboarding-float {
-  animation: onboarding-float 5.5s var(--md-motion-standard) infinite;
+.onboarding-preview-lift {
+  animation: onboarding-preview-lift 7s var(--md-motion-standard) infinite;
   transform-origin: center;
 }
 
-.onboarding-drift {
-  animation: onboarding-drift 7s var(--md-motion-standard) infinite;
-  transform-origin: center;
+.onboarding-scan-line {
+  position: absolute;
+  inset-inline: 1rem;
+  top: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--ow-onboarding-accent), transparent);
+  opacity: 0.72;
+  animation: onboarding-scan-line 3.8s ease-in-out infinite;
 }
 
 .tour-target {
@@ -384,23 +390,29 @@ body,
   z-index: 65;
 }
 
-@keyframes onboarding-float {
+@keyframes onboarding-preview-lift {
   0%,
   100% {
-    transform: translateY(0) rotate(-1deg);
+    transform: translateY(0);
   }
   50% {
-    transform: translateY(-14px) rotate(1deg);
+    transform: translateY(-8px);
   }
 }
 
-@keyframes onboarding-drift {
+@keyframes onboarding-scan-line {
   0%,
   100% {
-    transform: translate(0, 0);
+    transform: translateY(0);
+    opacity: 0;
   }
-  50% {
-    transform: translate(10px, -12px);
+  18%,
+  72% {
+    opacity: 0.72;
+  }
+  82% {
+    transform: translateY(17.8rem);
+    opacity: 0;
   }
 }
 

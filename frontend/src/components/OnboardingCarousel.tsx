@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { CSSProperties, useEffect, useState } from 'react'
 
 import { Button, Icon } from '../ui'
 
@@ -9,30 +9,77 @@ interface OnboardingCarouselProps {
   onStartOwnFolder: () => void
 }
 
-const slides = [
+type PreviewRow = {
+  icon: string
+  title: string
+  meta: string
+  state: string
+}
+
+type Slide = {
+  eyebrow: string
+  title: string
+  description: string
+  proof: string
+  accent: string
+  previewTitle: string
+  previewSubtitle: string
+  rows: PreviewRow[]
+  chips: string[]
+  metric: string
+}
+
+const slides: Slide[] = [
   {
     eyebrow: 'Find',
-    title: '흩어진 문서가 한곳으로 모입니다',
+    title: '흩어진 문서를 바로 찾습니다',
     description:
-      'Word, PowerPoint, Excel, 텍스트 문서가 어디에 있든 파일명과 본문을 함께 찾아 업무 흐름을 끊지 않습니다.',
-    accent: 'from-[#4257b2] to-[#8f7df0]',
-    illustration: 'search',
+      '파일명과 본문을 함께 색인해 Word, PowerPoint, Excel, 텍스트 문서를 한 번에 검색합니다.',
+    proof: '흩어진 업무 폴더를 검색 가능한 문서 라이브러리로 바꿉니다.',
+    accent: '#4257b2',
+    previewTitle: 'A 프로젝트 검색',
+    previewSubtitle: '본문 포함 결과 8개',
+    metric: '파일명 + 본문',
+    chips: ['문서 검색', '본문 미리보기', '로컬 색인'],
+    rows: [
+      { icon: 'description', title: '주간보고_v4.0_260517.docx', meta: '회의 액션아이템 · 본문 일치', state: 'Word' },
+      { icon: 'slideshow', title: '프로젝트상태_v4.0_260517.pptx', meta: '릴리즈 후보 준비 · 슬라이드 2', state: 'PPT' },
+      { icon: 'table_chart', title: '사업예산_v4.0_260517.xlsx', meta: 'Excel 표 안의 값까지 검색', state: 'Excel' },
+    ],
   },
   {
     eyebrow: 'Compare',
-    title: '버전 차이를 부드럽게 따라갑니다',
+    title: '문서의 버전 흐름을 봅니다',
     description:
-      'v1, v2, 날짜가 붙은 문서를 묶고 무엇이 바뀌었는지 Word·PPT·Excel에 맞게 보여줍니다.',
-    accent: 'from-[#6d5a86] to-[#4257b2]',
-    illustration: 'version',
+      'v1, 날짜, 제목이 조금 다른 파일도 한 묶음으로 보고 어떤 내용이 바뀌었는지 따라갑니다.',
+    proof: '문서 하나하나를 열어 대조하는 시간을 줄이고, 변경점에 바로 도착합니다.',
+    accent: '#6d5a86',
+    previewTitle: '프로젝트상태 버전 묶음',
+    previewSubtitle: '5개 파일 · 최신 v4.0',
+    metric: '변경점 중심',
+    chips: ['버전 진단', 'PPT 변경', '최신 지정'],
+    rows: [
+      { icon: 'task_alt', title: 'v4.0 → v3.0', meta: '주요 변경점 슬라이드 추가', state: '+3' },
+      { icon: 'sync_alt', title: 'v3.0 → v2.0', meta: '위험 요소 문구 수정', state: '수정' },
+      { icon: 'history', title: 'v2.0 → v1.1', meta: '일정 항목 2개 변경', state: '추적' },
+    ],
   },
   {
     eyebrow: 'Try',
-    title: 'A 프로젝트 예제로 먼저 감을 잡아보세요',
+    title: 'A 프로젝트로 먼저 둘러보세요',
     description:
-      '문서 새로고침, 검색, 버전 진단, Excel 표로 보기까지 준비된 예제로 짧게 둘러볼 수 있습니다.',
-    accent: 'from-[#146c2e] to-[#4257b2]',
-    illustration: 'example',
+      '문서 새로고침, 검색, 버전 진단, Excel 표로 보기를 직접 눌러보며 핵심 흐름을 확인합니다.',
+    proof: '실제 문서를 건드리지 않고 준비된 예제로 OfficeWhere가 맞는지 빠르게 판단합니다.',
+    accent: '#146c2e',
+    previewTitle: '예제 둘러보기 경로',
+    previewSubtitle: '6단계 안내 · 직접 클릭',
+    metric: '3분 체험',
+    chips: ['A 프로젝트', '문서 새로고침', '표로 보기'],
+    rows: [
+      { icon: 'folder_open', title: '예제 폴더 지정', meta: 'officewhere_test_library', state: '1' },
+      { icon: 'search', title: 'A 프로젝트 검색', meta: '검색 결과를 확인하고 버전으로 이동', state: '2' },
+      { icon: 'grid_on', title: 'Excel 표로 보기', meta: '셀 단위 변경점을 표에서 확인', state: '3' },
+    ],
   },
 ]
 
@@ -52,52 +99,70 @@ export default function OnboardingCarousel({
 
   const slide = slides[index]
   const isLast = index === slides.length - 1
+  const accentStyle = { '--ow-onboarding-accent': slide.accent } as CSSProperties
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_20%_10%,rgba(66,87,178,0.24),transparent_28rem),linear-gradient(135deg,rgba(246,247,251,0.92),rgba(227,232,255,0.9))] p-4 backdrop-blur-2xl"
+      className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-[#050711] p-4 text-slate-950"
       role="dialog"
       aria-modal="true"
       aria-labelledby="officewhere-onboarding-title"
       onMouseDown={(event) => event.stopPropagation()}
+      style={accentStyle}
     >
-      <div className="relative w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/70 bg-white/82 shadow-[0_40px_120px_rgba(15,23,42,0.2)] backdrop-blur-xl">
-        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_85%_10%,rgba(255,255,255,0.9),transparent_18rem),radial-gradient(circle_at_5%_80%,rgba(238,231,255,0.9),transparent_22rem)]" />
-        <div className="relative grid min-h-[680px] grid-cols-1 lg:grid-cols-[1fr_0.95fr]">
-          <section className="flex flex-col justify-between gap-8 p-8 md:p-12">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_18%,rgba(83,58,253,0.24),transparent_24rem),radial-gradient(circle_at_86%_16%,rgba(20,108,46,0.18),transparent_24rem),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_35%)]" />
+      <div className="relative w-full max-w-6xl overflow-hidden rounded-[1.75rem] border border-white/[0.12] bg-[#f7f8ff] shadow-[0_34px_90px_rgba(0,0,0,0.42)]">
+        <div className="grid min-h-[660px] grid-cols-1 lg:grid-cols-[0.92fr_1.08fr]">
+          <section className="relative flex flex-col justify-between gap-8 p-7 md:p-10 lg:p-12 lg:pr-10">
+            <div className="absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,var(--ow-onboarding-accent),rgba(83,58,253,0.28),transparent)]" />
+
             <div className="space-y-8">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-white/70 px-3 py-1.5 type-label-md text-[var(--md-sys-color-on-surface-variant)] shadow-[0_1px_0_rgba(255,255,255,0.9)_inset]">
-                <Icon name="auto_awesome" size={16} className="text-[var(--md-sys-color-primary)]" />
-                {replay ? '처음 둘러보기 다시 보기' : 'OfficeWhere 시작하기'}
+              <div className="flex items-center justify-between gap-3">
+                <div className="inline-flex items-center gap-2 rounded-md border border-[#dfe5f1] bg-white px-3 py-1.5 text-[0.78rem] font-medium text-[#42526b] shadow-[0_8px_22px_rgba(50,50,93,0.08)]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--ow-onboarding-accent)]" />
+                  {replay ? '처음 둘러보기 다시 보기' : 'OfficeWhere 시작하기'}
+                </div>
+                <span className="rounded-md border border-[#e5edf5] bg-white/70 px-2.5 py-1 text-[0.72rem] font-medium text-[#64748d]">
+                  {index + 1} / {slides.length}
+                </span>
               </div>
 
-              <div className="space-y-5">
-                <p className="type-label-md uppercase tracking-[0.18em] text-[var(--md-sys-color-primary)]">
+              <div className="space-y-4">
+                <p className="text-[0.74rem] font-semibold uppercase tracking-[0.18em] text-[var(--ow-onboarding-accent)]">
                   {slide.eyebrow}
                 </p>
                 <h1
                   id="officewhere-onboarding-title"
-                  className="max-w-2xl text-[2.7rem] font-semibold leading-[1.05] tracking-[-0.045em] text-[var(--md-sys-color-on-surface)] md:text-[4.25rem]"
+                  className="max-w-[31rem] text-[2.2rem] font-[520] leading-[1.06] tracking-[-0.045em] text-[#061b31] [text-wrap:balance] [word-break:keep-all] md:text-[3.35rem]"
                 >
                   {slide.title}
                 </h1>
-                <p className="max-w-xl type-body-lg text-[var(--md-sys-color-on-surface-variant)] md:text-[1.1rem] md:leading-7">
+                <p className="max-w-[30rem] text-[0.98rem] leading-7 text-[#64748d] [word-break:keep-all] md:text-[1.03rem]">
                   {slide.description}
                 </p>
               </div>
+
+              <div className="rounded-xl border border-[#e5edf5] bg-white p-4 shadow-[rgba(50,50,93,0.12)_0px_18px_42px_-24px,rgba(0,0,0,0.08)_0px_10px_24px_-18px]">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f3f6ff] text-[var(--ow-onboarding-accent)]">
+                    <Icon name="auto_awesome" size={19} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[#273951]">왜 필요한가요?</p>
+                    <p className="mt-1 text-sm leading-6 text-[#64748d]">{slide.proof}</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-6">
-              <div className="flex items-center gap-2">
+            <div className="space-y-5">
+              <div className="flex items-center gap-2" aria-hidden="true">
                 {slides.map((item, slideIndex) => (
                   <span
                     key={item.title}
-                    className={`h-2.5 rounded-full transition-all ${
-                      slideIndex === index
-                        ? 'w-10 bg-[var(--md-sys-color-primary)]'
-                        : 'w-2.5 bg-[var(--md-sys-color-outline-variant)]'
+                    className={`h-1.5 rounded-full transition-all ${
+                      slideIndex === index ? 'w-11 bg-[var(--ow-onboarding-accent)]' : 'w-5 bg-[#d7deea]'
                     }`}
-                    aria-hidden="true"
                   />
                 ))}
               </div>
@@ -117,7 +182,7 @@ export default function OnboardingCarousel({
                     </Button>
                   </>
                 )}
-                {index > 0 && (
+                {index > 0 && !isLast && (
                   <Button size="lg" variant="text" leadingIcon="arrow_back" onClick={() => setIndex((value) => value - 1)}>
                     이전
                   </Button>
@@ -126,15 +191,9 @@ export default function OnboardingCarousel({
             </div>
           </section>
 
-          <section className={`relative min-h-[26rem] overflow-hidden bg-gradient-to-br ${slide.accent}`}>
-            <div className="absolute inset-0 opacity-70 [background-image:radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.45),transparent_10rem),radial-gradient(circle_at_75%_70%,rgba(255,255,255,0.24),transparent_14rem)]" />
-            <div className="absolute inset-x-10 top-10 flex items-center justify-between text-white/75">
-              <span className="type-label-md tracking-[0.16em]">OFFICEWHERE</span>
-              <span className="rounded-full border border-white/30 px-3 py-1 type-label-sm">
-                {index + 1} / {slides.length}
-              </span>
-            </div>
-            <OnboardingIllustration kind={slide.illustration} />
+          <section className="relative overflow-hidden bg-[#0b1020] p-5 md:p-8 lg:p-10">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_10%,color-mix(in_srgb,var(--ow-onboarding-accent)_36%,transparent),transparent_18rem),linear-gradient(160deg,rgba(255,255,255,0.08),transparent_42%)]" />
+            <ProductPreview slide={slide} />
           </section>
         </div>
       </div>
@@ -142,60 +201,79 @@ export default function OnboardingCarousel({
   )
 }
 
-function OnboardingIllustration({ kind }: { kind: string }) {
-  const isSearch = kind === 'search'
-  const isVersion = kind === 'version'
+function ProductPreview({ slide }: { slide: Slide }) {
   return (
-    <svg
-      className="absolute inset-0 h-full w-full overflow-visible"
-      viewBox="0 0 520 680"
-      role="img"
-      aria-label="OfficeWhere 안내 일러스트"
-    >
-      <defs>
-        <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="0" dy="18" stdDeviation="18" floodColor="#0f172a" floodOpacity="0.2" />
-        </filter>
-      </defs>
-      <g className="onboarding-float" filter="url(#softShadow)">
-        <rect x="84" y="158" width="352" height="360" rx="34" fill="rgba(255,255,255,0.9)" />
-        <rect x="116" y="205" width="176" height="18" rx="9" fill="#4257b2" opacity="0.28" />
-        <rect x="116" y="246" width="278" height="14" rx="7" fill="#111827" opacity="0.12" />
-        <rect x="116" y="276" width="228" height="14" rx="7" fill="#111827" opacity="0.1" />
-        <rect x="116" y="338" width="288" height="86" rx="18" fill="#e3e8ff" />
-        <rect x="142" y="365" width="92" height="12" rx="6" fill="#4257b2" opacity="0.48" />
-        <rect x="142" y="392" width="196" height="12" rx="6" fill="#4257b2" opacity="0.2" />
-      </g>
+    <div className="relative flex h-full min-h-[32rem] items-center justify-center">
+      <div className="onboarding-preview-lift w-full max-w-[34rem] rounded-[1.35rem] border border-white/10 bg-[#0f1424]/95 p-4 shadow-[0_28px_70px_rgba(0,0,0,0.36)]">
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#ef4444]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[#f59e0b]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[#22c55e]" />
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-1 text-[0.72rem] font-medium text-slate-300">
+            Local · Read-only
+          </div>
+        </div>
 
-      {isSearch && (
-        <g className="onboarding-drift" filter="url(#softShadow)">
-          <rect x="48" y="390" width="126" height="156" rx="20" fill="white" opacity="0.94" />
-          <rect x="70" y="426" width="62" height="12" rx="6" fill="#146c2e" opacity="0.32" />
-          <rect x="70" y="455" width="82" height="10" rx="5" fill="#0f172a" opacity="0.12" />
-          <circle cx="362" cy="238" r="58" fill="none" stroke="white" strokeWidth="18" opacity="0.9" />
-          <path d="M402 278 L456 332" stroke="white" strokeWidth="18" strokeLinecap="round" opacity="0.9" />
-        </g>
-      )}
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-white/40">
+                  Workspace Preview
+                </p>
+                <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-white">{slide.previewTitle}</h2>
+                <p className="mt-1 text-sm text-slate-400">{slide.previewSubtitle}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_20%,transparent)] px-3 py-2 text-right">
+                <p className="text-[0.68rem] uppercase tracking-[0.12em] text-white/50">Mode</p>
+                <p className="mt-1 text-sm font-semibold text-white">{slide.metric}</p>
+              </div>
+            </div>
 
-      {isVersion && (
-        <g className="onboarding-drift" filter="url(#softShadow)">
-          <rect x="54" y="426" width="190" height="112" rx="22" fill="white" opacity="0.94" />
-          <rect x="82" y="458" width="46" height="46" rx="12" fill="#c2f0c5" />
-          <rect x="144" y="462" width="72" height="10" rx="5" fill="#146c2e" opacity="0.32" />
-          <rect x="144" y="488" width="56" height="10" rx="5" fill="#ba1a1a" opacity="0.28" />
-          <path d="M330 514 C374 476 400 430 406 376" fill="none" stroke="white" strokeWidth="8" strokeLinecap="round" strokeDasharray="10 14" />
-        </g>
-      )}
+            <div className="mt-5 flex flex-wrap gap-2">
+              {slide.chips.map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[0.76rem] font-medium text-slate-300"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
+          </div>
 
-      {!isSearch && !isVersion && (
-        <g className="onboarding-drift" filter="url(#softShadow)">
-          <rect x="68" y="430" width="386" height="92" rx="28" fill="white" opacity="0.94" />
-          <circle cx="118" cy="476" r="24" fill="#e3e8ff" />
-          <path d="M108 476 h20 M118 466 v20" stroke="#4257b2" strokeWidth="6" strokeLinecap="round" />
-          <rect x="162" y="455" width="138" height="14" rx="7" fill="#4257b2" opacity="0.32" />
-          <rect x="162" y="484" width="222" height="12" rx="6" fill="#0f172a" opacity="0.11" />
-        </g>
-      )}
-    </svg>
+          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#090d18]">
+            <div className="onboarding-scan-line" />
+            {slide.rows.map((row, rowIndex) => (
+              <div
+                key={`${row.title}-${rowIndex}`}
+                className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-white/[0.08] px-4 py-3.5 last:border-b-0"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.055] text-[var(--ow-onboarding-accent)]">
+                  <Icon name={row.icon} size={19} />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">{row.title}</p>
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{row.meta}</p>
+                </div>
+                <span className="rounded-md border border-white/10 bg-white/[0.045] px-2 py-1 text-[0.72rem] font-medium text-slate-300">
+                  {row.state}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="absolute -right-3 bottom-8 hidden w-44 rounded-2xl border border-white/10 bg-white/[0.08] p-3 text-white shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-xl md:block">
+        <div className="flex items-center gap-2 text-[0.72rem] font-medium text-white/60">
+          <span className="h-2 w-2 rounded-full bg-[var(--ow-onboarding-accent)]" />
+          Guided step
+        </div>
+        <p className="mt-2 text-sm leading-5 text-white/[0.85]">강조된 버튼만 따라가면 핵심 기능을 확인합니다.</p>
+      </div>
+    </div>
   )
 }
