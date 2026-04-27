@@ -53,16 +53,13 @@ async def health():
 
 @app.get("/api/app/example-library-path")
 async def example_library_path():
-    candidates = []
-    if getattr(sys, "frozen", False):
-        candidates.extend([
-            Path(sys.executable).parent / "examples" / "officewhere_test_library",
-            Path(sys.executable).parent.parent / "examples" / "officewhere_test_library",
-        ])
-    candidates.extend([
-        Path(__file__).parent.parent / "examples" / "officewhere_test_library",
+    executable_dir = Path(sys.executable).resolve().parent
+    candidates = [
+        executable_dir / "examples" / "officewhere_test_library",
+        executable_dir.parent / "examples" / "officewhere_test_library",
+        Path(__file__).resolve().parent.parent / "examples" / "officewhere_test_library",
         Path.cwd() / "examples" / "officewhere_test_library",
-    ])
+    ]
     for candidate in candidates:
         if candidate.exists():
             return {"available": True, "path": str(candidate)}
@@ -74,12 +71,9 @@ async def example_library_path():
 
 
 # 프론트엔드 static 파일 serve
-# PyInstaller 패키징 여부에 따라 경로 자동 분기
-if getattr(sys, "frozen", False):
-    base = sys._MEIPASS
-else:
-    base = Path(__file__).parent.parent
-
+# Electron packaged releases load the renderer directly, but direct backend
+# execution in development can still serve frontend/dist when present.
+base = Path(__file__).resolve().parent.parent
 static_dir = Path(base) / "frontend" / "dist"
 
 if static_dir.exists():

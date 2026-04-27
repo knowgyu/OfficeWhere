@@ -399,15 +399,13 @@ async function startBackend(port: number) {
 
 function getBackendCommand(port: number, dataDir: string): { file: string; args: string[]; cwd: string } {
   const args = ['--host', HOST, '--port', String(port), '--data-dir', dataDir]
-  const override = process.env.OW_BACKEND_EXE
-  if (override) {
-    return { file: override, args, cwd: path.dirname(override) }
-  }
 
   if (app.isPackaged) {
-    const exeName = process.platform === 'win32' ? 'officewhere-backend.exe' : 'officewhere-backend'
-    const file = path.join(process.resourcesPath, 'backend', exeName)
-    return { file, args, cwd: path.dirname(file) }
+    const backendRoot = path.join(process.resourcesPath, 'backend-source')
+    const script = path.join(backendRoot, 'backend_server.py')
+    const bundledPython = path.join(process.resourcesPath, 'python-runtime', 'python.exe')
+    const configuredPython = process.env.OW_PYTHON
+    return { file: configuredPython || bundledPython, args: [script, ...args], cwd: backendRoot }
   }
 
   const repoRoot = path.resolve(app.getAppPath(), '..')

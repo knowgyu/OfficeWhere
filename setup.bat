@@ -10,7 +10,7 @@ if %errorlevel% neq 0 (
     where python >nul 2>&1
     if %errorlevel% neq 0 (
         echo [오류] Python이 설치되어 있지 않습니다.
-        call :OfferWingetInstall "Python 3.12" "Python.Python.3.12" "https://www.python.org/downloads/windows/"
+        call :OfferWingetInstall "Python 3.13" "Python.Python.3.13" "https://www.python.org/downloads/windows/"
         echo.
         echo Python 설치 후 새 CMD/PowerShell 창에서 setup.bat을 다시 실행하세요.
         pause
@@ -21,11 +21,11 @@ if %errorlevel% neq 0 (
     set "PYTHON_CMD=py -3"
 )
 
-%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
+%PYTHON_CMD% -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [오류] Python 3.10 이상이 필요합니다.
+    echo [오류] Python 3.11 이상이 필요합니다.
     %PYTHON_CMD% --version
-    call :OfferWingetInstall "Python 3.12" "Python.Python.3.12" "https://www.python.org/downloads/windows/"
+    call :OfferWingetInstall "Python 3.13" "Python.Python.3.13" "https://www.python.org/downloads/windows/"
     echo.
     echo Python 설치 후 새 CMD/PowerShell 창에서 setup.bat을 다시 실행하세요.
     pause

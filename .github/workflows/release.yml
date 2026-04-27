@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "릴리스 태그 (예: v0.1.2). 비워두면 Actions artifact만 생성합니다."
+        description: "릴리스 태그 (예: v0.3.5). 비워두면 Actions artifact만 생성합니다."
         required: false
         type: string
       release_name:
@@ -99,7 +99,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -108,7 +108,14 @@ jobs:
           cache: "npm"
           cache-dependency-path: "frontend/package-lock.json"
 
-      - name: Install Python dependencies
+      - name: Verify bundled Python runtime exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "python-runtime/win-x64/python.exe")) {
+            throw "Bundled Python runtime is missing: python-runtime/win-x64/python.exe"
+          }
+
+      - name: Install Python dependencies for tests
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
@@ -136,10 +143,6 @@ jobs:
       - name: Run demo checks
         shell: pwsh
         run: python scripts/run_demo_checks.py
-
-      - name: Build backend executable
-        shell: pwsh
-        run: python -m PyInstaller officewhere_backend.spec --clean -y
 
       - name: Build Electron Windows zip
         working-directory: frontend
@@ -185,108 +188,12 @@ jobs:
             ${{ steps.bundle.outputs.sha_path }}
           if-no-files-found: error
 
-  macos-arm64-release:
-    name: macOS arm64
-    needs: release-metadata
-    runs-on: macos-latest
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PYTHONUTF8: "1"
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: "frontend/package-lock.json"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
-      - name: Build Electron main process
-        working-directory: frontend
-        run: npm run build:electron
-
-      - name: Run backend tests
-        run: pytest -q
-
-      - name: Run demo checks
-        run: python scripts/run_demo_checks.py
-
-      - name: Build backend executable
-        run: python -m PyInstaller officewhere_backend.spec --clean -y
-
-      - name: Build Electron macOS arm64 bundle
-        working-directory: frontend
-        run: npm run package:mac
-
-      - name: Package macOS release bundle
-        id: bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          bundle_name="officewhere-${{ needs.release-metadata.outputs.version }}-mac-arm64"
-          rm -f "$bundle_name.dmg" "$bundle_name.zip" "$bundle_name.sha256.txt"
-
-          source_dmg="$(find dist/electron -maxdepth 1 -name 'officewhere-*-mac-arm64.dmg' -print | sort | tail -n 1)"
-          source_zip="$(find dist/electron -maxdepth 1 -name 'officewhere-*-mac-arm64.zip' -print | sort | tail -n 1)"
-
-          if [[ -z "$source_dmg" || -z "$source_zip" ]]; then
-            echo "macOS artifacts were not created." >&2
-            find dist/electron -maxdepth 1 -type f -print >&2 || true
-            exit 1
-          fi
-
-          cp "$source_dmg" "$bundle_name.dmg"
-          cp "$source_zip" "$bundle_name.zip"
-          shasum -a 256 "$bundle_name.dmg" "$bundle_name.zip" > "$bundle_name.sha256.txt"
-
-          {
-            echo "bundle_name=$bundle_name"
-            echo "dmg_path=$bundle_name.dmg"
-            echo "zip_path=$bundle_name.zip"
-            echo "sha_path=$bundle_name.sha256.txt"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Upload macOS workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.bundle.outputs.bundle_name }}
-          path: |
-            ${{ steps.bundle.outputs.dmg_path }}
-            ${{ steps.bundle.outputs.zip_path }}
-            ${{ steps.bundle.outputs.sha_path }}
-          if-no-files-found: error
-
   publish-release:
     name: Publish GitHub Release assets
     if: needs.release-metadata.outputs.tag != ''
     needs:
       - release-metadata
       - windows-release
-      - macos-arm64-release
     runs-on: ubuntu-latest
     steps:
       - name: Download release artifacts
@@ -321,7 +228,7 @@ jobs:
             release create "$RELEASE_TAG" "${assets[@]}"
             --title "$RELEASE_NAME"
             --target "$GITHUB_SHA"
-            --notes "Desktop builds generated by GitHub Actions."
+            --notes "Windows desktop build generated by GitHub Actions."
           )
 
           if [[ "$RELEASE_DRAFT" == "true" ]]; then

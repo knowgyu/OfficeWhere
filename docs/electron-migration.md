@@ -4,7 +4,7 @@ Electron은 OfficeWhere의 기본 데스크톱 shell이다. Python/FastAPI/SQLit
 
 ## 현재 결정
 
-- Electron main process가 backend executable을 실행하고 종료 시 정리한다.
+- Electron main process가 backend server를 실행하고 종료 시 정리한다.
 - backend는 `127.0.0.1`의 사용 가능한 포트에 바인딩한다.
 - preload bridge는 OfficeWhere용 제한된 함수만 `window.officeWhere`에 노출한다.
   - `getBackendBaseUrl`
@@ -46,13 +46,13 @@ build.bat
 
 빌드 단계:
 
-1. `frontend`: `npm ci`
-2. renderer build: `npm run build`
-3. Electron main/preload build: `npm run build:electron`
-4. backend executable: `python -m PyInstaller officewhere_backend.spec --clean -y`
+1. bundled Python runtime 확인: `python-runtime/win-x64/python.exe`
+2. `frontend`: `npm ci`
+3. renderer build: `npm run build`
+4. Electron main/preload build: `npm run build:electron`
 5. Windows zip: `npm run package:win`
 
-backend executable의 output 이름은 `officewhere-backend`로 유지한다.
+Packaged Windows app은 `resources/python-runtime/python.exe`로 `resources/backend-source/backend_server.py`를 실행한다. 사용자는 Python이나 pip를 별도로 설치하지 않는다.
 
 ## Backend 환경 변수
 
@@ -66,16 +66,15 @@ OfficeWhere backend는 `OW_*` 환경 변수만 읽는다.
 | `OW_LOG_LEVEL` | uvicorn log level |
 | `OW_MAX_WORKERS` | Office parsing worker cap |
 
-Electron 개발 실행에서 backend 실행 파일이나 Python interpreter를 직접 지정할 때도 `OW_*` 이름을 우선한다.
+Electron 개발 실행에서 Python interpreter를 직접 지정할 때도 `OW_*` 이름을 우선한다.
 
 | Environment variable | 용도 |
 | --- | --- |
-| `OW_BACKEND_EXE` | packaged backend executable override |
-| `OW_PYTHON` | source checkout 실행 시 Python executable override |
+| `OW_PYTHON` | 개발 실행 또는 packaged 진단 시 Python executable override |
 
 ## GitHub Actions Release
 
-태그 `vX.Y.Z`를 push하면 `.github/workflows/release.yml`이 Windows zip과 SHA256 파일을 Release asset으로 업로드한다.
+태그 `vX.Y.Z`를 push하면 `.github/workflows/release.yml`이 embedded Python runtime을 포함한 Windows zip과 SHA256 파일을 Release asset으로 업로드한다.
 
 수동 실행에서는 `release_tag`를 비우면 Actions artifact만 만들고, 값을 입력하면 해당 태그의 Release를 생성하거나 갱신한다.
 

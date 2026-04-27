@@ -19,6 +19,12 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+if not exist "python-runtime\win-x64\python.exe" (
+    echo [오류] 번들 Python 런타임을 찾을 수 없습니다: python-runtime\win-x64\python.exe
+    pause
+    exit /b 1
+)
+
 cd frontend
 call npm ci
 if %errorlevel% neq 0 (
@@ -41,25 +47,8 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
-cd ..
-
-echo [officewhere] Backend PyInstaller 패키징 중...
-
-if not exist "venv\Scripts\python.exe" (
-    echo [오류] 가상환경 Python을 찾을 수 없습니다. setup.bat을 먼저 실행하세요.
-    pause
-    exit /b 1
-)
-
-venv\Scripts\python.exe -m PyInstaller officewhere_backend.spec --clean -y
-if %errorlevel% neq 0 (
-    echo [오류] Backend PyInstaller 패키징 실패
-    pause
-    exit /b 1
-)
 
 echo [officewhere] Electron Windows zip 패키징 중...
-cd frontend
 call npm run package:win
 if %errorlevel% neq 0 (
     echo [오류] Electron 패키징 실패

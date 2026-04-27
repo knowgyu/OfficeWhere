@@ -1,16 +1,16 @@
 """
 Backend-only entrypoint for Electron.
 
-This process starts FastAPI without opening any desktop shell. Runtime settings
+This script starts FastAPI without opening any desktop shell. Runtime settings
 can be passed as flags or environment variables so Electron can choose a free
-localhost port and a per-user data directory.
+localhost port and a per-user data directory. Packaged Windows builds run this
+file through OfficeWhere's bundled embedded Python runtime.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import multiprocessing
 import os
 import sys
 from pathlib import Path
@@ -41,16 +41,10 @@ def main():
 
     import uvicorn
 
-    if getattr(sys, "frozen", False):
-        from backend.main import app
-
-        uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
-    else:
-        uvicorn.run("backend.main:app", host=args.host, port=args.port, log_level=args.log_level)
+    uvicorn.run("backend.main:app", host=args.host, port=args.port, log_level=args.log_level)
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     main()

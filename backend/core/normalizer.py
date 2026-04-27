@@ -1,7 +1,5 @@
 import re
-from typing import List, Optional, Tuple
-
-SIMILARITY_THRESHOLD = 85
+from typing import List, Optional
 
 
 def normalize_key(value: str) -> str:
@@ -40,64 +38,6 @@ def values_equal(a: str, b: str) -> bool:
         return float(na.replace(",", "")) == float(nb.replace(",", ""))
     except ValueError:
         return False
-
-
-def are_keys_similar(key1: str, key2: str) -> bool:
-    """두 key가 유사한지 확인 (rapidfuzz ratio >= 85)"""
-    from rapidfuzz import fuzz
-
-    norm1 = normalize_key(key1)
-    norm2 = normalize_key(key2)
-    if norm1 == norm2:
-        return True
-    score = fuzz.ratio(norm1, norm2)
-    return score >= SIMILARITY_THRESHOLD
-
-
-def are_columns_similar(col1: str, col2: str) -> bool:
-    """두 컬럼명이 유사한지 확인 (동일 threshold 사용)"""
-    from rapidfuzz import fuzz
-
-    norm1 = normalize_key(col1)
-    norm2 = normalize_key(col2)
-    if norm1 == norm2:
-        return True
-    score = fuzz.ratio(norm1, norm2)
-    return score >= SIMILARITY_THRESHOLD
-
-
-def group_similar_columns(columns: List[str]) -> List[List[str]]:
-    """
-    유사한 컬럼명들을 그룹으로 묶어 반환.
-    반환: [[col1, col2], [col3], ...]
-    """
-    groups: List[List[str]] = []
-    used = [False] * len(columns)
-
-    for i, col in enumerate(columns):
-        if used[i]:
-            continue
-        group = [col]
-        used[i] = True
-        for j in range(i + 1, len(columns)):
-            if not used[j] and are_columns_similar(col, columns[j]):
-                group.append(columns[j])
-                used[j] = True
-        groups.append(group)
-
-    return groups
-
-
-def find_canonical_key(variants: List[str]) -> str:
-    """
-    여러 변형 key 중 정규화된 대표 key 반환.
-    정규화 후 가장 짧은 것을 대표로 사용.
-    """
-    if not variants:
-        return ""
-    normalized = [normalize_key(v) for v in variants]
-    # 가장 짧은 정규화 결과를 canonical로 사용
-    return min(normalized, key=len)
 
 
 def suggest_key_column(columns: List[str]) -> Optional[str]:

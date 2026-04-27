@@ -35,8 +35,8 @@ OfficeWhere는 회사 폴더, 연구 자료, 수업 과제, 프로젝트 산출�
 
 - [Releases](../../releases) 페이지에서 최신 배포 파일 다운로드
 - Windows: `officewhere-vX.Y.Z-windows-x64.zip` 압축 해제 후 `OfficeWhere.exe` 실행
-- macOS Apple Silicon: `officewhere-vX.Y.Z-mac-arm64.dmg` 또는 `.zip` 다운로드
 - 별도 설치 과정 없음
+- macOS / Linux 패키지는 embedded Python 방식으로 추후 지원 예정
 
 ## 웹 브라우저에서 빠르게 테스트하기
 
@@ -95,8 +95,9 @@ http://127.0.0.1:15173
 
 필요한 도구:
 
-- Python 3.10 이상
 - Node.js LTS
+- 개발/테스트용 Python 3.11 이상 (`setup.*`, `dev-web.*`, pytest 실행 시; 3.13 권장)
+- Windows 배포 빌드는 repo에 포함된 `python-runtime/win-x64/python.exe`를 사용
 
 ### Windows
 
@@ -108,6 +109,7 @@ build.bat
 결과:
 
 - `dist/electron/` 아래 Windows zip 생성
+- zip에는 OfficeWhere 전용 embedded Python runtime과 backend source가 함께 포함됨
 - zip 압축 해제 후 `OfficeWhere.exe` 실행
 
 ### Linux / macOS
@@ -120,19 +122,9 @@ chmod +x setup.sh build.sh
 
 결과:
 
-- frontend / Electron main / backend 패키징 검증
-- macOS에서 실행 시 `dist/electron/` 에 Apple Silicon용 `.dmg` 와 `.zip` 생성
-  - 산출물 예: `dist/electron/officewhere-<앱버전>-mac-arm64.dmg`
-- Windows zip은 build.bat 또는 GitHub Actions에서 별도 생성
-
-처음 macOS 빌드를 실행할 때는 ad-hoc 서명만 적용되므로 Gatekeeper가 경고를 띄울 수 있습니다.
-첫 실행은 우클릭 → "열기" 로 진행하거나 다음 명령으로 quarantine 속성을 제거하세요.
-
-```bash
-xattr -dr com.apple.quarantine /Applications/OfficeWhere.app
-```
-
-정식 코드 사이닝/공증(notarization) 은 아직 적용되어 있지 않습니다.
+- frontend / Electron main 빌드 검증
+- macOS / Linux packaged release는 Windows와 같은 embedded Python 방향으로 추후 정리 예정
+- Windows zip은 build.bat 또는 GitHub Actions에서 생성
 
 ## 데이터 저장 위치
 
