@@ -157,3 +157,7 @@ OfficeWhere는 원본 문서를 복사하거나 수정하지 않습니다.
 - 앱을 초기화하려면 **설정 → 앱 데이터 관리**를 사용합니다.
 - 앱 데이터 삭제는 DB·색인·캐시만 삭제합니다.
 - 사용자가 등록한 원본 문서 폴더는 삭제하지 않습니다.
+
+## 라이선스
+
+OfficeWhere는 GNU General Public License v3.0 전용(GPL-3.0-only)으로 배포됩니다. 자세한 내용은 [LICENSE](LICENSE)를 참고하세요.

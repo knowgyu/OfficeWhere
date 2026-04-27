@@ -1534,21 +1534,66 @@ function excelIssueTitle(issue: ExcelCheckIssue) {
   return issue.message
 }
 
-function excelIssueSubtext(issue: ExcelCheckIssue) {
-  if (issue.type === 'missing_column') {
-    return issue.columnGroup ? `항목 ${issue.columnGroup}` : ''
-  }
-  return issue.key ? `기준값 ${issue.key}` : ''
-}
-
 function conflictStatus(conflict: ExcelCheckIssue['conflicts'][number]) {
   return conflict.values.join(' | ') || (conflict.rowValues.length > 0 ? '내용 있음' : '-')
 }
 
-function isAbsentExcelConflict(conflict: ExcelCheckIssue['conflicts'][number]) {
-  if (conflict.rowValues.length > 0) return false
-  const status = conflict.values.join(' ')
-  return /없음|누락/.test(status)
+type UiTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'tertiary'
+
+type ExcelDigestRow = {
+  id: string
+  issue: ExcelCheckIssue
+  label: string
+  tone: UiTone
+  icon: string
+  location: string
+  beforeText: string
+  latestText: string
+}
+
+const EXCEL_ISSUE_META: Record<
+  ExcelCheckIssue['type'],
+  { label: string; tone: UiTone; icon: string }
+> = {
+  value_conflict: { label: '값 변경', tone: 'warning', icon: 'change_circle' },
+  value_added: { label: '추가', tone: 'success', icon: 'add_circle' },
+  value_removed: { label: '삭제', tone: 'danger', icon: 'do_not_disturb_on' },
+  value_presence: { label: '있음/없음', tone: 'warning', icon: 'rule' },
+  missing_key: { label: '행 추가/삭제', tone: 'warning', icon: 'difference' },
+  missing_column: { label: '열 추가/삭제', tone: 'warning', icon: 'view_column' },
+}
+
+function emptyExcelValueLabel(value: string) {
+  return isEmptyExcelValue(value) ? '(빈 값)' : value
+}
+
+function excelConflictDisplayText(conflict?: ExcelCheckIssue['conflicts'][number]) {
+  if (!conflict) return '-'
+  const text = conflictStatus(conflict)
+  return emptyExcelValueLabel(text)
+}
+
+function buildExcelDigestRows(issues: ExcelCheckIssue[]): ExcelDigestRow[] {
+  return issues.map((issue) => {
+    const meta = EXCEL_ISSUE_META[issue.type]
+    const firstConflict = issue.conflicts[0]
+    const lastConflict = issue.conflicts[issue.conflicts.length - 1]
+    const location = firstExcelLocation(issue) || '-'
+    const beforeText = excelConflictDisplayText(firstConflict)
+    const latestText =
+      lastConflict && lastConflict !== firstConflict ? excelConflictDisplayText(lastConflict) : ''
+
+    return {
+      id: issue.id,
+      issue,
+      label: meta.label,
+      tone: meta.tone,
+      icon: meta.icon,
+      location,
+      beforeText,
+      latestText: latestText || (issue.type === 'value_removed' ? '(빈 값)' : issue.message),
+    }
+  })
 }
 
 function ExcelCheckResult({
@@ -1589,265 +1634,212 @@ function ExcelCheckResult({
         </div>
       )}
 
-      {(!compact || valueConflicts.length > 0) && (
-        <ExcelIssueSection
-          title="값 변경"
-          icon="report_problem"
-          description="셀 값이 이전 버전과 달라진 항목입니다."
-          issues={valueConflicts}
-        />
-      )}
-      {(!compact || contentChanges.length > 0) && (
-        <ExcelIssueSection
-          title="추가/삭제된 내용"
-          icon="difference"
-          description="새로 생기거나 사라진 셀/행 내용을 필요할 때 펼쳐 확인합니다."
-          issues={contentChanges}
-        />
+      {result.issues.length === 0 ? (
+        <Card variant="outlined" className="px-6 py-8 text-center">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">Excel 변경점이 없습니다.</p>
+          <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            비교한 파일 사이에서 표시할 값 변경이나 추가/삭제를 찾지 못했습니다.
+          </p>
+        </Card>
+      ) : (
+        <ExcelChangeDigest result={result} compact={compact} />
       )}
     </div>
   )
 }
 
-function ExcelIssueSection({
-  title,
-  description,
-  icon,
-  issues,
+function ExcelChangeDigest({
+  result,
+  compact,
 }: {
-  title: string
-  description: string
-  icon: string
-  issues: ExcelCheckIssue[]
+  result: Extract<CheckResponse, { mode: 'excel' }>
+  compact: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const rows = useMemo(() => buildExcelDigestRows(result.issues), [result.issues])
+  const changedCount = rows.filter((row) => row.issue.type === 'value_conflict').length
+  const addedCount = rows.filter((row) => row.issue.type === 'value_added').length
+  const removedCount = rows.filter((row) => row.issue.type === 'value_removed').length
+  const otherCount = rows.length - changedCount - addedCount - removedCount
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedRow = rows.find((row) => row.id === selectedId) ?? rows[0] ?? null
 
   return (
     <Card variant="outlined" className="overflow-hidden">
-      <button
-        type="button"
-        className="state-host relative flex w-full items-center gap-2 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-6 py-3 text-left"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-      >
-        <span className="state-layer" />
-        <Icon
-          name={icon}
-          size={20}
-          className="relative text-[var(--md-sys-color-on-surface-variant)]"
-        />
-        <div className="relative min-w-0">
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{title}</p>
-          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{description}</p>
+      <header className="border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-4 py-3 sm:px-5">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Icon name="troubleshoot" size={20} className="text-[var(--md-sys-color-primary)]" />
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 빠른 보기</p>
+            </div>
+            <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              변경·추가·삭제된 셀만 한 표에 모아 보여줍니다. 행을 누르면 아래에서 파일별 값을 확인할 수 있습니다.
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap justify-end">
+            <Badge tone={changedCount > 0 ? 'warning' : 'neutral'}>{changedCount}건 변경</Badge>
+            <Badge tone={addedCount > 0 ? 'success' : 'neutral'}>{addedCount}건 추가</Badge>
+            <Badge tone={removedCount > 0 ? 'danger' : 'neutral'}>{removedCount}건 삭제</Badge>
+            {otherCount > 0 && <Badge tone="neutral">{otherCount}건 기타</Badge>}
+          </div>
         </div>
-        <span className="relative ml-auto flex items-center gap-2">
-          <Badge tone={issues.length > 0 ? 'warning' : 'neutral'}>
-            {issues.length}건
-          </Badge>
-          <Icon
-            name={open ? 'expand_less' : 'expand_more'}
-            size={20}
-            className="text-[var(--md-sys-color-on-surface-variant)]"
-          />
-        </span>
-      </button>
+      </header>
 
-      {open && (
-        issues.length === 0 ? (
-          <p className="px-6 py-6 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            해당 이슈가 없습니다.
-          </p>
-        ) : (
-          <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-            {issues.map((issue) => (
-              <li key={issue.id} className="px-6 py-4 space-y-3">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                        {excelIssueTitle(issue)}
-                      </span>
-                      <Badge tone={issue.severity === 'conflict' ? 'danger' : 'warning'}>
-                        {issue.severity === 'conflict' ? '확인 필요' : '주의'}
-                      </Badge>
-                    </div>
-                    {excelIssueSubtext(issue) && (
-                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
-                        {excelIssueSubtext(issue)}
-                      </p>
-                    )}
-                  </div>
-                  <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)] max-w-md">
-                    {issue.message}
-                  </p>
-                </div>
-
-                <ExcelIssueTable issue={issue} />
-              </li>
-            ))}
-          </ul>
-        )
-      )}
+      <div className={`grid grid-cols-1 ${compact ? 'xl:grid-cols-[minmax(0,1fr)_20rem]' : 'xl:grid-cols-[minmax(0,1fr)_22rem]'}`}>
+        <ExcelDigestTable
+          rows={rows}
+          selectedId={selectedRow?.id ?? null}
+          onSelect={setSelectedId}
+        />
+        <ExcelDigestDetailPanel row={selectedRow} />
+      </div>
     </Card>
   )
 }
 
-function ExcelIssueTable({ issue }: { issue: ExcelCheckIssue }) {
-  if (issue.type === 'missing_key' || issue.type === 'missing_column') {
-    return <ExcelContentPreviewTable issue={issue} />
-  }
-  return <ExcelValueIssueTable issue={issue} valueHeader={issue.type === 'value_conflict' ? '값' : '내용'} />
-}
-
-function ExcelValueIssueTable({
-  issue,
-  valueHeader = '값',
+function ExcelDigestTable({
+  rows,
+  selectedId,
+  onSelect,
 }: {
-  issue: ExcelCheckIssue
-  valueHeader?: string
+  rows: ExcelDigestRow[]
+  selectedId: string | null
+  onSelect: (id: string) => void
 }) {
   return (
-    <div className="overflow-x-auto rounded-md border border-[var(--md-sys-color-outline-variant)]">
-      <table className="min-w-full text-sm">
-        <thead className="bg-[var(--md-sys-color-surface-container-low)]">
-          <tr>
-            {['파일', '위치', valueHeader].map((header) => (
-              <th
-                key={header}
-                className="px-3 py-2 text-left type-label-md text-[var(--md-sys-color-on-surface-variant)]"
-              >
-                {header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-          {issue.conflicts.map((conflict) => (
-            <tr key={`${issue.id}-${conflict.fileId}`} className="bg-[var(--md-sys-color-surface-container-lowest)]">
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
-                {conflict.fileName}
-              </td>
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap font-mono">
-                {formatExcelLocation(conflict)}
-              </td>
-              <td className="px-3 py-2 text-[var(--md-sys-color-on-surface)] whitespace-nowrap font-mono">
-                {conflict.values.join(' | ') || '(빈 값)'}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function ExcelContentPreviewTable({ issue }: { issue: ExcelCheckIssue }) {
-  const presentConflicts = issue.conflicts.filter((conflict) => !isAbsentExcelConflict(conflict))
-  const absentConflicts = issue.conflicts.filter(isAbsentExcelConflict)
-
-  return (
-    <div className="space-y-3">
-      {presentConflicts.length === 0 ? (
-        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          표시할 추가/삭제 내용이 없습니다.
+    <section className="min-w-0">
+      <div className="flex items-start justify-between gap-3 px-4 py-3 sm:px-5">
+        <div className="min-w-0">
+          <p className="type-label-md text-[var(--md-sys-color-on-surface)]">셀 변경</p>
+          <p className="mt-0.5 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            빈 값에서 채워진 셀은 추가, 값이 사라진 셀은 삭제로 표시합니다.
+          </p>
+        </div>
+        <Chip label={`${rows.length}건`} tone={rows.length > 0 ? 'primary' : 'neutral'} as="span" />
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 pb-4 type-body-sm text-[var(--md-sys-color-on-surface-variant)] sm:px-5">
+          변경된 셀이 없습니다.
         </p>
       ) : (
-        presentConflicts.map((conflict) => {
-          const location = formatExcelLocation(conflict)
-          const visibleCount = conflict.rowValues.length
-          const countLabel =
-            conflict.rowCount > visibleCount && visibleCount > 0
-              ? `표시 ${visibleCount}/${conflict.rowCount}개`
-              : conflict.rowCount > 0
-                ? `${conflict.rowCount}개 값`
-                : ''
-          return (
-            <div
-              key={`${issue.id}-${conflict.fileId}`}
-              className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-3"
-            >
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge tone={conflict.values.some((value) => value.includes('삭제')) ? 'danger' : 'success'}>
-                      {conflictStatus(conflict)}
+        <div className="max-h-[24rem] overflow-auto overscroll-contain border-t border-[var(--md-sys-color-outline-variant)]">
+          <table className="min-w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-[var(--md-sys-color-surface-container-high)] shadow-[0_1px_0_var(--md-sys-color-outline-variant)]">
+              <tr>
+                {['위치', '이전 값', '최신 값', '상태'].map((header) => (
+                  <th
+                    key={header}
+                    className="px-3 py-2 text-left type-label-sm text-[var(--md-sys-color-on-surface-variant)] whitespace-nowrap"
+                  >
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--md-sys-color-outline-variant)]">
+              {rows.map((row) => (
+                <tr
+                  key={row.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onSelect(row.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelect(row.id)
+                    }
+                  }}
+                  className={`cursor-pointer transition-colors hover:bg-[var(--md-sys-color-surface-container-low)] ${
+                    selectedId === row.id
+                      ? 'bg-[var(--md-sys-color-primary-container)]/28 ring-1 ring-inset ring-[var(--md-sys-color-primary)]/40'
+                      : 'bg-[var(--md-sys-color-surface-container-lowest)]'
+                  }`}
+                >
+                  <td className="px-3 py-2 font-mono text-xs text-[var(--md-sys-color-on-surface)] whitespace-nowrap">
+                    {row.location}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs text-red-950">
+                    <div className="max-w-[16rem] truncate rounded-md bg-red-50 px-2 py-1" title={row.beforeText}>
+                      {row.beforeText}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs text-emerald-950">
+                    <div className="max-w-[16rem] truncate rounded-md bg-emerald-50 px-2 py-1" title={row.latestText}>
+                      {row.latestText}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <Badge tone={row.tone}>
+                      <Icon name={row.icon} size={14} /> {row.label}
                     </Badge>
-                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)] break-all">
-                      {conflict.fileName}
-                    </p>
-                  </div>
-                  {location !== '-' && (
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 font-mono">
-                      {location}
-                    </p>
-                  )}
-                </div>
-                {countLabel && <Chip label={countLabel} tone="neutral" as="span" />}
-              </div>
-              {conflict.rowValues.length > 0 ? (
-                <ExcelRowPreview conflict={conflict} />
-              ) : (
-                <p className="type-body-sm text-[var(--md-sys-color-on-surface)] font-mono">
-                  {conflict.values.join(' | ')}
-                </p>
-              )}
-            </div>
-          )
-        })
-      )}
-
-      {absentConflicts.length > 0 && (
-        <div className="rounded-md border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3">
-          <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">내용이 없는 파일</p>
-          <div className="mt-2 flex gap-2 flex-wrap">
-            {absentConflicts.map((conflict) => (
-              <Chip
-                key={`${issue.id}-absent-${conflict.fileId}`}
-                label={`${conflict.fileName} · ${conflictStatus(conflict)}`}
-                tone="neutral"
-                as="span"
-              />
-            ))}
-          </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
-    </div>
+    </section>
   )
 }
 
-function ExcelRowPreview({ conflict }: { conflict: ExcelCheckIssue['conflicts'][number] }) {
-  const columns = conflict.columns.length > 0
-    ? conflict.columns
-    : conflict.rowValues[0]?.map((_, index) => `열 ${index + 1}`) ?? []
+function ExcelDigestDetailPanel({ row }: { row: ExcelDigestRow | null }) {
+  if (!row) {
+    return (
+      <aside className="border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 xl:border-l xl:border-t-0">
+        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경 상세</p>
+        <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          변경 행을 선택하면 파일별 값과 위치를 확인할 수 있습니다.
+        </p>
+      </aside>
+    )
+  }
 
   return (
-    <div className="max-w-[720px] overflow-x-auto rounded border border-[var(--md-sys-color-outline-variant)]">
-      <table className="text-xs min-w-max">
-        <thead className="bg-[var(--md-sys-color-surface-container-low)]">
-          <tr>
-            {columns.map((column, index) => (
-              <th
-                key={`${column}-${index}`}
-                className="px-2 py-1 text-left type-label-sm text-[var(--md-sys-color-on-surface-variant)] whitespace-nowrap"
-              >
-                {column}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {conflict.rowValues.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-t border-[var(--md-sys-color-outline-variant)]">
-              {columns.map((column, columnIndex) => (
-                <td key={`${column}-${columnIndex}`} className="px-2 py-1 whitespace-nowrap font-mono">
-                  {row[columnIndex] || '(빈 값)'}
-                </td>
+    <aside className="min-w-0 border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 xl:border-l xl:border-t-0">
+      <div className="sticky top-0 space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge tone={row.tone}>
+            <Icon name={row.icon} size={14} /> {row.label}
+          </Badge>
+          <span className="font-mono type-label-md text-[var(--md-sys-color-on-surface-variant)]">{row.location}</span>
+        </div>
+        <div>
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{excelIssueTitle(row.issue)}</p>
+          <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{row.issue.message}</p>
+        </div>
+
+        <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-2">
+          <p className="type-label-md text-[var(--md-sys-color-on-surface)]">파일별 값</p>
+          {row.issue.conflicts.length === 0 ? (
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              파일별 상세 값이 없습니다.
+            </p>
+          ) : (
+            <div className="max-h-56 space-y-2 overflow-auto overscroll-contain pr-1">
+              {row.issue.conflicts.map((conflict) => (
+                <div
+                  key={`${row.id}-detail-${conflict.fileId}`}
+                  className="rounded-md bg-[var(--md-sys-color-surface-container-low)] px-3 py-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 truncate type-label-sm text-[var(--md-sys-color-on-surface)]" title={conflict.fileName}>
+                      {conflict.fileName}
+                    </p>
+                    <span className="shrink-0 font-mono text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                      {formatExcelLocation(conflict)}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-3 whitespace-pre-wrap break-words font-mono text-xs text-[var(--md-sys-color-on-surface)]">
+                    {excelConflictDisplayText(conflict)}
+                  </p>
+                </div>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
   )
 }
 

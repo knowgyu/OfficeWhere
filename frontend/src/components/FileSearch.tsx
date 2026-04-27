@@ -438,10 +438,6 @@ export default function FileSearch() {
           <span className="inline-flex items-center gap-1.5">
             <Icon name="bolt" size={16} /> {SEARCH_SCOPE_STATUS[searchScope]}
           </span>
-          <span className="hidden sm:inline-flex items-center gap-1.5">
-            <kbd className="kbd-token">600ms</kbd>
-            <span>입력 후 자동 검색</span>
-          </span>
           {lastReindex && (
             <span className="inline-flex items-center gap-1.5">
               <Icon name="schedule" size={16} /> 마지막 검색 갱신 {lastReindex}

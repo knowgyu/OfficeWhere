@@ -1,7 +1,7 @@
 {
   "name": "officewhere",
   "productName": "OfficeWhere",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -83,5 +83,6 @@
       "artifactName": "officewhere-${version}-mac-${arch}.${ext}",
       "identity": null
     }
-  }
+  },
+  "license": "GPL-3.0-only"
 }

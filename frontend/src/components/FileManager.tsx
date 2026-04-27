@@ -587,87 +587,91 @@ export default function FileManager() {
 
   return (
     <div className="space-y-6">
-      <Card variant="elevated">
-        <CardSection
-          title="화면 표시"
-          description="앱 전체 글자 크기를 조정합니다."
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
-            {APP_TEXT_SIZE_ORDER.map((size) => (
-              <button
-                key={size}
-                type="button"
-                onClick={() => setTextSize(size)}
-                className={`state-host relative text-left rounded-md border px-3 py-2.5 transition-colors ${
-                  textSize === size
-                    ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/40'
-                    : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-low)]'
-                }`}
-              >
-                <span className="state-layer" />
-                <span className="relative flex items-center justify-between gap-2">
-                  <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                    {APP_TEXT_SIZE_LABELS[size]}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <Card variant="outlined">
+          <CardSection
+            title="화면 표시"
+            description="앱 전체 글자 크기를 조정합니다."
+            className="p-4"
+          >
+            <div className="grid grid-cols-2 gap-2">
+              {APP_TEXT_SIZE_ORDER.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => setTextSize(size)}
+                  className={`state-host relative text-left rounded-md border px-2.5 py-2 transition-colors ${
+                    textSize === size
+                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/40'
+                      : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-low)]'
+                  }`}
+                >
+                  <span className="state-layer" />
+                  <span className="relative flex items-center justify-between gap-2">
+                    <span className="type-label-md text-[var(--md-sys-color-on-surface)]">
+                      {APP_TEXT_SIZE_LABELS[size]}
+                    </span>
+                    {textSize === size && <Icon name="check_circle" size={18} filled className="text-[var(--md-sys-color-primary)]" />}
                   </span>
-                  {textSize === size && <Icon name="check_circle" size={20} filled className="text-[var(--md-sys-color-primary)]" />}
-                </span>
-                <span className="relative block type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-2">
-                  {APP_TEXT_SIZE_DESCRIPTIONS[size]}
-                </span>
-              </button>
-            ))}
-          </div>
-        </CardSection>
-      </Card>
+                  <span className="relative mt-1 block text-xs text-[var(--md-sys-color-on-surface-variant)]">
+                    {APP_TEXT_SIZE_DESCRIPTIONS[size]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </CardSection>
+        </Card>
 
-      <Card variant="elevated">
-        <CardSection
-          title="창 닫기 동작"
-          description="X 버튼을 눌렀을 때 트레이로 보낼지, 완전히 종료할지 선택합니다."
-        >
-          {!closeBehaviorAvailable ? (
-            <EmptyState
-              icon="desktop_windows"
-              title="Electron 앱에서만 사용할 수 있습니다"
-              description="브라우저/개발 서버 모드에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
-              compact
-            />
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,360px)_1fr] gap-4 items-start">
-              <SelectField
-                label="X 버튼 동작"
-                value={closeBehavior}
-                onChange={(event) => void handleUpdateCloseBehavior(event.target.value as CloseBehavior)}
-                disabled={closeBehaviorLoading}
-                helper="트레이로 보내기를 선택하면 창은 사라지지만 OfficeWhere가 백그라운드에서 계속 실행됩니다."
-              >
-                <option value="ask">{CLOSE_BEHAVIOR_LABELS.ask}</option>
-                <option value="hide">{CLOSE_BEHAVIOR_LABELS.hide}</option>
-                <option value="quit">{CLOSE_BEHAVIOR_LABELS.quit}</option>
-              </SelectField>
-              <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 flex items-start gap-3">
-                <Icon
-                  name={closeBehavior === 'quit' ? 'power_settings_new' : 'move_to_inbox'}
-                  size={22}
-                  className="mt-0.5 text-[var(--md-sys-color-primary)]"
-                />
-                <div className="min-w-0 space-y-1">
-                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                    현재 설정 · {CLOSE_BEHAVIOR_LABELS[closeBehavior]}
-                  </p>
-                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                    {closeBehavior === 'ask'
-                      ? '창을 닫을 때마다 백그라운드 실행/종료/취소를 고를 수 있습니다.'
-                      : closeBehavior === 'hide'
-                        ? '창을 닫으면 트레이에 남고, 트레이 메뉴에서 열기 또는 종료를 선택할 수 있습니다.'
-                        : '창을 닫으면 앱과 백그라운드 색인이 함께 종료됩니다.'}
-                  </p>
+        <Card variant="outlined">
+          <CardSection
+            title="창 닫기 동작"
+            description="X 버튼을 눌렀을 때 트레이로 보낼지, 완전히 종료할지 선택합니다."
+            className="p-4"
+          >
+            {!closeBehaviorAvailable ? (
+              <EmptyState
+                icon="desktop_windows"
+                title="Electron 앱에서만 사용할 수 있습니다"
+                description="브라우저/개발 서버 모드에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
+                compact
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 items-start">
+                <SelectField
+                  label="X 버튼 동작"
+                  value={closeBehavior}
+                  onChange={(event) => void handleUpdateCloseBehavior(event.target.value as CloseBehavior)}
+                  disabled={closeBehaviorLoading}
+                  helper="트레이로 보내기를 선택하면 창은 사라지지만 OfficeWhere가 백그라운드에서 계속 실행됩니다."
+                >
+                  <option value="ask">{CLOSE_BEHAVIOR_LABELS.ask}</option>
+                  <option value="hide">{CLOSE_BEHAVIOR_LABELS.hide}</option>
+                  <option value="quit">{CLOSE_BEHAVIOR_LABELS.quit}</option>
+                </SelectField>
+                <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-2.5 flex items-start gap-2.5">
+                  <Icon
+                    name={closeBehavior === 'quit' ? 'power_settings_new' : 'move_to_inbox'}
+                    size={20}
+                    className="mt-0.5 text-[var(--md-sys-color-primary)]"
+                  />
+                  <div className="min-w-0 space-y-1">
+                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                      현재 설정 · {CLOSE_BEHAVIOR_LABELS[closeBehavior]}
+                    </p>
+                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                      {closeBehavior === 'ask'
+                        ? '창을 닫을 때마다 백그라운드 실행/종료/취소를 고를 수 있습니다.'
+                        : closeBehavior === 'hide'
+                          ? '창을 닫으면 트레이에 남고, 트레이 메뉴에서 열기 또는 종료를 선택할 수 있습니다.'
+                          : '창을 닫으면 앱과 백그라운드 색인이 함께 종료됩니다.'}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-        </CardSection>
-      </Card>
+            )}
+          </CardSection>
+        </Card>
+      </div>
       <Card variant="elevated">
         <CardSection
           title="대상 폴더"
@@ -867,15 +871,17 @@ export default function FileManager() {
         </CardSection>
       </Card>
 
-      <Card variant="elevated">
+      <Card variant="outlined">
         <CardSection
           title="앱 데이터 관리"
-          description="검색 색인과 앱 설정처럼 앱이 만든 데이터만 초기화합니다. 원본 문서와 대상 폴더는 삭제하지 않습니다."
+          description="검색 색인과 앱 설정만 초기화합니다. 원본 문서는 삭제하지 않습니다."
+          className="p-4"
           trailing={
             appDataAvailable ? (
               <div className="flex gap-2 flex-wrap">
                 <Button
                   variant="tonal"
+                  size="sm"
                   leadingIcon="refresh"
                   onClick={() => void fetchAppDataPaths()}
                   loading={appDataLoading}
@@ -903,14 +909,14 @@ export default function FileManager() {
           ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
+                <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="type-title-md text-[var(--md-sys-color-on-surface)]">
+                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
                         검색/앱 설정 초기화
                       </p>
                       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        검색 색인, 앱 화면 설정, 임시 캐시를 다음 실행 때 새로 만듭니다. 문제가 생겼을 때 먼저 시도할 안전한 초기화입니다.
+                        색인, 화면 설정, 임시 캐시를 다음 실행 때 새로 만듭니다.
                       </p>
                     </div>
                     <Badge tone={safeResetIds.length > 0 ? 'success' : 'neutral'}>
@@ -919,6 +925,7 @@ export default function FileManager() {
                   </div>
                   <Button
                     variant="filled"
+                    size="sm"
                     leadingIcon="restart_alt"
                     onClick={() => openClearAppDataPreset(safeResetIds)}
                     disabled={safeResetIds.length === 0 || appDataLoading}
@@ -927,14 +934,14 @@ export default function FileManager() {
                   </Button>
                 </div>
 
-                <div className="rounded-md border border-[var(--md-sys-color-error)]/50 bg-[var(--md-sys-color-error-container)]/20 p-4 space-y-3">
+                <div className="rounded-md border border-[var(--md-sys-color-error)]/50 bg-[var(--md-sys-color-error-container)]/20 p-3 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="type-title-md text-[var(--md-sys-color-on-surface)]">
+                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
                         문제 해결용 전체 초기화
                       </p>
                       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        앱 프로필 전체를 다음 실행 때 새로 만듭니다. 원본 문서는 삭제하지 않지만 앱 설정과 세션은 초기화됩니다.
+                        앱 프로필 전체를 다음 실행 때 새로 만듭니다.
                       </p>
                     </div>
                     <Badge tone={fullResetIds.length > 0 ? 'warning' : 'neutral'}>
@@ -943,6 +950,7 @@ export default function FileManager() {
                   </div>
                   <Button
                     variant="outlined"
+                    size="sm"
                     leadingIcon="warning"
                     className="!text-[var(--md-sys-color-error)]"
                     onClick={() => openClearAppDataPreset(fullResetIds)}
@@ -954,7 +962,7 @@ export default function FileManager() {
               </div>
 
               <details
-                className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4"
+                className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3"
                 open={appDataAdvancedOpen}
                 onToggle={(event) => setAppDataAdvancedOpen(event.currentTarget.open)}
               >
@@ -968,7 +976,7 @@ export default function FileManager() {
                   {appDataPaths.map((candidate) => (
                     <div
                       key={candidate.id}
-                      className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-4 py-3 flex items-start gap-3"
+                      className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2.5 flex items-start gap-3"
                     >
                       <Checkbox
                         checked={selectedAppDataIds.includes(candidate.id)}
