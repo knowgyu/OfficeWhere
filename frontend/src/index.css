@@ -15,9 +15,12 @@
     font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
       'Segoe UI', 'Malgun Gothic', '맑은 고딕', sans-serif;
     font-feature-settings: 'tnum' 1, 'ss01' 1;
+    background:
+      radial-gradient(circle at 18% 0%, rgba(66, 87, 178, 0.08), transparent 28rem),
+      linear-gradient(180deg, #fbfcff 0%, var(--md-sys-color-background) 24rem);
     background-color: var(--md-sys-color-background);
     color: var(--md-sys-color-on-background);
-    letter-spacing: -0.005em;
+    letter-spacing: -0.003em;
   }
 
   code,
@@ -44,9 +47,9 @@
   }
 
   *:focus-visible {
-    outline: 2px solid var(--md-sys-color-primary);
-    outline-offset: 2px;
-    border-radius: var(--md-shape-xs);
+    outline: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 82%, white);
+    outline-offset: 3px;
+    border-radius: var(--md-shape-sm);
   }
 
   /* Scrollbar */
@@ -156,13 +159,46 @@
     font-size: 0.75rem;
     line-height: 1rem;
     font-weight: 500;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.025em;
   }
   .type-label-sm {
     font-size: 0.6875rem;
     line-height: 1rem;
     font-weight: 500;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.035em;
+  }
+
+  .console-panel {
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 78%, white);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.72)),
+      var(--md-sys-color-surface-container-lowest);
+    box-shadow:
+      0 18px 48px rgba(15, 23, 42, 0.08),
+      0 1px 0 rgba(255, 255, 255, 0.92) inset;
+  }
+
+  .console-subpanel {
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 72%, white);
+    background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 72%, var(--md-sys-color-surface-container-low));
+  }
+
+  .kbd-token {
+    display: inline-flex;
+    min-width: 1.45rem;
+    height: 1.45rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 86%, white);
+    background: linear-gradient(180deg, #ffffff, #eef1f7);
+    box-shadow:
+      0 1px 1px rgba(15, 23, 42, 0.06),
+      0 -1px 0 rgba(15, 23, 42, 0.05) inset;
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1;
   }
 
   .app-text-large .type-title-lg {

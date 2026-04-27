@@ -1,6 +1,6 @@
 param(
-  [int]$BackendPort = $(if ($env:BACKEND_PORT) { [int]$env:BACKEND_PORT } else { 8765 }),
-  [int]$FrontendPort = $(if ($env:FRONTEND_PORT) { [int]$env:FRONTEND_PORT } else { 5173 }),
+  [int]$BackendPort = $(if ($env:BACKEND_PORT) { [int]$env:BACKEND_PORT } else { 18765 }),
+  [int]$FrontendPort = $(if ($env:FRONTEND_PORT) { [int]$env:FRONTEND_PORT } else { 15173 }),
   [string]$HostAddress = $(if ($env:HOST) { $env:HOST } else { '127.0.0.1' })
 )
 
@@ -23,7 +23,7 @@ $BackendProcess = Start-Process `
   -NoNewWindow
 
 try {
-  $HealthUrl = "$BackendUrl/health"
+  $HealthUrl = "$BackendUrl/api/health"
   $Ready = $false
   for ($i = 0; $i -lt 80; $i++) {
     try {

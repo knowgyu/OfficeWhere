@@ -54,13 +54,16 @@ const TABS: TabDef[] = [
   },
 ]
 
-const LS_TAB = 'odj:last-tab'
+const LS_TAB = 'officewhere:last-tab'
+const LEGACY_LS_TAB = 'odj:last-tab'
 const LOGO_SRC = './officewhere-logo.png'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     if (typeof window === 'undefined') return 'search'
-    const stored = window.localStorage.getItem(LS_TAB) as Tab | null
+    const stored = (
+      window.localStorage.getItem(LS_TAB) ?? window.localStorage.getItem(LEGACY_LS_TAB)
+    ) as Tab | null
     return stored && TABS.some((tab) => tab.id === stored) ? stored : 'search'
   })
   const { textSize, increaseTextSize, decreaseTextSize, resetTextSize } = useDisplaySettings()
@@ -99,7 +102,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-text-${textSize} flex flex-1 min-h-screen bg-[var(--md-sys-color-background)]`}
+      className={`app-text-${textSize} flex flex-1 min-h-screen bg-[var(--md-sys-color-background)] text-[var(--md-sys-color-on-surface)]`}
       onWheel={handleGlobalWheel}
     >
       <NavigationRail activeTab={activeTab} onChange={setActiveTab} />
@@ -107,7 +110,7 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <TopAppBar title={current.label} hint={current.hint} />
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1400px] px-6 pt-6 pb-16 animate-fade-in" key={activeTab}>
+          <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 pt-6 pb-16 animate-fade-in" key={activeTab}>
             {activeTab === 'files' && <FileManager />}
             {activeTab === 'search' && <FileSearch />}
             {activeTab === 'join' && <JoinQuery />}
@@ -180,16 +183,16 @@ function NavigationRail({
   onChange: (tab: Tab) => void
 }) {
   return (
-    <aside className="sticky top-0 self-start flex flex-col items-center gap-2 w-24 min-h-screen py-4 bg-[var(--md-sys-color-surface-container-low)] border-r border-[var(--md-sys-color-outline-variant)]">
+    <aside className="sticky top-0 self-start flex flex-col items-center gap-2 w-24 min-h-screen py-4 bg-[var(--md-sys-color-surface-container-lowest)]/82 backdrop-blur-xl border-r border-[var(--md-sys-color-outline-variant)] shadow-[1px_0_0_rgba(255,255,255,0.7)_inset]">
       <div className="flex items-center justify-center py-3">
         <img
           src={LOGO_SRC}
           alt="OfficeWhere"
-          className="h-10 w-10 rounded-md object-cover shadow-elev-1"
+          className="h-10 w-10 rounded-lg object-cover shadow-elev-2 ring-1 ring-[var(--md-sys-color-outline-variant)]"
         />
       </div>
 
-      <nav className="flex flex-col gap-1 mt-2 w-full px-2" aria-label="메인 내비게이션">
+      <nav className="flex flex-col gap-1.5 mt-2 w-full px-2" aria-label="메인 내비게이션">
         {TABS.map((tab) => {
           const active = tab.id === activeTab
           return (
@@ -197,14 +200,16 @@ function NavigationRail({
               key={tab.id}
               type="button"
               onClick={() => onChange(tab.id)}
-              className="state-host relative flex flex-col items-center gap-1 py-2 rounded-sm group"
+              className={`state-host relative flex flex-col items-center gap-1.5 py-2.5 rounded-lg group transition-colors ${
+                active ? 'text-[var(--md-sys-color-primary)]' : 'text-[var(--md-sys-color-on-surface-variant)]'
+              }`}
               aria-current={active ? 'page' : undefined}
             >
               <span className="state-layer" />
               <span
-                className={`relative inline-flex items-center justify-center h-8 w-14 rounded-full transition-colors ${
+                className={`relative inline-flex items-center justify-center h-9 w-14 rounded-full transition-all ${
                   active
-                    ? 'bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)]'
+                    ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-primary)] shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]'
                     : 'text-[var(--md-sys-color-on-surface-variant)]'
                 }`}
               >
@@ -229,17 +234,17 @@ function NavigationRail({
 
 function TopAppBar({ title, hint }: { title: string; hint: string }) {
   return (
-    <header className="sticky top-0 z-20 bg-[var(--md-sys-color-background)]/85 backdrop-blur supports-[backdrop-filter]:bg-[var(--md-sys-color-background)]/75 border-b border-[var(--md-sys-color-outline-variant)]">
-      <div className="mx-auto w-full max-w-[1400px] px-6 h-16 flex items-center justify-between gap-4">
+    <header className="sticky top-0 z-20 bg-[var(--md-sys-color-background)]/78 backdrop-blur-xl supports-[backdrop-filter]:bg-[var(--md-sys-color-background)]/68 border-b border-[var(--md-sys-color-outline-variant)]">
+      <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 h-[4.25rem] flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="type-label-md text-[var(--md-sys-color-primary)] uppercase">
+          <p className="type-label-md text-[var(--md-sys-color-primary)] uppercase tracking-[0.14em]">
             OfficeWhere
           </p>
-          <h1 className="type-title-lg text-[var(--md-sys-color-on-surface)] truncate">
+          <h1 className="type-title-lg text-[var(--md-sys-color-on-surface)] truncate -tracking-[0.01em]">
             {title}
           </h1>
         </div>
-        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] hidden md:block">
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] hidden md:block max-w-2xl text-right">
           {hint}
         </p>
       </div>

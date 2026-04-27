@@ -57,7 +57,6 @@ logs/
 
 # App data
 ~/.officewhere/
-~/.office-data-joiner/  # legacy
 
 # Private agent/user instruction files
 CLAUDE.md

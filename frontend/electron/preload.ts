@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-contextBridge.exposeInMainWorld('officeDataJoiner', {
+const officeWhereBridge = {
   getBackendBaseUrl: () => ipcRenderer.invoke('app:get-backend-base-url'),
   pickFile: () => ipcRenderer.invoke('dialog:pick-file'),
   pickFolder: () => ipcRenderer.invoke('dialog:pick-folder'),
@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld('officeDataJoiner', {
     ipcRenderer.invoke('app:clear-app-data', { candidateIds, exitAfterClear }),
   getCloseBehavior: () => ipcRenderer.invoke('app:get-close-behavior'),
   setCloseBehavior: (behavior: string) => ipcRenderer.invoke('app:set-close-behavior', { behavior }),
-})
+}
+
+contextBridge.exposeInMainWorld('officeWhere', officeWhereBridge)

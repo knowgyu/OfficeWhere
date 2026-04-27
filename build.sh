@@ -21,7 +21,7 @@ if [ ! -x "venv/bin/python" ]; then
     exit 1
 fi
 
-venv/bin/python -m PyInstaller office_data_joiner_backend.spec --clean -y
+venv/bin/python -m PyInstaller officewhere_backend.spec --clean -y
 
 echo ""
 echo "[완료] dist/officewhere-backend/ 폴더에 backend 실행파일이 생성되었습니다."

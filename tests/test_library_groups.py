@@ -1,3 +1,7 @@
+import pytest
+
+from fastapi import HTTPException
+
 from backend.database import init_db, register_file
 
 
@@ -8,7 +12,7 @@ def _setup_db(tmp_path, monkeypatch):
 
 
 def _register(path: str, name: str, file_type: str):
-    register_file(
+    return register_file(
         path=path,
         name=name,
         file_type=file_type,
@@ -117,3 +121,90 @@ def test_library_groups_searches_names_paths_and_sorts(tmp_path, monkeypatch):
 
     response = get_library_groups(sort="name", limit=10)
     assert [group.base_name for group in response.groups] == ["보고서", "예산", "홍보"]
+
+
+def test_set_group_latest_file_persists_manual_order(tmp_path, monkeypatch):
+    from backend.core.library import (
+        clear_group_latest_file,
+        get_file_group_detail,
+        list_file_groups,
+        set_group_latest_file,
+    )
+
+    _setup_db(tmp_path, monkeypatch)
+    v1_id = _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
+    v2_id = _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
+    v3_id = _register("/tmp/a/보고서_v3.docx", "보고서_v3.docx", "Word")
+
+    group = list_file_groups(kind="version_family", limit=10).groups[0]
+    original = get_file_group_detail(group.id)
+
+    assert original is not None
+    assert original.latest_file.id == v3_id
+    assert [file.id for file in original.files] == [v3_id, v2_id, v1_id]
+    assert original.manual_latest_file_id is None
+
+    updated = set_group_latest_file(group.id, v1_id)
+    reloaded = get_file_group_detail(group.id)
+
+    assert updated is not None
+    assert reloaded is not None
+    assert updated.latest_file.id == v1_id
+    assert updated.previous_file.id == v3_id
+    assert updated.manual_latest_file_id == v1_id
+    assert [file.id for file in updated.files] == [v1_id, v3_id, v2_id]
+    assert reloaded.latest_file.id == v1_id
+    assert reloaded.manual_latest_file_id == v1_id
+
+    cleared = clear_group_latest_file(group.id)
+
+    assert cleared is not None
+    assert cleared.latest_file.id == v3_id
+    assert cleared.previous_file.id == v2_id
+    assert cleared.manual_latest_file_id is None
+    assert [file.id for file in cleared.files] == [v3_id, v2_id, v1_id]
+
+
+def test_set_group_latest_file_rejects_file_outside_group(tmp_path, monkeypatch):
+    from backend.core.library import get_file_group_detail, list_file_groups, set_group_latest_file
+
+    _setup_db(tmp_path, monkeypatch)
+    v1_id = _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
+    v2_id = _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
+    other_id = _register("/tmp/a/다른문서_v1.docx", "다른문서_v1.docx", "Word")
+    _register("/tmp/a/다른문서_v2.docx", "다른문서_v2.docx", "Word")
+
+    group = next(group for group in list_file_groups(kind="version_family", limit=10).groups if group.base_name == "보고서")
+
+    with pytest.raises(ValueError, match="포함되어 있지 않습니다"):
+        set_group_latest_file(group.id, other_id)
+
+    detail = get_file_group_detail(group.id)
+    assert detail is not None
+    assert detail.manual_latest_file_id is None
+    assert {detail.latest_file.id, detail.previous_file.id} == {v1_id, v2_id}
+
+
+def test_update_library_group_latest_file_api_errors(tmp_path, monkeypatch):
+    from backend.api.library import clear_library_group_latest_file, update_library_group_latest_file
+    from backend.core.library import list_file_groups
+    from backend.models.schemas import LibraryGroupLatestFileRequest
+
+    _setup_db(tmp_path, monkeypatch)
+    _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
+    _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
+    other_id = _register("/tmp/a/다른문서_v1.docx", "다른문서_v1.docx", "Word")
+    _register("/tmp/a/다른문서_v2.docx", "다른문서_v2.docx", "Word")
+    group = next(group for group in list_file_groups(kind="version_family", limit=10).groups if group.base_name == "보고서")
+
+    with pytest.raises(HTTPException) as missing:
+        update_library_group_latest_file("missing-group", LibraryGroupLatestFileRequest(file_id=other_id))
+    assert missing.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_clear:
+        clear_library_group_latest_file("missing-group")
+    assert missing_clear.value.status_code == 404
+
+    with pytest.raises(HTTPException) as invalid:
+        update_library_group_latest_file(group.id, LibraryGroupLatestFileRequest(file_id=other_id))
+    assert invalid.value.status_code == 400

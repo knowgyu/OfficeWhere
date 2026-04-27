@@ -54,13 +54,13 @@ dev-web.bat
 포트를 바꾸려면:
 
 ```bat
-dev-web.bat -BackendPort 8876 -FrontendPort 5174
+dev-web.bat -BackendPort 18766 -FrontendPort 15174
 ```
 
 브라우저 주소:
 
 ```text
-http://127.0.0.1:5174
+http://127.0.0.1:15173
 ```
 
 ### Linux / macOS
@@ -74,13 +74,13 @@ git pull
 포트를 바꾸려면:
 
 ```bash
-BACKEND_PORT=8876 FRONTEND_PORT=5174 ./dev-web.sh
+BACKEND_PORT=18766 FRONTEND_PORT=15174 ./dev-web.sh
 ```
 
 브라우저 주소:
 
 ```text
-http://127.0.0.1:5174
+http://127.0.0.1:15173
 ```
 
 ### 참고

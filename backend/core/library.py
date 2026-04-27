@@ -43,6 +43,7 @@ from ..runtime import get_worker_count
 
 SETTINGS_KEY = "library_settings"
 LAST_RESCAN_KEY = "library_last_rescan_at"
+MANUAL_LATEST_SETTING_KEY = "library_manual_latest_files"
 MAX_WORKERS = get_worker_count()
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[Dict[str, Any]], None]
@@ -145,6 +146,35 @@ def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
     set_setting(SETTINGS_KEY, normalized.model_dump_json())
     normalized.last_rescan_at = get_setting(LAST_RESCAN_KEY) or None
     return normalized
+
+
+def _load_manual_latest_map() -> Dict[str, int]:
+    raw = get_setting(MANUAL_LATEST_SETTING_KEY, "{}")
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+
+    manual_latest: Dict[str, int] = {}
+    for group_id, file_id in payload.items():
+        try:
+            normalized_file_id = int(file_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized_file_id > 0:
+            manual_latest[str(group_id)] = normalized_file_id
+    return manual_latest
+
+
+def _save_manual_latest_map(manual_latest: Dict[str, int]) -> None:
+    cleaned = {
+        str(group_id): int(file_id)
+        for group_id, file_id in manual_latest.items()
+        if str(group_id) and int(file_id) > 0
+    }
+    set_setting(MANUAL_LATEST_SETTING_KEY, json.dumps(cleaned, ensure_ascii=False, sort_keys=True))
 
 
 def _normalize_name_part(value: str) -> str:
@@ -856,13 +886,22 @@ def _group_detail(
     reason: str,
     tokens_summary: Optional[List[str]] = None,
     fingerprint_by_id: Optional[Dict[int, Dict[str, Any]]] = None,
+    manual_latest_by_group: Optional[Dict[str, int]] = None,
 ) -> LibraryGroupDetail:
+    group_id = _slug(f"{group_kind}-{file_type}-{base_name}")
     ordered = sorted(
         files,
         key=_version_file_sort_key if group_kind == "version_family" else file_sort_key,
         reverse=True,
     )
-    group_id = _slug(f"{group_kind}-{file_type}-{base_name}")
+    manual_latest_file_id: Optional[int] = None
+    manual_file_id = (manual_latest_by_group or {}).get(group_id)
+    if manual_file_id is not None:
+        manual_file = next((file for file in ordered if file.id == manual_file_id), None)
+        if manual_file:
+            ordered = [manual_file, *(file for file in ordered if file.id != manual_file_id)]
+            manual_latest_file_id = manual_file.id
+
     content = _content_evidence(ordered, fingerprint_by_id or {}, expected_count=len(ordered))
     return LibraryGroupDetail(
         id=group_id,
@@ -882,6 +921,7 @@ def _group_detail(
         fingerprint_unique_count=content["fingerprint_unique_count"],
         content_evidence=content["content_evidence"],
         recommended_action=_recommended_action(file_type),
+        manual_latest_file_id=manual_latest_file_id,
         files=ordered,
     )
 
@@ -889,6 +929,7 @@ def _group_detail(
 def _all_file_group_details() -> List[LibraryGroupDetail]:
     exact_buckets: Dict[Tuple[str, str], List[FileInfo]] = {}
     version_buckets: Dict[Tuple[str, str], List[Tuple[FileInfo, Dict[str, Any]]]] = {}
+    manual_latest_by_group = _load_manual_latest_map()
 
     for row in get_all_files():
         file_info = file_info_from_row(row)
@@ -914,6 +955,7 @@ def _all_file_group_details() -> List[LibraryGroupDetail]:
                 files=files,
                 confidence="exact_filename",
                 reason="같은 파일명이 여러 위치에 있습니다. 내용을 확인해 보세요.",
+                manual_latest_by_group=manual_latest_by_group,
             )
         )
 
@@ -936,6 +978,7 @@ def _all_file_group_details() -> List[LibraryGroupDetail]:
                 confidence="filename_tokens",
                 reason="파일명에서 버전/날짜/상태 표시를 감지했습니다. 같은 문서 계열 후보로 확인해 보세요.",
                 tokens_summary=_tokens_summary([identity for _file, identity in items]),
+                manual_latest_by_group=manual_latest_by_group,
             )
         )
 
@@ -963,6 +1006,7 @@ def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
         reason=group.reason,
         latest_file=group.latest_file,
         previous_file=group.previous_file,
+        manual_latest_file_id=group.manual_latest_file_id,
         tokens_summary=group.tokens_summary,
         content_status=group.content_status,
         fingerprint_coverage=group.fingerprint_coverage,
@@ -1054,6 +1098,39 @@ def get_file_group_detail(group_id: str, *, limit: int = MAX_GROUP_DETAIL_LIMIT)
             }
         )
     return None
+
+
+def set_group_latest_file(group_id: str, file_id: int) -> Optional[LibraryGroupDetail]:
+    target_group = next((group for group in _all_file_group_details() if group.id == group_id), None)
+    if not target_group:
+        return None
+
+    try:
+        safe_file_id = int(file_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("파일 ID가 올바르지 않습니다.") from exc
+
+    if safe_file_id <= 0 or all(file.id != safe_file_id for file in target_group.files):
+        raise ValueError("선택한 파일이 이 문서 묶음에 포함되어 있지 않습니다.")
+
+    manual_latest = _load_manual_latest_map()
+    manual_latest[group_id] = safe_file_id
+    _save_manual_latest_map(manual_latest)
+
+    return get_file_group_detail(group_id)
+
+
+def clear_group_latest_file(group_id: str) -> Optional[LibraryGroupDetail]:
+    target_group = next((group for group in _all_file_group_details() if group.id == group_id), None)
+    if not target_group:
+        return None
+
+    manual_latest = _load_manual_latest_map()
+    if group_id in manual_latest:
+        manual_latest.pop(group_id, None)
+        _save_manual_latest_map(manual_latest)
+
+    return get_file_group_detail(group_id)
 
 
 def build_file_groups() -> List[LibraryFileGroup]:

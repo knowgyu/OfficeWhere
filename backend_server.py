@@ -16,12 +16,16 @@ import sys
 from pathlib import Path
 
 
+def _env_value(name: str, default: str = "") -> str:
+    return os.environ.get(name, "").strip() or default
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="OfficeWhere backend server")
-    parser.add_argument("--host", default=os.environ.get("ODJ_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("ODJ_PORT", "8765")))
-    parser.add_argument("--data-dir", default=os.environ.get("ODJ_DATA_DIR", ""))
-    parser.add_argument("--log-level", default=os.environ.get("ODJ_LOG_LEVEL", "info"))
+    parser.add_argument("--host", default=_env_value("OW_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(_env_value("OW_PORT", "18765")))
+    parser.add_argument("--data-dir", default=_env_value("OW_DATA_DIR"))
+    parser.add_argument("--log-level", default=_env_value("OW_LOG_LEVEL", "info"))
     return parser.parse_args()
 
 
@@ -30,7 +34,7 @@ def main():
 
     if args.data_dir:
         data_dir = str(Path(args.data_dir).expanduser())
-        os.environ["ODJ_DATA_DIR"] = data_dir
+        os.environ["OW_DATA_DIR"] = data_dir
         from backend.database import configure_database
 
         configure_database(data_dir)

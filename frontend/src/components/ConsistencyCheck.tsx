@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import {
   CheckResponse,
@@ -277,30 +278,13 @@ const pathTail = (path: string) => {
   return parts.slice(-3).join(' / ') || path
 }
 
-const versionTokensFromName = (name: string) => {
-  const tokens = new Set<string>()
-  const withoutExtension = name.replace(/\.[^.]+$/, '')
-  for (const match of withoutExtension.matchAll(/(?:^|[^A-Za-z0-9가-힣])(?:v|ver|version|rev)\s*\.?\s*(\d+(?:\.\d+)*)(?=$|[^A-Za-z0-9가-힣])/gi)) {
-    tokens.add(`v${match[1]}`)
-  }
-  for (const match of withoutExtension.matchAll(/(?:^|[^0-9])(\d{6}|\d{8})(?=$|[^0-9])/g)) {
-    tokens.add(match[1])
-  }
-  for (const match of withoutExtension.matchAll(/(?:^|[^A-Za-z0-9가-힣])(초안|draft|final|최종|수정본)(?=$|[^A-Za-z0-9가-힣])/gi)) {
-    tokens.add(match[1])
-  }
-  return Array.from(tokens)
-}
-
-const fileVersionMarkers = (file: FileInfo) => {
-  const tokens = versionTokensFromName(file.name)
-  if (tokens.length > 0) return tokens
-  const date = file.file_mtime ?? file.created_at
-  return date ? [formatDate(date).slice(0, 12).trim()] : []
-}
-
 const versionGroupAnchorId = (groupId: string) =>
   `version-group-${groupId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+
+const groupSummaryFromDetail = (detail: LibraryGroupDetail): LibraryGroupSummary => {
+  const { files: _files, ...summary } = detail
+  return summary
+}
 
 export default function ConsistencyCheck() {
   const snackbar = useSnackbar()
@@ -324,11 +308,14 @@ export default function ConsistencyCheck() {
   const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
   const [activeGroupDetail, setActiveGroupDetail] = useState<LibraryGroupDetail | null>(null)
   const [groupDetailFiles, setGroupDetailFiles] = useState<FileInfo[]>([])
+  const [settingLatestFileId, setSettingLatestFileId] = useState<number | null>(null)
+  const [clearingLatestGroupId, setClearingLatestGroupId] = useState<string | null>(null)
   const [historyState, setHistoryState] = useState<HistoryDiffState | null>(null)
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [pendingScrollGroupId, setPendingScrollGroupId] = useState<string | null>(null)
   const [excelGridModal, setExcelGridModal] = useState<ExcelGridModalState | null>(null)
+  const historyRunRef = useRef(0)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setFilesLoading(true)
@@ -527,6 +514,9 @@ export default function ConsistencyCheck() {
     })
 
   const runHistoryDiffs = async (detail: LibraryGroupDetail) => {
+    const runId = historyRunRef.current + 1
+    historyRunRef.current = runId
+    const isCurrentRun = () => historyRunRef.current === runId
     const transitions = buildHistoryTransitions(detail)
     const total = transitions.length
     const truncated = detail.file_count > detail.files.length
@@ -542,9 +532,10 @@ export default function ConsistencyCheck() {
     if (total === 0) return
 
     for (let index = 0; index < transitions.length; index += 1) {
+      if (!isCurrentRun()) return
       const transition = transitions[index]
       setHistoryState((current) =>
-        current?.groupId === detail.id
+        current?.groupId === detail.id && isCurrentRun()
           ? {
               ...current,
               transitions: current.transitions.map((item) =>
@@ -559,9 +550,10 @@ export default function ConsistencyCheck() {
           file_ids: [transition.fromFile.id, transition.toFile.id],
           comparison_scope: 'version_history',
         })
+        if (!isCurrentRun()) return
         const normalized = normalizeCheckResponse(response.data)
         setHistoryState((current) =>
-          current?.groupId === detail.id
+          current?.groupId === detail.id && isCurrentRun()
             ? {
                 ...current,
                 completed: Math.min(current.completed + 1, current.total),
@@ -574,11 +566,12 @@ export default function ConsistencyCheck() {
             : current,
         )
       } catch (error) {
+        if (!isCurrentRun()) return
         const detailMessage =
           (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
           '이 버전 사이의 변경점을 계산하지 못했습니다.'
         setHistoryState((current) =>
-          current?.groupId === detail.id
+          current?.groupId === detail.id && isCurrentRun()
             ? {
                 ...current,
                 completed: Math.min(current.completed + 1, current.total),
@@ -594,7 +587,7 @@ export default function ConsistencyCheck() {
     }
 
     setHistoryState((current) =>
-      current?.groupId === detail.id ? { ...current, loading: false } : current,
+      current?.groupId === detail.id && isCurrentRun() ? { ...current, loading: false } : current,
     )
   }
 
@@ -611,6 +604,66 @@ export default function ConsistencyCheck() {
     setPendingScrollGroupId(detail.id)
     if (historyState?.groupId === detail.id && historyState.transitions.length > 0) return
     await runHistoryDiffs(detail)
+  }
+
+  const setGroupLatestFile = async (detail: LibraryGroupDetail, file: FileInfo) => {
+    if (detail.files[0]?.id === file.id) {
+      snackbar.info('이미 최신 파일로 표시되어 있습니다.')
+      return
+    }
+
+    setSettingLatestFileId(file.id)
+    setGroupLoadingId(detail.id)
+    try {
+      const response = await api.library.setGroupLatestFile(detail.id, file.id)
+      const updated = response.data
+      setActiveGroupDetail(updated)
+      setGroupDetailFiles(updated.files)
+      setGroups((current) =>
+        current.map((group) => (group.id === updated.id ? groupSummaryFromDetail(updated) : group)),
+      )
+      setHistoryState(null)
+      await runHistoryDiffs(updated)
+      snackbar.success('최신 파일로 지정했습니다.')
+    } catch (error) {
+      const detailMessage =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        '최신 파일을 지정하지 못했습니다.'
+      snackbar.error(detailMessage)
+    } finally {
+      setSettingLatestFileId(null)
+      setGroupLoadingId(null)
+    }
+  }
+
+  const clearGroupLatestFile = async (detail: LibraryGroupDetail) => {
+    if (!detail.manual_latest_file_id) {
+      snackbar.info('이미 자동 최신 정렬을 사용 중입니다.')
+      return
+    }
+
+    setClearingLatestGroupId(detail.id)
+    setGroupLoadingId(detail.id)
+    try {
+      const response = await api.library.clearGroupLatestFile(detail.id)
+      const updated = response.data
+      setActiveGroupDetail(updated)
+      setGroupDetailFiles(updated.files)
+      setGroups((current) =>
+        current.map((group) => (group.id === updated.id ? groupSummaryFromDetail(updated) : group)),
+      )
+      setHistoryState(null)
+      await runHistoryDiffs(updated)
+      snackbar.success('자동 최신 정렬로 되돌렸습니다.')
+    } catch (error) {
+      const detailMessage =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        '자동 최신 정렬로 되돌리지 못했습니다.'
+      snackbar.error(detailMessage)
+    } finally {
+      setClearingLatestGroupId(null)
+      setGroupLoadingId(null)
+    }
   }
 
   const openExcelGrid = async (detail: LibraryGroupDetail, currentHistoryState: HistoryDiffState | null) => {
@@ -857,13 +910,17 @@ export default function ConsistencyCheck() {
               {groups.map((group) => (
                 <GroupCard
                   key={group.id}
-                    group={group}
-                    activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
-                    historyState={historyState?.groupId === group.id ? historyState : null}
-                    loading={groupLoadingId === group.id}
-                    onOpen={() => void selectGroup(group)}
-                    onOpenFile={(file) => void openFile(file)}
-                    onOpenExcelGrid={(detail, state) => void openExcelGrid(detail, state)}
+                  group={group}
+                  activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
+                  historyState={historyState?.groupId === group.id ? historyState : null}
+                  loading={groupLoadingId === group.id}
+                  onOpen={() => void selectGroup(group)}
+                  onOpenFile={(file) => void openFile(file)}
+                  onOpenExcelGrid={(detail, state) => void openExcelGrid(detail, state)}
+                  onSetLatestFile={(detail, file) => void setGroupLatestFile(detail, file)}
+                  onClearLatestFile={(detail) => void clearGroupLatestFile(detail)}
+                  settingLatestFileId={settingLatestFileId}
+                  clearingLatestGroupId={clearingLatestGroupId}
                 />
               ))}
             </div>
@@ -1076,6 +1133,10 @@ function GroupCard({
   onOpen,
   onOpenFile,
   onOpenExcelGrid,
+  onSetLatestFile,
+  onClearLatestFile,
+  settingLatestFileId,
+  clearingLatestGroupId,
 }: {
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
@@ -1084,47 +1145,78 @@ function GroupCard({
   onOpen: () => void
   onOpenFile: (file: FileInfo) => void
   onOpenExcelGrid: (detail: LibraryGroupDetail, historyState: HistoryDiffState | null) => void
+  onSetLatestFile: (detail: LibraryGroupDetail, file: FileInfo) => void
+  onClearLatestFile: (detail: LibraryGroupDetail) => void
+  settingLatestFileId: number | null
+  clearingLatestGroupId: string | null
 }) {
   const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
-  const summaryTokens = group.tokens_summary.slice(0, 8)
 
   return (
     <div
       id={versionGroupAnchorId(group.id)}
-      className="scroll-mt-24 rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4"
+      className={`scroll-mt-24 overflow-hidden rounded-xl border bg-[var(--md-sys-color-surface-container-lowest)] transition-colors ${
+        activeDetail
+          ? 'border-[var(--md-sys-color-primary)]/45 shadow-elev-1'
+          : 'border-[var(--md-sys-color-outline-variant)] hover:bg-[var(--md-sys-color-surface-container-low)]'
+      }`}
     >
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <FileTypeBadge fileType={group.file_type} />
-          <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-            {group.base_name}
-          </span>
-          <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
-            {groupKindLabel(group.group_kind)}
-          </Badge>
-          <Badge tone="neutral">{group.file_count}개 파일</Badge>
-          <Badge tone={contentMeta.tone}>{contentMeta.label}</Badge>
-        </div>
-
-        {summaryTokens.length > 0 && (
-          <div className="flex gap-1.5 flex-wrap">
-            {summaryTokens.map((token) => (
-              <Chip key={token} label={token} tone="secondary" as="span" />
-            ))}
+      <div className="border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 px-4 py-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
+                진단 묶음
+              </span>
+              <FileTypeBadge fileType={group.file_type} />
+              <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
+                {groupKindLabel(group.group_kind)}
+              </Badge>
+            </div>
+            <p className="type-title-md text-[var(--md-sys-color-on-surface)] break-words">
+              {group.base_name}
+            </p>
           </div>
-        )}
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Badge tone="neutral">{group.file_count}개 파일</Badge>
+            <Badge tone={contentMeta.tone}>{contentMeta.label}</Badge>
+          </div>
+        </div>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
-        <Button
-          variant={activeDetail ? 'tonal' : 'filled'}
-          leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
-          onClick={onOpen}
-          loading={historyLoading}
-        >
-          {activeDetail ? '버전 관리 접기' : '버전 관리 열기'}
-        </Button>
+      <div className="space-y-4 p-4">
+        {(group.latest_file || group.previous_file) && (
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            {group.latest_file && (
+              <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2">
+                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">현재 기준 파일</p>
+                <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.latest_file.name}>
+                  {group.latest_file.name}
+                </p>
+              </div>
+            )}
+            {group.previous_file && (
+              <div className="rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
+                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">직전 비교 대상</p>
+                <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.previous_file.name}>
+                  {group.previous_file.name}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant={activeDetail ? 'tonal' : 'filled'}
+            leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
+            onClick={onOpen}
+            loading={historyLoading}
+          >
+            {activeDetail ? '진단 접기' : '버전 진단 열기'}
+          </Button>
+        </div>
       </div>
 
       {activeDetail && (
@@ -1133,6 +1225,10 @@ function GroupCard({
           historyState={historyState}
           onOpenFile={onOpenFile}
           onOpenExcelGrid={() => onOpenExcelGrid(activeDetail, historyState)}
+          onSetLatestFile={(file) => onSetLatestFile(activeDetail, file)}
+          onClearLatestFile={() => onClearLatestFile(activeDetail)}
+          settingLatestFileId={settingLatestFileId}
+          clearingLatestGroupId={clearingLatestGroupId}
         />
       )}
     </div>
@@ -1144,11 +1240,19 @@ function GroupTimeline({
   historyState,
   onOpenFile,
   onOpenExcelGrid,
+  onSetLatestFile,
+  onClearLatestFile,
+  settingLatestFileId,
+  clearingLatestGroupId,
 }: {
   detail: LibraryGroupDetail
   historyState: HistoryDiffState | null
   onOpenFile: (file: FileInfo) => void
   onOpenExcelGrid: () => void
+  onSetLatestFile: (file: FileInfo) => void
+  onClearLatestFile: () => void
+  settingLatestFileId: number | null
+  clearingLatestGroupId: string | null
 }) {
   const progressLabel = historyState
     ? historyState.total === 0
@@ -1159,13 +1263,28 @@ function GroupTimeline({
     : '변경점 계산 준비 중'
 
   return (
-    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">버전 목록</p>
+    <div className="border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <p className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
+            변경 증거
+          </p>
+          <p className="mt-1 type-title-sm text-[var(--md-sys-color-on-surface)]">버전 진단 상세</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
+          {detail.manual_latest_file_id && (
+            <Button
+              variant="outlined"
+              size="sm"
+              leadingIcon="auto_awesome"
+              loading={clearingLatestGroupId === detail.id}
+              disabled={Boolean(settingLatestFileId) || Boolean(historyState?.loading)}
+              onClick={onClearLatestFile}
+            >
+              자동 최신으로
+            </Button>
+          )}
           {normalizeFileType(detail.file_type) === 'Excel' && (
             <Button
               variant="filled"
@@ -1179,12 +1298,12 @@ function GroupTimeline({
         </div>
       </div>
 
-      <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">버전별 변경점</p>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              이 묶음 안에서 바로 이전 버전과 다음 버전만 순서대로 비교합니다.
+      <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 진단</p>
+            <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              바로 이전 버전과 다음 버전만 순서대로 비교해 변경 증거를 분리합니다.
             </p>
           </div>
           <Badge tone={historyState?.loading ? 'warning' : 'neutral'}>
@@ -1192,44 +1311,82 @@ function GroupTimeline({
           </Badge>
         </div>
         {historyState?.truncated && (
-          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          <p className="rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
             최신 {detail.files.length}개만 표시되어 이 범위 안의 변경점만 계산했습니다.
           </p>
         )}
         <HistoryTransitions transitions={historyState?.transitions ?? []} />
       </div>
 
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">파일 버전 순서</p>
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">1번이 현재 최신 기준입니다.</p>
+      </div>
       <ol className="space-y-2">
-        {detail.files.map((file, index) => (
-          <li
-            key={file.id}
-            className="flex items-start gap-3 rounded-md bg-[var(--md-sys-color-surface-container-lowest)] border border-[var(--md-sys-color-outline-variant)] p-3"
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)] type-label-md">
-              {index + 1}
-            </div>
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
-                  {file.name}
-                </p>
-                <FileTypeBadge fileType={file.file_type} />
-                {fileVersionMarkers(file).map((token) => (
-                  <Chip key={`${file.id}-${token}`} label={token} tone="secondary" as="span" />
-                ))}
+        {detail.files.map((file, index) => {
+          const isLatest = index === 0
+          const isManualLatest = detail.manual_latest_file_id === file.id
+          const latestActionDisabled =
+            Boolean(settingLatestFileId) ||
+            Boolean(clearingLatestGroupId) ||
+            Boolean(historyState?.loading)
+          return (
+            <li
+              key={file.id}
+              className={`flex items-start gap-3 rounded-lg border p-3 ${
+                isLatest
+                  ? 'border-[var(--md-sys-color-primary)]/40 bg-[var(--md-sys-color-primary-container)]/20'
+                  : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]'
+              }`}
+            >
+              <div
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full type-label-md ${
+                  isLatest
+                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)]'
+                    : 'bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)]'
+                }`}
+              >
+                {index + 1}
               </div>
-              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                수정/등록 · {formatDate(file.file_mtime ?? file.created_at)}
-              </p>
-              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate" title={file.path}>
-                위치 · {pathTail(file.path)}
-              </p>
-            </div>
-            <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(file)}>
-              열기
-            </Button>
-          </li>
-        ))}
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
+                    {file.name}
+                  </p>
+                  <FileTypeBadge fileType={file.file_type} />
+                  {isLatest && (
+                    <Badge tone={isManualLatest ? 'success' : 'neutral'}>
+                      {isManualLatest ? '지정 최신' : '최신'}
+                    </Badge>
+                  )}
+                </div>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  수정/등록 · {formatDate(file.file_mtime ?? file.created_at)}
+                </p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate" title={file.path}>
+                  위치 · {pathTail(file.path)}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2 flex-wrap justify-end">
+                {!isLatest && (
+                  <Button
+                    variant="outlined"
+                    size="sm"
+                    leadingIcon="star"
+                    loading={settingLatestFileId === file.id}
+                    disabled={latestActionDisabled}
+                    onClick={() => onSetLatestFile(file)}
+                  >
+                    최신으로 지정
+                  </Button>
+                )}
+                <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(file)}>
+                  열기
+                </Button>
+              </div>
+            </li>
+          )
+        })}
       </ol>
     </div>
   )
@@ -1282,14 +1439,30 @@ function HistoryTransitionCard({ transition }: { transition: HistoryTransition }
           : '대기'
 
   return (
-    <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3">
+    <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0 flex-1">
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)] break-words">
-            {transition.fromFile.name} → {transition.toFile.name}
-          </p>
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
+            <div className="min-w-0 rounded-md border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
+              <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">이전 버전</p>
+              <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.fromFile.name}>
+                {transition.fromFile.name}
+              </p>
+            </div>
+            <Icon
+              name="arrow_forward"
+              size={18}
+              className="hidden text-[var(--md-sys-color-on-surface-variant)] lg:block"
+            />
+            <div className="min-w-0 rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
+              <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">다음 버전</p>
+              <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.toFile.name}>
+                {transition.toFile.name}
+              </p>
+            </div>
+          </div>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            이전 버전에서 다음 버전으로 바뀐 내용을 확인합니다.
+            두 버전 사이의 변경 증거만 분리해 표시합니다.
           </p>
         </div>
         <Badge tone={statusTone}>
@@ -1298,12 +1471,14 @@ function HistoryTransitionCard({ transition }: { transition: HistoryTransition }
       </div>
 
       {transition.status === 'error' && (
-        <p className="type-body-sm text-[var(--md-sys-color-error)]">
+        <p className="rounded-lg border border-[var(--md-sys-color-error)]/60 bg-[var(--md-sys-color-error-container)]/50 px-3 py-2 type-body-sm text-[var(--md-sys-color-error)]">
           {transition.error ?? '이 버전 사이의 변경점을 계산하지 못했습니다.'}
         </p>
       )}
       {transition.status === 'done' && transition.result && (
-        <HistoryTransitionResult result={transition.result} />
+        <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3">
+          <HistoryTransitionResult result={transition.result} />
+        </div>
       )}
     </div>
   )
@@ -1712,40 +1887,64 @@ function ExcelDiffGridModal({
 }) {
   const [selectedCell, setSelectedCell] = useState<ExcelDiffGridCell | null>(null)
 
-  return (
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [])
+
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm p-3 sm:p-6"
+      className="fixed inset-0 z-[80] flex items-center justify-center overflow-hidden overscroll-contain bg-black/45 backdrop-blur-sm p-2 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Excel 표로 보기"
       onClick={onClose}
+      onWheel={(event) => {
+        event.stopPropagation()
+        if (event.target === event.currentTarget) event.preventDefault()
+      }}
+      onTouchMove={(event) => {
+        event.stopPropagation()
+        if (event.target === event.currentTarget) event.preventDefault()
+      }}
     >
       <div
-        className="flex h-[90vh] min-h-[560px] w-[94vw] max-w-[1400px] flex-col overflow-hidden rounded-xl bg-[var(--md-sys-color-surface)] shadow-2xl border border-[var(--md-sys-color-outline-variant)]"
+        className="flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] px-5 py-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Icon name="table_chart" size={22} className="text-[var(--md-sys-color-primary)]" />
-              <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 표로 보기</p>
-              <Badge tone="neutral">색상은 최신↔이전 기준</Badge>
+        <header className="shrink-0 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/96">
+          <div className="flex min-h-16 items-start justify-between gap-3 px-5 py-4">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]">
+                <Icon name="table_chart" size={22} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 표로 보기</p>
+                  <Badge tone="neutral">최신↔이전 기준</Badge>
+                </div>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate mt-1">
+                  {modal.detail.base_name}
+                </p>
+              </div>
             </div>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate mt-1">
-              {modal.detail.base_name}
-            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-2 text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-high)]"
+              aria-label="닫기"
+            >
+              <Icon name="close" size={22} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-high)]"
-            aria-label="닫기"
-          >
-            <Icon name="close" size={22} />
-          </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 space-y-3">
           {modal.loading ? (
             <div className="flex items-center justify-center gap-2 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
               <Spinner size={20} /> Excel 표 범위를 계산하는 중…
@@ -1770,7 +1969,8 @@ function ExcelDiffGridModal({
           ) : null}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

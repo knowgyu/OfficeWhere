@@ -143,7 +143,7 @@ async function createMainWindow() {
     return
   }
 
-  await mainWindow.loadURL('http://localhost:5173')
+  await mainWindow.loadURL('http://localhost:15173')
 }
 
 function getRendererIndexPath(): string {
@@ -325,9 +325,9 @@ async function startBackend(port: number) {
     cwd: command.cwd,
     env: {
       ...process.env,
-      ODJ_DATA_DIR: dataDir,
-      ODJ_HOST: HOST,
-      ODJ_PORT: String(port),
+      OW_DATA_DIR: dataDir,
+      OW_HOST: HOST,
+      OW_PORT: String(port),
       PYTHONUTF8: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -375,7 +375,7 @@ async function startBackend(port: number) {
 
 function getBackendCommand(port: number, dataDir: string): { file: string; args: string[]; cwd: string } {
   const args = ['--host', HOST, '--port', String(port), '--data-dir', dataDir]
-  const override = process.env.ODJ_BACKEND_EXE
+  const override = process.env.OW_BACKEND_EXE
   if (override) {
     return { file: override, args, cwd: path.dirname(override) }
   }
@@ -392,7 +392,7 @@ function getBackendCommand(port: number, dataDir: string): { file: string; args:
 }
 
 function getPythonExecutable(repoRoot: string): string {
-  const configured = process.env.ODJ_PYTHON
+  const configured = process.env.OW_PYTHON
   if (configured) return configured
 
   const venvPython =

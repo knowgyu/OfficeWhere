@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "[office-data-joiner] 개발 환경 설정 중..."
+echo "[officewhere] 개발 환경 설정 중..."
 
 if ! command -v python3 &> /dev/null; then
     echo "[오류] Python3이 설치되어 있지 않습니다."
@@ -39,5 +39,6 @@ cd ..
 echo ""
 echo "[완료] 개발 환경 설정이 완료되었습니다."
 echo "웹 테스트 실행: ./dev-web.sh"
-echo "포트 변경 예: BACKEND_PORT=8876 FRONTEND_PORT=5174 ./dev-web.sh"
+echo "기본 주소: http://127.0.0.1:15173"
+echo "포트 변경 예: BACKEND_PORT=18766 FRONTEND_PORT=15174 ./dev-web.sh"
 echo "Electron 실행: cd frontend 후 npm run electron:dev"

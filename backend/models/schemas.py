@@ -402,6 +402,7 @@ class LibraryFileGroup(BaseModel):
     file_count: int = 0
     latest_file: Optional[FileInfo] = None
     previous_file: Optional[FileInfo] = None
+    manual_latest_file_id: Optional[int] = None
     tokens_summary: List[str] = Field(default_factory=list)
     content_status: str = "pending"
     fingerprint_coverage: int = 0
@@ -423,6 +424,7 @@ class LibraryGroupSummary(BaseModel):
     reason: str
     latest_file: Optional[FileInfo] = None
     previous_file: Optional[FileInfo] = None
+    manual_latest_file_id: Optional[int] = None
     tokens_summary: List[str] = Field(default_factory=list)
     content_status: str = "pending"
     fingerprint_coverage: int = 0
@@ -433,6 +435,10 @@ class LibraryGroupSummary(BaseModel):
 
 class LibraryGroupDetail(LibraryGroupSummary):
     files: List[FileInfo]
+
+
+class LibraryGroupLatestFileRequest(BaseModel):
+    file_id: int
 
 
 class LibraryGroupsResponse(BaseModel):

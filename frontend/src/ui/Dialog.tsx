@@ -38,10 +38,11 @@ export function Dialog({
       if (event.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', handler)
+    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', handler)
-      document.body.style.overflow = ''
+      document.body.style.overflow = previousOverflow
     }
   }, [open, onClose])
 
@@ -49,15 +50,23 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden overscroll-contain p-4 bg-black/40 backdrop-blur-sm animate-fade-in"
       onMouseDown={(event) => {
         if (dismissOnBackdrop && event.target === event.currentTarget) onClose()
+      }}
+      onWheel={(event) => {
+        event.stopPropagation()
+        if (event.target === event.currentTarget) event.preventDefault()
+      }}
+      onTouchMove={(event) => {
+        event.stopPropagation()
+        if (event.target === event.currentTarget) event.preventDefault()
       }}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className={`w-full ${SIZE[size]} max-h-[88vh] flex flex-col rounded-xl bg-[var(--md-sys-color-surface-container-high)] shadow-elev-5 animate-scale-in overflow-hidden`}
+        className={`w-full ${SIZE[size]} max-h-[88vh] flex flex-col rounded-xl bg-[var(--md-sys-color-surface-container-high)] shadow-elev-5 animate-scale-in overflow-hidden overscroll-contain`}
       >
         <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4">
           <div className="flex items-start gap-3 min-w-0">
@@ -84,7 +93,7 @@ export function Dialog({
           </div>
           <IconButton icon="close" label="닫기" onClick={onClose} size="sm" />
         </div>
-        <div className="flex-1 overflow-auto px-6 pb-4">{children}</div>
+        <div className="flex-1 overflow-auto overscroll-contain px-6 pb-4">{children}</div>
         {actions && (
           <div className="px-6 py-4 border-t border-[var(--md-sys-color-outline-variant)] flex justify-end gap-2">
             {actions}

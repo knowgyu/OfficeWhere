@@ -14,6 +14,7 @@ import {
   NormalizedPreview,
   SchemaResponse,
   formatParserConfigSummary,
+  getOfficeWhereBridge,
   isExcelFile,
   normalizeFileInspect,
   normalizeSchemaResponse,
@@ -169,12 +170,11 @@ export default function FileManager() {
   const [clearAppDataResult, setClearAppDataResult] = useState<ClearAppDataResult | null>(null)
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
   const [closeBehaviorLoading, setCloseBehaviorLoading] = useState(false)
-  const appDataAvailable =
-    typeof window !== 'undefined' &&
-    Boolean(window.officeDataJoiner?.getAppDataPaths && window.officeDataJoiner?.clearAppData)
-  const closeBehaviorAvailable =
-    typeof window !== 'undefined' &&
-    Boolean(window.officeDataJoiner?.getCloseBehavior && window.officeDataJoiner?.setCloseBehavior)
+  const officeWhereBridge = getOfficeWhereBridge()
+  const appDataAvailable = Boolean(officeWhereBridge?.getAppDataPaths && officeWhereBridge?.clearAppData)
+  const closeBehaviorAvailable = Boolean(
+    officeWhereBridge?.getCloseBehavior && officeWhereBridge?.setCloseBehavior,
+  )
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setLoading(true)

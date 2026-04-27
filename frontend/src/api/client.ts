@@ -21,7 +21,7 @@ export interface ClearAppDataResult {
 export type CloseBehavior = 'ask' | 'hide' | 'quit'
 
 declare global {
-  interface OfficeDataJoinerBridge {
+  interface OfficeWhereBridge {
     getBackendBaseUrl?: () => Promise<string>
     pickFolder?: () => Promise<FolderPickResponse & { error?: string }>
     pickFile?: () => Promise<{ cancelled: boolean; path: string; error?: string }>
@@ -34,17 +34,21 @@ declare global {
   }
 
   interface Window {
-    officeDataJoiner?: OfficeDataJoinerBridge
+    officeWhere?: OfficeWhereBridge
   }
 }
 
 let backendBaseUrlPromise: Promise<string> | null = null
 const configuredDevBackendUrl = import.meta.env.VITE_BACKEND_URL?.trim().replace(/\/$/, '')
 
+export function getOfficeWhereBridge(): OfficeWhereBridge | undefined {
+  if (typeof window === 'undefined') return undefined
+  return window.officeWhere
+}
+
 export async function getBackendBaseUrl(): Promise<string> {
   if (!backendBaseUrlPromise) {
-    const bridge =
-      typeof window !== 'undefined' ? window.officeDataJoiner : undefined
+    const bridge = getOfficeWhereBridge()
     backendBaseUrlPromise = bridge?.getBackendBaseUrl
       ? bridge.getBackendBaseUrl()
       : Promise.resolve(import.meta.env.DEV ? configuredDevBackendUrl || '' : '')
@@ -535,6 +539,7 @@ export interface LibraryGroupSummary {
   reason: string
   latest_file?: FileInfo | null
   previous_file?: FileInfo | null
+  manual_latest_file_id?: number | null
   tokens_summary: string[]
   content_status: 'pending' | 'partial' | 'not_enough_content' | 'same_content' | 'content_differs'
   fingerprint_coverage: number
@@ -564,8 +569,7 @@ export interface LibraryGroupsParams {
   offset?: number
 }
 
-const electronApi = () =>
-  typeof window !== 'undefined' ? window.officeDataJoiner : undefined
+const electronApi = () => getOfficeWhereBridge()
 
 function desktopError(message: string): never {
   throw { response: { data: { detail: message } } }
@@ -1384,6 +1388,14 @@ export const api = {
     groups: getLibraryGroups,
     groupDetail: async (id: string) =>
       axios.get<LibraryGroupDetail>(await apiPath(`/api/library/groups/${encodeURIComponent(id)}`)),
+    setGroupLatestFile: (id: string, fileId: number) =>
+      apiPath(`/api/library/groups/${encodeURIComponent(id)}/latest-file`).then((url) =>
+        axios.put<LibraryGroupDetail>(url, { file_id: fileId })
+      ),
+    clearGroupLatestFile: (id: string) =>
+      apiPath(`/api/library/groups/${encodeURIComponent(id)}/latest-file`).then((url) =>
+        axios.delete<LibraryGroupDetail>(url)
+      ),
   },
 }
 

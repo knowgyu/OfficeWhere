@@ -6,7 +6,7 @@ Electron은 OfficeWhere의 기본 데스크톱 shell이다. Python/FastAPI/SQLit
 
 - Electron main process가 backend executable을 실행하고 종료 시 정리한다.
 - backend는 `127.0.0.1`의 사용 가능한 포트에 바인딩한다.
-- preload bridge는 제한된 함수만 노출한다.
+- preload bridge는 OfficeWhere용 제한된 함수만 `window.officeWhere`에 노출한다.
   - `getBackendBaseUrl`
   - `pickFile`
   - `pickFolder`
@@ -19,7 +19,7 @@ Electron은 OfficeWhere의 기본 데스크톱 shell이다. Python/FastAPI/SQLit
 
 ```bash
 source venv/bin/activate
-python backend_server.py --host 127.0.0.1 --port 8765
+python backend_server.py --host 127.0.0.1 --port 18765
 
 cd frontend
 npm run dev
@@ -35,7 +35,7 @@ npm run electron:dev
 Vite dev server를 붙일 때:
 
 ```bash
-ELECTRON_RENDERER_URL=http://localhost:5173 npm run electron:dev
+ELECTRON_RENDERER_URL=http://localhost:15173 npm run electron:dev
 ```
 
 ## Windows 빌드
@@ -49,8 +49,29 @@ build.bat
 1. `frontend`: `npm ci`
 2. renderer build: `npm run build`
 3. Electron main/preload build: `npm run build:electron`
-4. backend executable: `python -m PyInstaller office_data_joiner_backend.spec --clean -y`
+4. backend executable: `python -m PyInstaller officewhere_backend.spec --clean -y`
 5. Windows zip: `npm run package:win`
+
+backend executable의 output 이름은 `officewhere-backend`로 유지한다.
+
+## Backend 환경 변수
+
+OfficeWhere backend는 `OW_*` 환경 변수만 읽는다.
+
+| Environment variable | 용도 |
+| --- | --- |
+| `OW_HOST` | backend bind host |
+| `OW_PORT` | backend bind port |
+| `OW_DATA_DIR` | SQLite data directory |
+| `OW_LOG_LEVEL` | uvicorn log level |
+| `OW_MAX_WORKERS` | Office parsing worker cap |
+
+Electron 개발 실행에서 backend 실행 파일이나 Python interpreter를 직접 지정할 때도 `OW_*` 이름을 우선한다.
+
+| Environment variable | 용도 |
+| --- | --- |
+| `OW_BACKEND_EXE` | packaged backend executable override |
+| `OW_PYTHON` | source checkout 실행 시 Python executable override |
 
 ## GitHub Actions Release
 

@@ -114,7 +114,7 @@ function SearchResultListItem({
       <button
         type="button"
         onClick={() => onOpen(item.file_id, item.name)}
-        className="block w-full text-left"
+        className="block w-full text-left rounded-md"
       >
         <p className="type-label-md text-[var(--md-sys-color-primary)] mb-1 inline-flex items-center gap-1.5">
           <Icon name="my_location" size={14} />
@@ -386,7 +386,7 @@ export default function FileSearch() {
 
   return (
     <div className="space-y-6">
-      <Card variant="elevated" className="p-5 space-y-4">
+      <Card variant="elevated" className="console-panel p-5 md:p-6 space-y-5">
         <div className="flex flex-col md:flex-row gap-3 md:items-center">
           <div className="flex-1">
             <TextField
@@ -394,6 +394,7 @@ export default function FileSearch() {
               placeholder="파일 안의 단어를 검색 (예: 회의록, 예산안, 실험 결과)"
               value={query}
               onChange={(event) => handleQueryChange(event.target.value)}
+              className="h-12 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_rgba(255,255,255,0.95)_inset,0_0_0_1px_rgba(15,23,42,0.05)]"
               trailing={
                 query ? (
                   <IconButton
@@ -437,6 +438,10 @@ export default function FileSearch() {
           <span className="inline-flex items-center gap-1.5">
             <Icon name="bolt" size={16} /> {SEARCH_SCOPE_STATUS[searchScope]}
           </span>
+          <span className="hidden sm:inline-flex items-center gap-1.5">
+            <kbd className="kbd-token">600ms</kbd>
+            <span>입력 후 자동 검색</span>
+          </span>
           {lastReindex && (
             <span className="inline-flex items-center gap-1.5">
               <Icon name="schedule" size={16} /> 마지막 검색 갱신 {lastReindex}
@@ -444,8 +449,8 @@ export default function FileSearch() {
           )}
         </div>
 
-        <div className="space-y-3">
-          <div className="space-y-2">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,0.55fr)]">
+          <div className="console-subpanel rounded-lg p-4 space-y-2">
             <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">검색 범위</span>
             <div>
               <SegmentedButton<SearchScope>
@@ -463,33 +468,35 @@ export default function FileSearch() {
               {SEARCH_SCOPE_DESCRIPTION[searchScope]}
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">문서 형식</span>
-            {FILE_TYPE_FILTERS.map((filter) => {
-              const selected = selectedFileTypes.includes(filter.value)
-              return (
-                <Chip
-                  key={filter.value}
-                  label={filter.label}
-                  icon={filter.icon}
-                  kind="filter"
-                  selected={selected}
-                  aria-pressed={selected}
-                  onClick={() => toggleFileType(filter.value)}
-                />
-              )
-            })}
-            <Button
-              variant="text"
-              size="sm"
-              leadingIcon="restart_alt"
-              onClick={handleResetFileTypes}
-              disabled={selectedFileTypes.length === 0}
-            >
-              초기화
-            </Button>
+          <div className="console-subpanel rounded-lg p-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">문서 형식</span>
+              {FILE_TYPE_FILTERS.map((filter) => {
+                const selected = selectedFileTypes.includes(filter.value)
+                return (
+                  <Chip
+                    key={filter.value}
+                    label={filter.label}
+                    icon={filter.icon}
+                    kind="filter"
+                    selected={selected}
+                    aria-pressed={selected}
+                    onClick={() => toggleFileType(filter.value)}
+                  />
+                )
+              })}
+              <Button
+                variant="text"
+                size="sm"
+                leadingIcon="restart_alt"
+                onClick={handleResetFileTypes}
+                disabled={selectedFileTypes.length === 0}
+              >
+                초기화
+              </Button>
+            </div>
           </div>
-          <div className="space-y-2">
+          <div className="console-subpanel rounded-lg p-4 space-y-2 lg:col-span-2">
             <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">수정일</span>
             <div className="flex items-center gap-2 flex-wrap">
               {MODIFIED_DATE_FILTERS.map((filter) => (
@@ -523,7 +530,7 @@ export default function FileSearch() {
       </Card>
 
       {settingsOpen && settingsDraft && (
-        <Card variant="elevated" className="p-5 space-y-4 animate-slide-up">
+        <Card variant="elevated" className="console-panel p-5 space-y-4 animate-slide-up">
           <div>
             <p className="type-title-md text-[var(--md-sys-color-on-surface)]">검색 갱신 주기</p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
@@ -629,7 +636,7 @@ export default function FileSearch() {
 
       {hasResults && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/80 p-3">
             <Chip label={`${results.length}건`} tone="primary" as="span" icon="filter_list" />
             {selectedFileTypes.length > 0 && (
               <Chip label={`형식 ${selectedFileTypes.length}개 선택`} tone="secondary" as="span" icon="checklist" />
@@ -670,8 +677,8 @@ export default function FileSearch() {
             const contentExpanded = expandedContentFiles.has(fileKey)
 
             return (
-              <Card key={fileKey} variant="outlined" className="overflow-hidden">
-                <header className="px-5 py-3 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)]">
+              <Card key={fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none">
+                <header className="px-5 py-3.5 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/62">
                   <FileTypeBadge fileType={items[0].file_type} />
                   <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
                     {fileName}

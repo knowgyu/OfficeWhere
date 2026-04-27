@@ -139,7 +139,7 @@ jobs:
 
       - name: Build backend executable
         shell: pwsh
-        run: python -m PyInstaller office_data_joiner_backend.spec --clean -y
+        run: python -m PyInstaller officewhere_backend.spec --clean -y
 
       - name: Build Electron Windows zip
         working-directory: frontend
@@ -236,7 +236,7 @@ jobs:
         run: python scripts/run_demo_checks.py
 
       - name: Build backend executable
-        run: python -m PyInstaller office_data_joiner_backend.spec --clean -y
+        run: python -m PyInstaller officewhere_backend.spec --clean -y
 
       - name: Build Electron macOS arm64 bundle
         working-directory: frontend

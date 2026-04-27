@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST="${HOST:-127.0.0.1}"
-BACKEND_PORT="${BACKEND_PORT:-8765}"
-FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+BACKEND_PORT="${BACKEND_PORT:-18765}"
+FRONTEND_PORT="${FRONTEND_PORT:-15173}"
 
 if [[ -x "$ROOT_DIR/venv/bin/python" ]]; then
   PYTHON_BIN="$ROOT_DIR/venv/bin/python"
@@ -38,7 +38,7 @@ BACKEND_PID=$!
 
 "$PYTHON_BIN" - <<PY
 import sys, time, urllib.request
-url = "http://${HOST}:${BACKEND_PORT}/health"
+url = "http://${HOST}:${BACKEND_PORT}/api/health"
 for _ in range(80):
     try:
         urllib.request.urlopen(url, timeout=0.5).read()

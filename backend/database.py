@@ -11,7 +11,7 @@ from .core.hangul_search import build_search_text, make_search_snippet
 
 
 def _default_db_dir() -> Path:
-    configured = os.environ.get("ODJ_DATA_DIR", "").strip()
+    configured = os.environ.get("OW_DATA_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
     return Path.home() / ".officewhere"

@@ -51,7 +51,7 @@ if not exist "venv\Scripts\python.exe" (
     exit /b 1
 )
 
-venv\Scripts\python.exe -m PyInstaller office_data_joiner_backend.spec --clean -y
+venv\Scripts\python.exe -m PyInstaller officewhere_backend.spec --clean -y
 if %errorlevel% neq 0 (
     echo [오류] Backend PyInstaller 패키징 실패
     pause

@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 chcp 65001 > nul
-echo [office-data-joiner] 개발 환경 설정 중...
+echo [officewhere] 개발 환경 설정 중...
 echo.
 
 set "PYTHON_CMD="
@@ -85,7 +85,8 @@ cd ..
 echo.
 echo [완료] 개발 환경 설정이 완료되었습니다.
 echo 웹 테스트 실행: dev-web.bat
-echo 포트 변경 예: dev-web.bat -BackendPort 8876 -FrontendPort 5174
+echo 기본 주소: http://127.0.0.1:15173
+echo 포트 변경 예: dev-web.bat -BackendPort 18766 -FrontendPort 15174
 echo Electron 실행: cd frontend 후 npm run electron:dev
 pause
 exit /b 0
