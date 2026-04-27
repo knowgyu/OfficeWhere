@@ -232,7 +232,7 @@ export default function JoinQuery() {
         <EmptyState
           icon="table_view"
           title="먼저 대상 폴더를 설정해 주세요"
-          description="설정에서 Excel 파일이 있는 폴더를 추가하고 자동 등록을 실행하면 이 화면에서 통합할 수 있습니다."
+          description="설정에서 Excel 파일이 있는 폴더를 추가하고 문서 새로고침을 실행하면 이 화면에서 통합할 수 있습니다."
         />
       </Card>
     )
@@ -299,7 +299,7 @@ export default function JoinQuery() {
             <EmptyState
               icon="warning"
               title="표시할 Excel 파일이 없습니다"
-              description="검색어를 바꾸거나 설정 탭에서 대상 폴더를 추가하고 자동 등록을 실행해 주세요."
+              description="검색어를 바꾸거나 설정 탭에서 대상 폴더를 추가하고 문서 새로고침을 실행해 주세요."
               compact
             />
           ) : (

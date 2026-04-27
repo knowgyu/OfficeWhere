@@ -4,9 +4,13 @@ import FileManager from './components/FileManager'
 import JoinQuery from './components/JoinQuery'
 import ConsistencyCheck from './components/ConsistencyCheck'
 import FileSearch from './components/FileSearch'
+import OnboardingCarousel from './components/OnboardingCarousel'
+import { api } from './api/client'
 import { Button, Icon, Spinner } from './ui'
+import { useSnackbar } from './ui'
 import { useLibraryRescan } from './contexts/LibraryRescanContext'
 import { useDisplaySettings } from './contexts/DisplaySettingsContext'
+import { TutorialStep } from './tutorial'
 
 type Tab = 'search' | 'check' | 'join' | 'files'
 
@@ -56,9 +60,11 @@ const TABS: TabDef[] = [
 
 const LS_TAB = 'officewhere:last-tab'
 const LEGACY_LS_TAB = 'odj:last-tab'
+const LS_ONBOARDING_DONE = 'officewhere:onboarding-complete:v1'
 const LOGO_SRC = './officewhere-logo.png'
 
 export default function App() {
+  const snackbar = useSnackbar()
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     if (typeof window === 'undefined') return 'search'
     const stored = (
@@ -66,6 +72,13 @@ export default function App() {
     ) as Tab | null
     return stored && TABS.some((tab) => tab.id === stored) ? stored : 'search'
   })
+  const [onboardingOpen, setOnboardingOpen] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(LS_ONBOARDING_DONE) !== 'true'
+  })
+  const [onboardingReplay, setOnboardingReplay] = useState(false)
+  const [tutorialStep, setTutorialStep] = useState<TutorialStep | null>(null)
+  const [exampleLibraryPath, setExampleLibraryPath] = useState('')
   const { textSize, increaseTextSize, decreaseTextSize, resetTextSize } = useDisplaySettings()
 
   useEffect(() => {
@@ -100,6 +113,52 @@ export default function App() {
 
   const current = TABS.find((tab) => tab.id === activeTab) ?? TABS[0]
 
+  const completeOnboarding = () => {
+    window.localStorage.setItem(LS_ONBOARDING_DONE, 'true')
+    setOnboardingOpen(false)
+    setOnboardingReplay(false)
+  }
+
+  const handleStartOwnFolder = () => {
+    completeOnboarding()
+    setTutorialStep(null)
+    setActiveTab('files')
+  }
+
+  const handleReplayOnboarding = () => {
+    setOnboardingReplay(true)
+    setOnboardingOpen(true)
+  }
+
+  const handleStartExample = async () => {
+    try {
+      const response = await api.app.getExampleLibraryPath()
+      if (response.data.available && response.data.path) {
+        setExampleLibraryPath(response.data.path)
+        completeOnboarding()
+        setActiveTab('files')
+        setTutorialStep('example-folder')
+      } else {
+        setExampleLibraryPath('')
+        snackbar.warn(response.data.reason || '예제 라이브러리 경로를 찾지 못했습니다.')
+      }
+    } catch (error) {
+      setExampleLibraryPath('')
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        '예제 라이브러리 경로를 확인하지 못했습니다.'
+      snackbar.warn(detail)
+    }
+  }
+
+  const handleTutorialStep = (next: TutorialStep | null) => {
+    setTutorialStep(next)
+    if (next === 'search') setActiveTab('search')
+    if (next === 'version-ppt' || next === 'version-excel' || next === 'excel-table') {
+      setActiveTab('check')
+    }
+  }
+
   return (
     <div
       className={`app-text-${textSize} flex flex-1 min-h-screen bg-[var(--md-sys-color-background)] text-[var(--md-sys-color-on-surface)]`}
@@ -111,14 +170,41 @@ export default function App() {
         <TopAppBar title={current.label} hint={current.hint} />
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 pt-6 pb-16 animate-fade-in" key={activeTab}>
-            {activeTab === 'files' && <FileManager />}
-            {activeTab === 'search' && <FileSearch />}
+            {activeTab === 'files' && (
+              <FileManager
+                tutorialStep={tutorialStep}
+                exampleLibraryPath={exampleLibraryPath}
+                onTutorialStep={handleTutorialStep}
+                onReplayOnboarding={handleReplayOnboarding}
+              />
+            )}
+            {activeTab === 'search' && (
+              <FileSearch
+                tutorialActive={tutorialStep === 'search'}
+                onTutorialSearchComplete={() => handleTutorialStep('version-ppt')}
+              />
+            )}
             {activeTab === 'join' && <JoinQuery />}
-            {activeTab === 'check' && <ConsistencyCheck />}
+            {activeTab === 'check' && (
+              <ConsistencyCheck
+                tutorialStep={tutorialStep}
+                onTutorialStep={handleTutorialStep}
+              />
+            )}
           </div>
         </main>
       </div>
       <GlobalRescanProgress />
+      {tutorialStep && tutorialStep !== 'done' && (
+        <div className="fixed inset-0 z-[64] pointer-events-none bg-slate-950/10 backdrop-blur-[1px]" />
+      )}
+      <GuidedTourPanel step={tutorialStep} onFinish={() => handleTutorialStep(null)} />
+      <OnboardingCarousel
+        open={onboardingOpen}
+        replay={onboardingReplay}
+        onStartExample={handleStartExample}
+        onStartOwnFolder={handleStartOwnFolder}
+      />
     </div>
   )
 }
@@ -144,7 +230,7 @@ function GlobalRescanProgress() {
           </div>
           <div className="min-w-0 flex-1 space-y-1">
             <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-              {cancelling ? '재스캔 정지 중' : '자동 등록 / 재스캔 중'}
+              {cancelling ? '문서 새로고침 정지 중' : '문서 새로고침 중'}
             </p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               {status.message || '대상 폴더 상태를 확인하는 중입니다.'}
@@ -169,6 +255,71 @@ function GlobalRescanProgress() {
             className="h-full rounded-full bg-[var(--md-sys-color-primary)] transition-[width] duration-300"
             style={{ width: `${percent}%` }}
           />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GuidedTourPanel({
+  step,
+  onFinish,
+}: {
+  step: TutorialStep | null
+  onFinish: () => void
+}) {
+  if (!step) return null
+
+  const content: Record<TutorialStep, { title: string; description: string; action?: string }> = {
+    'example-folder': {
+      title: '1. 예제 폴더를 대상에 추가하세요',
+      description: 'A 프로젝트 예제 폴더가 입력되어 있습니다. 강조된 대상 추가 버튼을 눌러 라이브러리에 넣어주세요.',
+    },
+    'document-refresh': {
+      title: '2. 문서 새로고침을 실행하세요',
+      description: '대상 폴더의 새 문서와 변경된 문서를 확인합니다. 강조된 문서 새로고침 버튼을 눌러주세요.',
+    },
+    search: {
+      title: '3. 예제 키워드를 검색하세요',
+      description: '검색어가 미리 입력되어 있습니다. 검색 버튼을 눌러 문서 안의 A 프로젝트 결과를 확인하세요.',
+    },
+    'version-ppt': {
+      title: '4. PPT 버전 진단을 열어보세요',
+      description: '프로젝트상태 PowerPoint 묶음이 준비됩니다. 강조된 버전 진단 열기를 눌러 변경 내용을 확인하세요.',
+    },
+    'version-excel': {
+      title: '5. Excel 버전 진단을 열어보세요',
+      description: '사업예산 Excel 묶음으로 이동합니다. 다시 버전 진단 열기를 눌러 값 변경을 확인하세요.',
+    },
+    'excel-table': {
+      title: '6. Excel 표로 보기를 확인하세요',
+      description: '변경점이 표 위에 표시됩니다. 강조된 표로 보기 버튼을 눌러 셀 단위 변경을 확인하세요.',
+    },
+    done: {
+      title: '예제로 둘러보기를 마쳤습니다',
+      description: '이제 검색, 버전 관리, Excel 통합을 자유롭게 사용해도 됩니다.',
+      action: '둘러보기 끝내기',
+    },
+  }
+
+  const current = content[step]
+
+  return (
+    <div className="fixed inset-x-0 bottom-6 z-[66] flex justify-center px-4 pointer-events-none">
+      <div className="pointer-events-auto max-w-2xl rounded-2xl border border-white/70 bg-[var(--md-sys-color-surface-container-lowest)]/92 p-4 shadow-elev-5 backdrop-blur-xl">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-primary)]">
+            <Icon name={step === 'done' ? 'task_alt' : 'auto_awesome'} size={22} filled={step === 'done'} />
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{current.title}</p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{current.description}</p>
+          </div>
+          {current.action && (
+            <Button size="sm" variant="filled" onClick={onFinish}>
+              {current.action}
+            </Button>
+          )}
         </div>
       </div>
     </div>

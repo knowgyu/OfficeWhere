@@ -51,6 +51,28 @@ async def health():
     }
 
 
+@app.get("/api/app/example-library-path")
+async def example_library_path():
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.extend([
+            Path(sys.executable).parent / "examples" / "officewhere_test_library",
+            Path(sys.executable).parent.parent / "examples" / "officewhere_test_library",
+        ])
+    candidates.extend([
+        Path(__file__).parent.parent / "examples" / "officewhere_test_library",
+        Path.cwd() / "examples" / "officewhere_test_library",
+    ])
+    for candidate in candidates:
+        if candidate.exists():
+            return {"available": True, "path": str(candidate)}
+    return {
+        "available": False,
+        "path": "",
+        "reason": "examples/officewhere_test_library 폴더를 찾지 못했습니다.",
+    }
+
+
 # 프론트엔드 static 파일 serve
 # PyInstaller 패키징 여부에 따라 경로 자동 분기
 if getattr(sys, "frozen", False):

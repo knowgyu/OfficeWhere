@@ -20,6 +20,12 @@ export interface ClearAppDataResult {
 
 export type CloseBehavior = 'ask' | 'hide' | 'quit'
 
+export interface ExampleLibraryPathResponse {
+  available: boolean
+  path: string
+  reason?: string
+}
+
 declare global {
   interface OfficeWhereBridge {
     getBackendBaseUrl?: () => Promise<string>
@@ -31,6 +37,7 @@ declare global {
     clearAppData?: (candidateIds: string[], exitAfterClear?: boolean) => Promise<ClearAppDataResult>
     getCloseBehavior?: () => Promise<CloseBehavior>
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
+    getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
   }
 
   interface Window {
@@ -1375,6 +1382,27 @@ export const api = {
       const electron = electronApi()
       if (!electron?.setCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
       return { data: await electron.setCloseBehavior(behavior) }
+    },
+    getExampleLibraryPath: async () => {
+      const electron = electronApi()
+      if (electron?.getExampleLibraryPath) {
+        return { data: await electron.getExampleLibraryPath() }
+      }
+      try {
+        return await axios.get<ExampleLibraryPathResponse>(await apiPath('/api/app/example-library-path'))
+      } catch {
+        // Fall through to explicit Vite configuration or a clear unavailable result.
+      }
+      const configuredPath = import.meta.env.VITE_EXAMPLE_LIBRARY_PATH?.trim()
+      return {
+        data: configuredPath
+          ? { available: true, path: configuredPath }
+          : {
+              available: false,
+              path: '',
+              reason: '브라우저 개발 모드에서는 예제 폴더 자동 지정이 비활성화되어 있습니다.',
+            },
+      }
     },
   },
   library: {

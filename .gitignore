@@ -66,9 +66,10 @@ AGENTS.md
 ARCHITECTURE.md
 PLAN.md
 
-# Generated demo inputs (regenerate via scripts/generate_demo_cases.py)
+# Generated smoke-test inputs (regenerate via scripts/generate_demo_cases.py)
 examples/demo_cases/
-examples/officewhere_test_library/
+
+# Onboarding example library is intentionally tracked and packaged with Electron.
 
 # Codex local marker
 .codex

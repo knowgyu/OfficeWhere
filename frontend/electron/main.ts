@@ -94,6 +94,7 @@ function registerIpcHandlers() {
   ipcMain.handle('app:clear-app-data', async (_event, payload: unknown) => clearAppData(payload))
   ipcMain.handle('app:get-close-behavior', () => readCloseBehavior())
   ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
+  ipcMain.handle('app:get-example-library-path', () => getExampleLibraryPath())
   ipcMain.handle('dialog:pick-file', async () => pickFile())
   ipcMain.handle('dialog:pick-folder', async () => pickFolder())
 }
@@ -167,6 +168,29 @@ function getTrayIconPath(): string {
     : path.join(app.getAppPath(), 'dist')
   const iconPath = path.join(basePath, iconName)
   return fs.existsSync(iconPath) ? iconPath : getAppIconPath()
+}
+
+function getExampleLibraryPath(): { available: boolean; path: string; reason?: string } {
+  const candidates = app.isPackaged
+    ? [
+        path.join(path.dirname(app.getPath('exe')), 'examples', 'officewhere_test_library'),
+        path.join(path.dirname(app.getPath('exe')), '..', 'examples', 'officewhere_test_library'),
+        path.join(process.resourcesPath, 'examples', 'officewhere_test_library'),
+      ]
+    : [
+        path.resolve(app.getAppPath(), '..', 'examples', 'officewhere_test_library'),
+        path.resolve(process.cwd(), '..', 'examples', 'officewhere_test_library'),
+        path.resolve(process.cwd(), 'examples', 'officewhere_test_library'),
+      ]
+
+  const found = candidates.find((candidate) => fs.existsSync(candidate))
+  if (found) return { available: true, path: found }
+
+  return {
+    available: false,
+    path: '',
+    reason: '예제 라이브러리 폴더를 찾지 못했습니다. examples/officewhere_test_library를 생성해 주세요.',
+  }
 }
 
 function settingsPath(): string {

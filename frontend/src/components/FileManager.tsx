@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   api,
@@ -44,6 +44,7 @@ import {
   APP_TEXT_SIZE_ORDER,
   useDisplaySettings,
 } from '../contexts/DisplaySettingsContext'
+import { TutorialStep } from '../tutorial'
 import PreviewPanel from './PreviewPanel'
 
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
@@ -120,7 +121,17 @@ function appDataSize(candidates: AppDataCandidate[], ids: string[]) {
   )
 }
 
-export default function FileManager() {
+export default function FileManager({
+  tutorialStep,
+  exampleLibraryPath = '',
+  onTutorialStep,
+  onReplayOnboarding,
+}: {
+  tutorialStep?: TutorialStep | null
+  exampleLibraryPath?: string
+  onTutorialStep?: (step: TutorialStep | null) => void
+  onReplayOnboarding?: () => void
+}) {
   const snackbar = useSnackbar()
   const { textSize, setTextSize } = useDisplaySettings()
   const [files, setFiles] = useState<FileInfo[]>([])
@@ -143,7 +154,12 @@ export default function FileManager() {
   const [schema, setSchema] = useState<NormalizedPreview | null>(null)
   const [schemaLoading, setSchemaLoading] = useState(false)
 
-  const [confirmDelete, setConfirmDelete] = useState<FileInfo | null>(null)
+  const [confirmDeleteFiles, setConfirmDeleteFiles] = useState<FileInfo[]>([])
+  const [selectedFileIds, setSelectedFileIds] = useState<Set<number>>(new Set())
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [focusedFileId, setFocusedFileId] = useState<number | null>(null)
+  const dragSelectionRef = useRef<{ active: boolean; anchorIndex: number; selecting: boolean } | null>(null)
+  const [tourRefreshStartKey, setTourRefreshStartKey] = useState<number | null>(null)
   const [librarySettings, setLibrarySettings] = useState<LibrarySettings>({
     watched_folders: [],
     auto_rescan_mode: 'interval',
@@ -239,6 +255,52 @@ export default function FileManager() {
     void fetchLibrarySettings()
   }, [rescanCompletionKey])
 
+  useEffect(() => {
+    if (tutorialStep !== 'example-folder' || !exampleLibraryPath) return
+    setFolderPathDraft(exampleLibraryPath)
+    setFolderRecursive(true)
+  }, [exampleLibraryPath, tutorialStep])
+
+  useEffect(() => {
+    if (tourRefreshStartKey === null || rescanning) return
+    if (rescanCompletionKey > tourRefreshStartKey) {
+      setTourRefreshStartKey(null)
+      const currentSummary = rescanStatus?.summary ?? rescanSummary
+      const handled = (currentSummary?.registered ?? rescanStatus?.registered ?? 0)
+        + (currentSummary?.updated ?? rescanStatus?.updated ?? 0)
+        + (currentSummary?.skipped ?? rescanStatus?.skipped ?? 0)
+      const failed = currentSummary?.failed ?? rescanStatus?.failed ?? 0
+      if (rescanStatus?.stage === 'completed' && handled > 0 && failed === 0) {
+        onTutorialStep?.('search')
+      } else {
+        snackbar.warn('예제 문서가 아직 준비되지 않았습니다. 문서 새로고침을 다시 실행해 주세요.')
+      }
+    }
+  }, [onTutorialStep, rescanCompletionKey, rescanStatus, rescanSummary, rescanning, snackbar, tourRefreshStartKey])
+
+  useEffect(() => {
+    const stopDrag = () => {
+      dragSelectionRef.current = null
+    }
+    window.addEventListener('pointerup', stopDrag)
+    window.addEventListener('pointercancel', stopDrag)
+    return () => {
+      window.removeEventListener('pointerup', stopDrag)
+      window.removeEventListener('pointercancel', stopDrag)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (confirmDeleteFiles.length === 0) return
+    const handler = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      void handleDeleteFiles(confirmDeleteFiles)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [confirmDeleteFiles])
+
   const fetchLibrarySettings = async () => {
     setSettingsLoading(true)
     try {
@@ -302,6 +364,11 @@ export default function FileManager() {
     if (!saved) return
 
     setFolderPathDraft('')
+    if (tutorialStep === 'example-folder') {
+      onTutorialStep?.('document-refresh')
+      snackbar.success('예제 폴더를 추가했습니다. 이제 문서 새로고침을 눌러주세요.')
+      return
+    }
     await startRescan('added')
   }
 
@@ -345,6 +412,7 @@ export default function FileManager() {
   }
 
   const handleRescanLibrary = async () => {
+    if (tutorialStep === 'document-refresh') setTourRefreshStartKey(rescanCompletionKey)
     await startRescan('manual')
   }
 
@@ -379,6 +447,73 @@ export default function FileManager() {
     const boundedOffset = Math.max(0, nextOffset)
     setFileOffset(boundedOffset)
     void fetchFiles(boundedOffset, fileQuery)
+  }
+
+  const visibleSelectedFiles = () => files.filter((file) => selectedFileIds.has(file.id))
+
+  const openDeleteConfirm = (targets: FileInfo[]) => {
+    if (targets.length === 0) {
+      snackbar.warn('등록 해제할 파일을 선택해 주세요.')
+      return
+    }
+    setConfirmDeleteFiles(targets)
+  }
+
+  const toggleRegisteredFileSelection = (file: FileInfo, selected?: boolean) => {
+    setSelectedFileIds((current) => {
+      const next = new Set(current)
+      const shouldSelect = selected ?? !next.has(file.id)
+      if (shouldSelect) next.add(file.id)
+      else next.delete(file.id)
+      return next
+    })
+  }
+
+  const selectVisibleFileRange = (fromIndex: number, toIndex: number, selected: boolean) => {
+    const start = Math.max(0, Math.min(fromIndex, toIndex))
+    const end = Math.min(files.length - 1, Math.max(fromIndex, toIndex))
+    setSelectedFileIds((current) => {
+      const next = new Set(current)
+      files.slice(start, end + 1).forEach((file) => {
+        if (selected) next.add(file.id)
+        else next.delete(file.id)
+      })
+      return next
+    })
+  }
+
+  const isUnsafeDeleteKeyTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false
+    return Boolean(target.closest('input, textarea, select, button, [contenteditable="true"]'))
+  }
+
+  const handleRegisteredFilesKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Delete') return
+    if (isUnsafeDeleteKeyTarget(event.target)) return
+    const selected = visibleSelectedFiles()
+    const focused = focusedFileId ? files.find((file) => file.id === focusedFileId) : null
+    const targets = selected.length > 0 ? selected : focused ? [focused] : []
+    if (targets.length === 0) return
+    event.preventDefault()
+    openDeleteConfirm(targets)
+  }
+
+  const handleFileRowPointerDown = (
+    event: ReactPointerEvent<HTMLLIElement>,
+    file: FileInfo,
+    index: number,
+  ) => {
+    if (!selectionMode || event.button !== 0 || isUnsafeDeleteKeyTarget(event.target)) return
+    const selecting = !selectedFileIds.has(file.id)
+    dragSelectionRef.current = { active: true, anchorIndex: index, selecting }
+    toggleRegisteredFileSelection(file, selecting)
+    event.preventDefault()
+  }
+
+  const handleFileRowPointerEnter = (index: number) => {
+    const drag = dragSelectionRef.current
+    if (!drag?.active) return
+    selectVisibleFileRange(drag.anchorIndex, index, drag.selecting)
   }
 
   const handleClearAppData = async () => {
@@ -464,6 +599,9 @@ export default function FileManager() {
   const hasPreviousFilePage = fileOffset > 0
   const hasNextFilePage = fileOffset + files.length < fileTotal
   const fileTypeCounts = Object.entries(fileCountsByType)
+  const selectedFiles = files.filter((file) => selectedFileIds.has(file.id))
+  const selectedCount = selectedFiles.length
+  const selectionVisible = selectionMode || selectedCount > 0
 
   const handleInspectPath = async () => {
     if (!filePath.trim()) {
@@ -555,19 +693,41 @@ export default function FileManager() {
     }
   }
 
-  const handleDelete = async (file: FileInfo) => {
+  const handleDeleteFiles = async (targets: FileInfo[]) => {
+    if (targets.length === 0) return
+    const deleted: FileInfo[] = []
+    const failed: FileInfo[] = []
     try {
-      await api.files.delete(file.id)
-      snackbar.success(`"${file.name}" 등록 해제됨.`)
+      for (const file of targets) {
+        try {
+          await api.files.delete(file.id)
+          deleted.push(file)
+        } catch {
+          failed.push(file)
+        }
+      }
+
+      setSelectedFileIds((current) => {
+        const next = new Set(current)
+        deleted.forEach((file) => next.delete(file.id))
+        return next
+      })
+
+      if (failed.length > 0) {
+        snackbar.error(`등록 해제 실패 ${failed.length}개 · 성공 ${deleted.length}개`)
+      } else if (deleted.length === 1) {
+        snackbar.success(`"${deleted[0].name}" 등록 해제됨.`)
+      } else {
+        snackbar.success(`${deleted.length}개 파일 등록을 해제했습니다.`)
+      }
+
       const nextOffset =
-        files.length === 1 && fileOffset > 0
+        files.length <= deleted.length && fileOffset > 0
           ? Math.max(0, fileOffset - REGISTERED_FILE_PAGE_SIZE)
           : fileOffset
       await fetchFiles(nextOffset, fileQuery)
-    } catch {
-      snackbar.error('파일 삭제에 실패했습니다.')
     } finally {
-      setConfirmDelete(null)
+      setConfirmDeleteFiles([])
     }
   }
 
@@ -587,6 +747,21 @@ export default function FileManager() {
 
   return (
     <div className="space-y-6">
+      {onReplayOnboarding && (
+        <Card variant="elevated" className="overflow-hidden">
+          <CardSection
+            className="p-4"
+            title="처음 둘러보기"
+            description="OfficeWhere의 핵심 흐름을 예제 문서로 다시 확인할 수 있습니다."
+            trailing={
+              <Button variant="tonal" leadingIcon="auto_awesome" onClick={onReplayOnboarding}>
+                처음 둘러보기 다시 보기
+              </Button>
+            }
+          />
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Card variant="outlined">
           <CardSection
@@ -683,8 +858,9 @@ export default function FileManager() {
               onClick={handleRescanLibrary}
               loading={rescanning}
               disabled={settingsLoading || librarySettings.watched_folders.length === 0}
+              className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
             >
-              자동 등록 / 재스캔
+              문서 새로고침
             </Button>
           }
         >
@@ -716,7 +892,7 @@ export default function FileManager() {
               onClick={handleAddWatchedFolder}
               loading={settingsLoading}
               disabled={folderPicking || rescanning}
-              className={hasPendingNewFolder ? 'attention-pulse' : ''}
+              className={hasPendingNewFolder || tutorialStep === 'example-folder' ? 'attention-pulse tour-target' : ''}
             >
               대상 추가
             </Button>
@@ -725,14 +901,14 @@ export default function FileManager() {
             checked={folderRecursive}
             onChange={(event) => setFolderRecursive(event.target.checked)}
             label="하위 폴더 포함"
-            description="프로젝트/연도별 하위 폴더까지 자동 등록합니다."
+            description="프로젝트/연도별 하위 폴더까지 문서 새로고침 대상에 포함합니다."
           />
 
           {librarySettings.watched_folders.length === 0 ? (
             <EmptyState
               icon="folder_off"
               title="지정된 대상 폴더가 없습니다"
-              description="먼저 자주 쓰는 작업 폴더(업무/연구/강의/프로젝트 등)를 추가한 뒤 자동 등록을 실행하세요."
+              description="먼저 자주 쓰는 작업 폴더(업무/연구/강의/프로젝트 등)를 추가한 뒤 문서 새로고침을 실행하세요."
               compact
             />
           ) : (
@@ -815,14 +991,14 @@ export default function FileManager() {
 
           <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
             <div>
-              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">자동 재스캔 주기</p>
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">자동 새로고침 주기</p>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                 등록한 폴더를 주기적으로 확인해 새 파일과 수정된 파일을 검색 대상으로 반영합니다.
               </p>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_160px_140px] gap-3 items-end">
               <SelectField
-                label="자동 재스캔"
+                label="자동 새로고침"
                 value={librarySettings.auto_rescan_mode}
                 onChange={(event) =>
                   void handleUpdateAutoRescan({
@@ -858,7 +1034,7 @@ export default function FileManager() {
                 />
               )}
               <div className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                마지막 재스캔
+                마지막 새로고침
                 <br />
                 <span className="text-[var(--md-sys-color-on-surface)]">
                   {librarySettings.last_rescan_at
@@ -1099,7 +1275,10 @@ export default function FileManager() {
       </Card>
 
       <Card variant="outlined" className="overflow-hidden">
-        <header className="px-6 py-4 space-y-4 border-b border-[var(--md-sys-color-outline-variant)]">
+        <header
+          className="px-6 py-4 space-y-4 border-b border-[var(--md-sys-color-outline-variant)]"
+          onKeyDown={handleRegisteredFilesKeyDown}
+        >
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
             <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
@@ -1109,13 +1288,34 @@ export default function FileManager() {
               전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 목록에서만 제거하며 원본 파일은 삭제하지 않습니다.
             </p>
             </div>
-            <IconButton
-              icon="refresh"
-              label="새로고침"
-              variant="tonal"
-              onClick={() => void fetchFiles(fileOffset, fileQuery)}
-              disabled={loading}
-            />
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant={selectionMode ? 'tonal' : 'outlined'}
+                leadingIcon={selectionMode ? 'checklist' : 'delete_sweep'}
+                onClick={() => {
+                  setSelectionMode((value) => !value)
+                  if (selectionMode) setSelectedFileIds(new Set())
+                }}
+              >
+                {selectionMode ? '선택 종료' : '목록에서 제거하기'}
+              </Button>
+              {selectedCount > 0 && (
+                <Button
+                  variant="danger"
+                  leadingIcon="delete"
+                  onClick={() => openDeleteConfirm(selectedFiles)}
+                >
+                  선택 해제 {selectedCount}개
+                </Button>
+              )}
+              <IconButton
+                icon="refresh"
+                label="새로고침"
+                variant="tonal"
+                onClick={() => void fetchFiles(fileOffset, fileQuery)}
+                disabled={loading}
+              />
+            </div>
           </div>
           <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
             <div className="flex-1 min-w-[240px]">
@@ -1150,6 +1350,9 @@ export default function FileManager() {
               as="span"
             />
             {fileQuery && <Chip label={`검색어 · ${fileQuery}`} tone="secondary" icon="search" as="span" />}
+            {selectedCount > 0 && (
+              <Chip label={`선택 ${selectedCount}개 · Delete로 해제`} tone="warning" icon="keyboard" as="span" />
+            )}
             {fileTypeCounts.map(([fileType, count]) => (
               <span
                 key={fileType}
@@ -1173,42 +1376,66 @@ export default function FileManager() {
             compact
           />
         ) : (
-          <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-            {files.map((file) => (
+          <ul
+            className="divide-y divide-[var(--md-sys-color-outline-variant)]"
+            onKeyDown={handleRegisteredFilesKeyDown}
+          >
+            {files.map((file, index) => {
+              const selected = selectedFileIds.has(file.id)
+              return (
               <li
                 key={file.id}
-                className="px-6 py-4 flex items-start justify-between gap-4 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors"
+                tabIndex={0}
+                onFocus={() => setFocusedFileId(file.id)}
+                onPointerDown={(event) => handleFileRowPointerDown(event, file, index)}
+                onPointerEnter={() => handleFileRowPointerEnter(index)}
+                className={`px-6 py-4 flex items-start justify-between gap-4 transition-colors outline-none ${
+                  selected
+                    ? 'bg-[var(--md-sys-color-primary-container)]/35'
+                    : 'hover:bg-[var(--md-sys-color-surface-container-low)]'
+                } ${selectionMode ? 'select-none cursor-crosshair' : ''}`}
               >
-                <button
-                  type="button"
-                  onClick={() => handlePreview(file)}
-                  className="flex-1 min-w-0 text-left group"
-                >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="type-title-sm text-[var(--md-sys-color-primary)] group-hover:underline">
-                      {file.name}
-                    </span>
-                    <FileTypeBadge fileType={file.file_type} />
+                {selectionVisible && (
+                  <div className="pt-1">
+                    <Checkbox
+                      checked={selected}
+                      aria-label={`${file.name} 선택`}
+                      onChange={() => toggleRegisteredFileSelection(file)}
+                    />
                   </div>
-                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
-                    {file.path}
-                  </p>
-                </button>
+                )}
+                {selectionMode ? (
+                  <div
+                    className="flex-1 min-w-0 text-left group"
+                    onClick={() => toggleRegisteredFileSelection(file)}
+                  >
+                    <RegisteredFileSummary file={file} />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handlePreview(file)}
+                    className="flex-1 min-w-0 text-left group"
+                  >
+                    <RegisteredFileSummary file={file} />
+                  </button>
+                )}
                 <div className="shrink-0 flex flex-col items-end gap-2">
                   <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                     {file.created_at ? file.created_at.replace('T', ' ').slice(0, 19) : '-'}
                   </p>
                   <IconButton
                     icon="delete"
-                    label={`${file.name} 삭제`}
+                    label={`${file.name} 등록 해제`}
                     variant="standard"
                     size="sm"
-                    onClick={() => setConfirmDelete(file)}
+                    onClick={() => openDeleteConfirm([file])}
                     className="text-[var(--md-sys-color-error)]"
                   />
                 </div>
               </li>
-            ))}
+              )
+            })}
           </ul>
         )}
         {fileTotal > REGISTERED_FILE_PAGE_SIZE && (
@@ -1330,22 +1557,23 @@ export default function FileManager() {
       </Dialog>
 
       <Dialog
-        open={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
+        open={confirmDeleteFiles.length > 0}
+        onClose={() => setConfirmDeleteFiles([])}
         size="sm"
         icon="delete"
-        title="등록 해제"
-        description={confirmDelete?.name}
+        title={confirmDeleteFiles.length > 1 ? `${confirmDeleteFiles.length}개 파일 등록 해제` : '등록 해제'}
+        description={confirmDeleteFiles.length === 1 ? confirmDeleteFiles[0]?.name : '선택한 파일의 등록 정보와 인덱스를 삭제합니다.'}
         actions={
           <>
-            <Button variant="text" onClick={() => setConfirmDelete(null)}>
+            <Button variant="text" onClick={() => setConfirmDeleteFiles([])}>
               취소
             </Button>
             <Button
               variant="filled"
               leadingIcon="delete"
               className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
-              onClick={() => confirmDelete && handleDelete(confirmDelete)}
+              onClick={() => void handleDeleteFiles(confirmDeleteFiles)}
+              autoFocus
             >
               해제
             </Button>
@@ -1353,10 +1581,35 @@ export default function FileManager() {
         }
       >
         <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-          이 파일의 등록 정보와 인덱스를 삭제합니다. 원본 파일은 영향받지 않습니다.
+          등록 정보와 인덱스만 삭제합니다. 원본 파일은 삭제하거나 이동하지 않습니다.
         </p>
+        {confirmDeleteFiles.length > 1 && (
+          <div className="mt-3 max-h-48 space-y-2 overflow-auto rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-2">
+            {confirmDeleteFiles.map((file) => (
+              <p key={file.id} className="truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                {file.name}
+              </p>
+            ))}
+          </div>
+        )}
       </Dialog>
     </div>
+  )
+}
+
+function RegisteredFileSummary({ file }: { file: FileInfo }) {
+  return (
+    <>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="type-title-sm text-[var(--md-sys-color-primary)] group-hover:underline">
+          {file.name}
+        </span>
+        <FileTypeBadge fileType={file.file_type} />
+      </div>
+      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
+        {file.path}
+      </p>
+    </>
   )
 }
 

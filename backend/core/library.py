@@ -333,7 +333,7 @@ def _cancelled_result(path: str) -> LibraryRescanResult:
         name=Path(path).name,
         success=False,
         action="cancelled",
-        error="사용자가 자동 등록/재스캔을 정지했습니다.",
+        error="사용자가 문서 새로고침을 정지했습니다.",
     )
 
 
@@ -362,7 +362,7 @@ def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
             "error_code": "parser_config_out_of_range",
             "error_stage": "parser_config",
             "error_type": error_type,
-            "error_hint": "저장된 Excel 표 범위가 현재 시트 크기를 벗어났습니다. 파일 관리에서 표 범위를 다시 선택한 뒤 등록/재스캔해 주세요.",
+            "error_hint": "저장된 Excel 표 범위가 현재 시트 크기를 벗어났습니다. 파일 관리에서 표 범위를 다시 선택한 뒤 등록/새로고침해 주세요.",
         }
     if "parser_config" in message and ("정수" in message or "invalid" in lower):
         return {
@@ -383,14 +383,14 @@ def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
             "error_code": "parser_config_invalid_number" if suffix in {".xls", ".xlsx"} else "office_parser_error",
             "error_stage": "parser_config" if suffix in {".xls", ".xlsx"} else "office_parser",
             "error_type": error_type,
-            "error_hint": "문서 파서가 숫자 필드를 처리하지 못했습니다. 파일을 다시 저장한 뒤 재스캔하고, 반복되면 진단 ID와 함께 로그를 확인해 주세요.",
+            "error_hint": "문서 파서가 숫자 필드를 처리하지 못했습니다. 파일을 다시 저장한 뒤 새로고침하고, 반복되면 진단 ID와 함께 로그를 확인해 주세요.",
         }
     if "database is locked" in lower:
         return {
             "error_code": "database_locked",
             "error_stage": "database",
             "error_type": error_type,
-            "error_hint": "다른 OfficeWhere 프로세스나 백그라운드 색인이 DB를 쓰는 중일 수 있습니다. 잠시 뒤 재스캔해 주세요.",
+            "error_hint": "다른 OfficeWhere 프로세스나 백그라운드 색인이 DB를 쓰는 중일 수 있습니다. 잠시 뒤 문서 새로고침을 다시 실행해 주세요.",
         }
     if error_type in {"ValueError", "TypeError", "KeyError"}:
         return {
@@ -594,7 +594,7 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
             progress_callback(
                 {
                     "stage": "cancelled",
-                    "message": "자동 등록/재스캔이 정지되었습니다.",
+                    "message": "문서 새로고침이 정지되었습니다.",
                     "found": total,
                     "total": total,
                     "processed": 0,
@@ -690,7 +690,7 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
         progress_callback(
             {
                 "stage": "cancelled" if cancelled else "completed",
-                "message": "자동 등록/재스캔이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
+                "message": "문서 새로고침이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
                 "found": total,
                 "total": total,
                 "processed": len(results) - len(scan_errors),
@@ -713,7 +713,7 @@ def _run_rescan_job() -> None:
             {
                 "running": False,
                 "stage": "cancelled" if cancelled else "completed",
-                "message": "자동 등록/재스캔이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
+                "message": "문서 새로고침이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
                 "percent": _rescan_status.get("percent", 100.0),
                 "eta_seconds": None,
                 "summary": summary,

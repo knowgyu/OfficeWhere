@@ -1,8 +1,10 @@
+import asyncio
 import sys
 from pathlib import Path
 
 import backend_server
 from backend import database
+from backend.main import example_library_path
 from backend.runtime import get_worker_count
 
 
@@ -46,3 +48,11 @@ def test_worker_count_uses_ow_env(monkeypatch):
     monkeypatch.setenv("OW_MAX_WORKERS", "2")
 
     assert get_worker_count(default=4, cap=8) == 2
+
+
+def test_example_library_path_uses_repo_examples():
+    response = asyncio.run(example_library_path())
+
+    assert response["available"] is True
+    assert Path(response["path"]).name == "officewhere_test_library"
+    assert Path(response["path"]).exists()

@@ -82,7 +82,13 @@
       ],
       "artifactName": "officewhere-${version}-mac-${arch}.${ext}",
       "identity": null
-    }
+    },
+    "extraFiles": [
+      {
+        "from": "../examples/officewhere_test_library",
+        "to": "examples/officewhere_test_library"
+      }
+    ]
   },
   "license": "GPL-3.0-only"
 }

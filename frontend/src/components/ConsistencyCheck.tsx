@@ -35,6 +35,7 @@ import {
   TextField,
   useSnackbar,
 } from '../ui'
+import { EXAMPLE_EXCEL_QUERY, EXAMPLE_PPT_QUERY, TutorialStep } from '../tutorial'
 
 const CHECK_FILE_PAGE_SIZE = 60
 const GROUP_PAGE_SIZE = 50
@@ -286,7 +287,13 @@ const groupSummaryFromDetail = (detail: LibraryGroupDetail): LibraryGroupSummary
   return summary
 }
 
-export default function ConsistencyCheck() {
+export default function ConsistencyCheck({
+  tutorialStep,
+  onTutorialStep,
+}: {
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
+}) {
   const snackbar = useSnackbar()
   const [files, setFiles] = useState<FileInfo[]>([])
   const [fileTotal, setFileTotal] = useState(0)
@@ -372,6 +379,16 @@ export default function ConsistencyCheck() {
     void fetchFiles(0, '')
     void fetchGroups(0, 'all')
   }, [])
+
+  useEffect(() => {
+    if (tutorialStep !== 'version-ppt' && tutorialStep !== 'version-excel') return
+    const query = tutorialStep === 'version-ppt' ? EXAMPLE_PPT_QUERY : EXAMPLE_EXCEL_QUERY
+    const fileType = tutorialStep === 'version-ppt' ? 'PowerPoint' : 'Excel'
+    setGroupQueryDraft(query)
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, 'version_family', query, fileType, 'recent')
+  }, [tutorialStep])
 
   useEffect(() => {
     if (!pendingScrollGroupId || activeGroupDetail?.id !== pendingScrollGroupId) return
@@ -596,14 +613,26 @@ export default function ConsistencyCheck() {
       setActiveGroupDetail(null)
       setHistoryState(null)
       setGroupDetailFiles([])
-      return
+      return false
     }
 
     const detail = await loadGroupDetail(group)
-    if (!detail) return
+    if (!detail) return false
     setPendingScrollGroupId(detail.id)
-    if (historyState?.groupId === detail.id && historyState.transitions.length > 0) return
+    if (historyState?.groupId === detail.id && historyState.transitions.length > 0) return true
     await runHistoryDiffs(detail)
+    return true
+  }
+
+  const openGuidedGroup = async (group: LibraryGroupSummary) => {
+    const opened = await selectGroup(group)
+    if (!opened) return
+    const normalizedType = normalizeFileType(group.file_type)
+    if (tutorialStep === 'version-ppt' && normalizedType === 'PowerPoint') {
+      onTutorialStep?.('version-excel')
+    } else if (tutorialStep === 'version-excel' && normalizedType === 'Excel') {
+      onTutorialStep?.('excel-table')
+    }
   }
 
   const setGroupLatestFile = async (detail: LibraryGroupDetail, file: FileInfo) => {
@@ -669,7 +698,7 @@ export default function ConsistencyCheck() {
   const openExcelGrid = async (detail: LibraryGroupDetail, currentHistoryState: HistoryDiffState | null) => {
     if (normalizeFileType(detail.file_type) !== 'Excel') {
       snackbar.warn('표로 보기는 Excel 묶음에서만 사용할 수 있습니다.')
-      return
+      return false
     }
 
     const focuses = currentHistoryState ? buildExcelGridFocuses(currentHistoryState.transitions) : []
@@ -690,6 +719,7 @@ export default function ConsistencyCheck() {
         data: response.data,
         error: '',
       })
+      return true
     } catch (error) {
       const detailMessage =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
@@ -700,7 +730,13 @@ export default function ConsistencyCheck() {
         data: null,
         error: detailMessage,
       })
+      return false
     }
+  }
+
+  const openGuidedExcelGrid = async (detail: LibraryGroupDetail, currentHistoryState: HistoryDiffState | null) => {
+    const opened = await openExcelGrid(detail, currentHistoryState)
+    if (opened && tutorialStep === 'excel-table') onTutorialStep?.('done')
   }
 
   const openFile = async (file: FileInfo) => {
@@ -914,13 +950,18 @@ export default function ConsistencyCheck() {
                   activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
                   historyState={historyState?.groupId === group.id ? historyState : null}
                   loading={groupLoadingId === group.id}
-                  onOpen={() => void selectGroup(group)}
+                  onOpen={() => void openGuidedGroup(group)}
                   onOpenFile={(file) => void openFile(file)}
-                  onOpenExcelGrid={(detail, state) => void openExcelGrid(detail, state)}
+                  onOpenExcelGrid={(detail, state) => void openGuidedExcelGrid(detail, state)}
                   onSetLatestFile={(detail, file) => void setGroupLatestFile(detail, file)}
                   onClearLatestFile={(detail) => void clearGroupLatestFile(detail)}
                   settingLatestFileId={settingLatestFileId}
                   clearingLatestGroupId={clearingLatestGroupId}
+                  highlightOpen={
+                    (tutorialStep === 'version-ppt' && normalizeFileType(group.file_type) === 'PowerPoint') ||
+                    (tutorialStep === 'version-excel' && normalizeFileType(group.file_type) === 'Excel')
+                  }
+                  highlightExcelGrid={tutorialStep === 'excel-table' && activeGroupDetail?.id === group.id}
                 />
               ))}
             </div>
@@ -1137,6 +1178,8 @@ function GroupCard({
   onClearLatestFile,
   settingLatestFileId,
   clearingLatestGroupId,
+  highlightOpen = false,
+  highlightExcelGrid = false,
 }: {
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
@@ -1149,6 +1192,8 @@ function GroupCard({
   onClearLatestFile: (detail: LibraryGroupDetail) => void
   settingLatestFileId: number | null
   clearingLatestGroupId: string | null
+  highlightOpen?: boolean
+  highlightExcelGrid?: boolean
 }) {
   const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
@@ -1213,6 +1258,7 @@ function GroupCard({
             leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
             onClick={onOpen}
             loading={historyLoading}
+            className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
           >
             {activeDetail ? '진단 접기' : '버전 진단 열기'}
           </Button>
@@ -1229,6 +1275,7 @@ function GroupCard({
           onClearLatestFile={() => onClearLatestFile(activeDetail)}
           settingLatestFileId={settingLatestFileId}
           clearingLatestGroupId={clearingLatestGroupId}
+          highlightExcelGrid={highlightExcelGrid}
         />
       )}
     </div>
@@ -1244,6 +1291,7 @@ function GroupTimeline({
   onClearLatestFile,
   settingLatestFileId,
   clearingLatestGroupId,
+  highlightExcelGrid = false,
 }: {
   detail: LibraryGroupDetail
   historyState: HistoryDiffState | null
@@ -1253,6 +1301,7 @@ function GroupTimeline({
   onClearLatestFile: () => void
   settingLatestFileId: number | null
   clearingLatestGroupId: string | null
+  highlightExcelGrid?: boolean
 }) {
   const progressLabel = historyState
     ? historyState.total === 0
@@ -1289,7 +1338,7 @@ function GroupTimeline({
             <Button
               variant="filled"
               leadingIcon="table_chart"
-              className="shadow-elev-1"
+              className={`shadow-elev-1 ${highlightExcelGrid ? 'attention-pulse tour-target' : ''}`}
               onClick={onOpenExcelGrid}
             >
               표로 보기

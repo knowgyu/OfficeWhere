@@ -369,6 +369,41 @@ body,
   animation: attention-ring 1.1s var(--md-motion-standard) infinite;
 }
 
+.onboarding-float {
+  animation: onboarding-float 5.5s var(--md-motion-standard) infinite;
+  transform-origin: center;
+}
+
+.onboarding-drift {
+  animation: onboarding-drift 7s var(--md-motion-standard) infinite;
+  transform-origin: center;
+}
+
+.tour-target {
+  position: relative;
+  z-index: 65;
+}
+
+@keyframes onboarding-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(1deg);
+  }
+}
+
+@keyframes onboarding-drift {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(10px, -12px);
+  }
+}
+
 @keyframes attention-ring {
   0% {
     opacity: 0.85;

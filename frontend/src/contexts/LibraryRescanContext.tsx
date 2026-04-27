@@ -82,24 +82,24 @@ export function LibraryRescanProvider({ children }: { children: ReactNode }) {
     const unchangedText = currentSummary.skipped > 0 ? ` · 변경 없음 ${currentSummary.skipped}` : ''
     if (status.stage === 'failed') {
       observedRunningRef.current = false
-      snackbar.error(status.error || status.message || '대상 폴더 자동 등록에 실패했습니다.')
+      snackbar.error(status.error || status.message || '문서 새로고침에 실패했습니다.')
       return
     }
     if (status.stage === 'cancelled') {
       observedRunningRef.current = false
-      snackbar.warn(`자동 등록/재스캔 정지됨 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`)
+      snackbar.warn(`문서 새로고침 정지됨 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`)
       return
     }
     if (currentSummary.failed > 0) {
       observedRunningRef.current = false
-      snackbar.warn(`자동 등록 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText} · 실패 ${currentSummary.failed}`)
+      snackbar.warn(`문서 새로고침 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText} · 실패 ${currentSummary.failed}`)
       return
     }
     observedRunningRef.current = false
     snackbar.success(
       reasonRef.current === 'added'
         ? `폴더 추가 및 색인 완료 · 등록/확인 ${currentSummary.registered + currentSummary.updated + currentSummary.skipped} · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`
-        : `자동 등록 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`,
+        : `문서 새로고침 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`,
     )
   }, [snackbar, status, summary])
 
@@ -115,7 +115,7 @@ export function LibraryRescanProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         const detail =
           (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-          '대상 폴더 자동 등록에 실패했습니다.'
+          '문서 새로고침에 실패했습니다.'
         snackbar.error(detail)
         return null
       }

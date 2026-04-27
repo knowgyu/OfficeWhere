@@ -32,11 +32,11 @@ python scripts/run_demo_checks.py
 
 1. 앱 실행
 2. 문서 폴더에 `examples/officewhere_test_library/` 추가
-3. 재스캔 후 아래를 확인
+3. 문서 새로고침 후 아래를 확인
 
 검색 확인:
 
-- `DFBA`: Word/PPT/TXT/MD 본문 검색
+- `A 프로젝트`: Word/PPT/TXT/MD 본문 검색
 - `예산 조정`: Excel v1.1 + 부서B 회의록 본문 검색
 - `회의록`: 파일명 검색
 

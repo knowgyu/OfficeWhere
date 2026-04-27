@@ -16,6 +16,7 @@ import {
   TextField,
   useSnackbar,
 } from '../ui'
+import { EXAMPLE_SEARCH_QUERY } from '../tutorial'
 
 
 const FILE_TYPE_FILTERS = [
@@ -126,7 +127,13 @@ function SearchResultListItem({
   )
 }
 
-export default function FileSearch() {
+export default function FileSearch({
+  tutorialActive = false,
+  onTutorialSearchComplete,
+}: {
+  tutorialActive?: boolean
+  onTutorialSearchComplete?: () => void
+}) {
   const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
@@ -153,6 +160,13 @@ export default function FileSearch() {
       setSettingsDraft(response.data)
     })
   }, [])
+
+  useEffect(() => {
+    if (!tutorialActive) return
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    setQuery(EXAMPLE_SEARCH_QUERY)
+    setSearchScope('filename_content')
+  }, [tutorialActive])
 
   const buildModifiedDateParams = useCallback(
     (
@@ -194,7 +208,7 @@ export default function FileSearch() {
         setSearched(false)
         setExpandedContentFiles(new Set())
         setLoading(false)
-        return
+        return false
       }
       setLoading(true)
       try {
@@ -206,14 +220,16 @@ export default function FileSearch() {
           search_scope: scope,
           ...modifiedDateParams,
         })
-        if (requestId !== searchRequestSeq.current) return
+        if (requestId !== searchRequestSeq.current) return false
         setResults(response.data.results)
         setExpandedContentFiles(new Set())
         setSearched(true)
+        return response.data.results.length > 0
       } catch {
-        if (requestId !== searchRequestSeq.current) return
+        if (requestId !== searchRequestSeq.current) return false
         setResults([])
         snackbar.error('검색에 실패했습니다.')
+        return false
       } finally {
         if (requestId === searchRequestSeq.current) setLoading(false)
       }
@@ -419,8 +435,18 @@ export default function FileSearch() {
             <Button
               variant="filled"
               leadingIcon="search"
-              onClick={() => doSearch(query, selectedFileTypes, searchScope)}
+              onClick={() => {
+                void doSearch(query, selectedFileTypes, searchScope).then((hasResults) => {
+                  if (!tutorialActive) return
+                  if (hasResults) {
+                    onTutorialSearchComplete?.()
+                  } else {
+                    snackbar.warn('예제 검색 결과가 아직 없습니다. 문서 새로고침 완료 후 다시 검색해 주세요.')
+                  }
+                })
+              }}
               disabled={!query.trim() || loading}
+              className={tutorialActive ? 'attention-pulse tour-target' : ''}
             >
               검색
             </Button>

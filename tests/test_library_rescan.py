@@ -84,7 +84,7 @@ def test_classify_index_error_database_locked_is_specific():
 
     assert diagnostic["error_code"] == "database_locked"
     assert diagnostic["error_stage"] == "database"
-    assert "재스캔" in diagnostic["error_hint"]
+    assert "새로고침" in diagnostic["error_hint"]
 
 
 def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch, caplog):
