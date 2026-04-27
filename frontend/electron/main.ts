@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron'
 import { execFile, spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
@@ -1017,7 +1017,12 @@ function setStartupSettings(payload: unknown): AppStartupSettings {
 
 function ensureTray() {
   if (tray) return
-  tray = new Tray(getTrayIconPath())
+  const trayImage = nativeImage.createFromPath(getTrayIconPath())
+  const trayIcon =
+    process.platform === 'win32'
+      ? trayImage
+      : trayImage.resize({ width: 18, height: 18 })
+  tray = new Tray(trayIcon)
   tray.setToolTip('OfficeWhere')
   tray.setContextMenu(
     Menu.buildFromTemplate([
