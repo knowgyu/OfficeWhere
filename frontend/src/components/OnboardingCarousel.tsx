@@ -37,10 +37,10 @@ const slides: Slide[] = [
       '파일명과 본문을 함께 색인해 Word, PowerPoint, Excel, 텍스트 문서를 한 번에 검색합니다.',
     proof: '흩어진 업무 폴더를 검색 가능한 문서 라이브러리로 바꿉니다.',
     accent: '#4257b2',
-    previewTitle: 'A 프로젝트 검색',
-    previewSubtitle: '본문 포함 결과 8개',
-    metric: '파일명 + 본문',
-    chips: ['문서 검색', '본문 미리보기', '로컬 색인'],
+    previewTitle: 'ㅍㄹㅈㅌ 초성 검색',
+    previewSubtitle: 'A 프로젝트 본문 결과 8개',
+    metric: '초성 + 본문',
+    chips: ['초성 검색', '본문 미리보기', '로컬 색인'],
     rows: [
       { icon: 'description', title: '주간보고_v4.0_260517.docx', meta: '회의 액션아이템 · 본문 일치', state: 'Word' },
       { icon: 'slideshow', title: '프로젝트상태_v4.0_260517.pptx', meta: '릴리즈 후보 준비 · 슬라이드 2', state: 'PPT' },
@@ -66,7 +66,7 @@ const slides: Slide[] = [
   },
   {
     eyebrow: 'Try',
-    title: 'A 프로젝트로 먼저 둘러보세요',
+    title: '초성 검색부터 먼저 둘러보세요',
     description:
       '문서 새로고침, 검색, 버전 진단, Excel 표로 보기를 직접 눌러보며 핵심 흐름을 확인합니다.',
     proof: '실제 문서를 건드리지 않고 준비된 예제로 OfficeWhere가 맞는지 빠르게 판단합니다.',
@@ -74,10 +74,10 @@ const slides: Slide[] = [
     previewTitle: '예제 둘러보기 경로',
     previewSubtitle: '6단계 안내 · 직접 클릭',
     metric: '3분 체험',
-    chips: ['A 프로젝트', '문서 새로고침', '표로 보기'],
+    chips: ['ㅍㄹㅈㅌ → 프로젝트', '문서 새로고침', '표로 보기'],
     rows: [
       { icon: 'folder_open', title: '예제 폴더 지정', meta: 'officewhere_test_library', state: '1' },
-      { icon: 'search', title: 'A 프로젝트 검색', meta: '검색 결과를 확인하고 버전으로 이동', state: '2' },
+      { icon: 'search', title: 'ㅍㄹㅈㅌ 초성 검색', meta: '검색 결과를 확인하고 버전으로 이동', state: '2' },
       { icon: 'grid_on', title: 'Excel 표로 보기', meta: '셀 단위 변경점을 표에서 확인', state: '3' },
     ],
   },

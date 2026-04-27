@@ -849,7 +849,13 @@ export default function FileManager({
             </Button>
           }
         >
-          <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
+          <div
+            className={`flex gap-2 items-start flex-wrap md:flex-nowrap ${
+              tutorialStep === 'example-folder'
+                ? 'tour-target rounded-2xl ring-1 ring-[var(--md-sys-color-primary)]/25'
+                : ''
+            }`}
+          >
             <div className="flex-1 min-w-0">
               <TextField
                 leadingIcon="folder"
@@ -880,7 +886,7 @@ export default function FileManager({
               disabled={folderPicking || rescanning}
               className={
                 tutorialStep === 'example-folder'
-                  ? 'attention-pulse tour-target'
+                  ? 'attention-pulse'
                   : hasPendingNewFolder
                     ? 'attention-pulse'
                     : ''

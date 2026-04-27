@@ -16,7 +16,7 @@ import {
   TextField,
   useSnackbar,
 } from '../ui'
-import { EXAMPLE_SEARCH_QUERY } from '../tutorial'
+import { EXAMPLE_SEARCH_QUERY, TutorialStep } from '../tutorial'
 
 
 const FILE_TYPE_FILTERS = [
@@ -128,11 +128,11 @@ function SearchResultListItem({
 }
 
 export default function FileSearch({
-  tutorialActive = false,
-  onTutorialSearchComplete,
+  tutorialStep,
+  onTutorialStep,
 }: {
-  tutorialActive?: boolean
-  onTutorialSearchComplete?: () => void
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
@@ -162,11 +162,11 @@ export default function FileSearch({
   }, [])
 
   useEffect(() => {
-    if (!tutorialActive) return
+    if (tutorialStep !== 'search') return
     if (debounceRef.current) clearTimeout(debounceRef.current)
     setQuery(EXAMPLE_SEARCH_QUERY)
     setSearchScope('filename_content')
-  }, [tutorialActive])
+  }, [tutorialStep])
 
   const buildModifiedDateParams = useCallback(
     (
@@ -379,10 +379,26 @@ export default function FileSearch({
   )
   const allContentMatchesExpanded =
     contentFileKeys.length > 0 && contentFileKeys.every((key) => expandedContentFiles.has(key))
+  const hasResults = !loading && results.length > 0
 
   const expandAllContentMatches = () => {
     setExpandedContentFiles(new Set(contentFileKeys))
+    if (tutorialStep === 'search-results') onTutorialStep?.('search-review')
   }
+
+  useEffect(() => {
+    if (tutorialStep !== 'search-results') return
+    if (!searched || loading || !hasResults) return
+    if (contentFileKeys.length === 0 || allContentMatchesExpanded) onTutorialStep?.('search-review')
+  }, [
+    allContentMatchesExpanded,
+    contentFileKeys.length,
+    hasResults,
+    loading,
+    onTutorialStep,
+    searched,
+    tutorialStep,
+  ])
 
   const collapseAllContentMatches = () => {
     setExpandedContentFiles(new Set())
@@ -395,7 +411,6 @@ export default function FileSearch({
     }
   }, [])
 
-  const hasResults = !loading && results.length > 0
   const lastReindex = settings?.last_reindex_at
     ? new Date(settings.last_reindex_at).toLocaleString('ko-KR')
     : null
@@ -437,16 +452,16 @@ export default function FileSearch({
               leadingIcon="search"
               onClick={() => {
                 void doSearch(query, selectedFileTypes, searchScope).then((hasResults) => {
-                  if (!tutorialActive) return
+                  if (tutorialStep !== 'search') return
                   if (hasResults) {
-                    onTutorialSearchComplete?.()
+                    onTutorialStep?.('search-results')
                   } else {
                     snackbar.warn('예제 검색 결과가 아직 없습니다. 문서 새로고침 완료 후 다시 검색해 주세요.')
                   }
                 })
               }}
               disabled={!query.trim() || loading}
-              className={tutorialActive ? 'attention-pulse tour-target' : ''}
+              className={tutorialStep === 'search' ? 'attention-pulse tour-target' : ''}
             >
               검색
             </Button>
@@ -464,6 +479,12 @@ export default function FileSearch({
           <span className="inline-flex items-center gap-1.5">
             <Icon name="bolt" size={16} /> {SEARCH_SCOPE_STATUS[searchScope]}
           </span>
+          {tutorialStep === 'search' && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-primary)]/20 bg-[var(--md-sys-color-primary-container)]/55 px-3 py-1 text-[var(--md-sys-color-on-primary-container)]">
+              <Icon name="auto_awesome" size={16} />
+              ㅍㄹㅈㅌ만 입력해도 프로젝트 문서를 찾아요
+            </span>
+          )}
           {lastReindex && (
             <span className="inline-flex items-center gap-1.5">
               <Icon name="schedule" size={16} /> 마지막 검색 갱신 {lastReindex}
@@ -677,6 +698,7 @@ export default function FileSearch({
                   leadingIcon="unfold_more"
                   onClick={expandAllContentMatches}
                   disabled={allContentMatchesExpanded}
+                  className={tutorialStep === 'search-results' ? 'attention-pulse tour-target' : ''}
                 >
                   본문 전체 열기
                 </Button>
@@ -692,63 +714,65 @@ export default function FileSearch({
               </div>
             )}
           </div>
-          {grouped.map(([fileName, items]) => {
-            const fileKey = `${items[0].file_id}:${fileName}`
-            const filenameItems = items.filter((item) => item.location === '파일명')
-            const contentItems = items.filter((item) => item.location !== '파일명')
-            const contentExpanded = expandedContentFiles.has(fileKey)
+          <div className={tutorialStep === 'search-review' ? 'tour-target tour-review-target rounded-2xl' : ''}>
+            {grouped.map(([fileName, items]) => {
+              const fileKey = `${items[0].file_id}:${fileName}`
+              const filenameItems = items.filter((item) => item.location === '파일명')
+              const contentItems = items.filter((item) => item.location !== '파일명')
+              const contentExpanded = expandedContentFiles.has(fileKey)
 
-            return (
-              <Card key={fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none">
-                <header className="px-5 py-3.5 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/62">
-                  <FileTypeBadge fileType={items[0].file_type} />
-                  <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
-                    {fileName}
-                  </span>
-                  <Badge tone="neutral">{items.length}건</Badge>
-                  <Button
-                    variant="text"
-                    size="sm"
-                    leadingIcon="open_in_new"
-                    onClick={() => handleOpenFile(items[0].file_id, fileName)}
-                  >
-                    열기
-                  </Button>
-                </header>
-                <ul>
-                  {filenameItems.map((item, index) => (
-                    <SearchResultListItem
-                      key={`filename-${item.file_id}-${index}`}
-                      item={item}
-                      onOpen={handleOpenFile}
-                    />
-                  ))}
-                  {contentItems.length > 0 && (
-                    <li className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0">
-                      <Button
-                        variant="tonal"
-                        size="sm"
-                        leadingIcon={contentExpanded ? 'expand_less' : 'expand_more'}
-                        onClick={() => toggleContentMatches(fileKey)}
-                      >
-                        {contentExpanded
-                          ? '본문 매칭 접기'
-                          : `본문 매칭 ${contentItems.length}건 보기`}
-                      </Button>
-                    </li>
-                  )}
-                  {contentExpanded &&
-                    contentItems.map((item, index) => (
+              return (
+                <Card key={fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none">
+                  <header className="px-5 py-3.5 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/62">
+                    <FileTypeBadge fileType={items[0].file_type} />
+                    <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
+                      {fileName}
+                    </span>
+                    <Badge tone="neutral">{items.length}건</Badge>
+                    <Button
+                      variant="text"
+                      size="sm"
+                      leadingIcon="open_in_new"
+                      onClick={() => handleOpenFile(items[0].file_id, fileName)}
+                    >
+                      열기
+                    </Button>
+                  </header>
+                  <ul>
+                    {filenameItems.map((item, index) => (
                       <SearchResultListItem
-                        key={`content-${item.file_id}-${item.location}-${index}`}
+                        key={`filename-${item.file_id}-${index}`}
                         item={item}
                         onOpen={handleOpenFile}
                       />
                     ))}
-                </ul>
-              </Card>
-            )
-          })}
+                    {contentItems.length > 0 && (
+                      <li className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0">
+                        <Button
+                          variant="tonal"
+                          size="sm"
+                          leadingIcon={contentExpanded ? 'expand_less' : 'expand_more'}
+                          onClick={() => toggleContentMatches(fileKey)}
+                        >
+                          {contentExpanded
+                            ? '본문 매칭 접기'
+                            : `본문 매칭 ${contentItems.length}건 보기`}
+                        </Button>
+                      </li>
+                    )}
+                    {contentExpanded &&
+                      contentItems.map((item, index) => (
+                        <SearchResultListItem
+                          key={`content-${item.file_id}-${item.location}-${index}`}
+                          item={item}
+                          onOpen={handleOpenFile}
+                        />
+                      ))}
+                  </ul>
+                </Card>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

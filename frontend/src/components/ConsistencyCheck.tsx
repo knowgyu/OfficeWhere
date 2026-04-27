@@ -635,9 +635,9 @@ export default function ConsistencyCheck({
     if (!opened) return
     const normalizedType = normalizeFileType(group.file_type)
     if (tutorialStep === 'version-ppt' && normalizedType === 'PowerPoint') {
-      onTutorialStep?.('version-excel')
+      onTutorialStep?.('version-ppt-review')
     } else if (tutorialStep === 'version-excel' && normalizedType === 'Excel') {
-      onTutorialStep?.('excel-table')
+      onTutorialStep?.('version-excel-review')
     }
   }
 
@@ -742,7 +742,7 @@ export default function ConsistencyCheck({
 
   const openGuidedExcelGrid = async (detail: LibraryGroupDetail, currentHistoryState: HistoryDiffState | null) => {
     const opened = await openExcelGrid(detail, currentHistoryState)
-    if (opened && tutorialStep === 'excel-table') onTutorialStep?.('done')
+    if (opened && tutorialStep === 'excel-table') onTutorialStep?.('excel-table-review')
   }
 
   const openFile = async (file: FileInfo) => {
@@ -1007,6 +1007,11 @@ export default function ConsistencyCheck({
                     (tutorialStep === 'version-excel' && normalizeFileType(group.file_type) === 'Excel')
                   }
                   highlightExcelGrid={tutorialStep === 'excel-table' && activeGroupDetail?.id === group.id}
+                  highlightReview={
+                    activeGroupDetail?.id === group.id &&
+                    ((tutorialStep === 'version-ppt-review' && normalizeFileType(group.file_type) === 'PowerPoint') ||
+                      (tutorialStep === 'version-excel-review' && normalizeFileType(group.file_type) === 'Excel'))
+                  }
                 />
               ))}
             </div>
@@ -1205,6 +1210,7 @@ export default function ConsistencyCheck({
         <ExcelDiffGridModal
           modal={excelGridModal}
           onClose={() => setExcelGridModal(null)}
+          highlightReview={tutorialStep === 'excel-table-review'}
         />
       )}
     </div>
@@ -1225,6 +1231,7 @@ function GroupCard({
   clearingLatestGroupId,
   highlightOpen = false,
   highlightExcelGrid = false,
+  highlightReview = false,
 }: {
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
@@ -1239,6 +1246,7 @@ function GroupCard({
   clearingLatestGroupId: string | null
   highlightOpen?: boolean
   highlightExcelGrid?: boolean
+  highlightReview?: boolean
 }) {
   const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
@@ -1321,6 +1329,7 @@ function GroupCard({
           settingLatestFileId={settingLatestFileId}
           clearingLatestGroupId={clearingLatestGroupId}
           highlightExcelGrid={highlightExcelGrid}
+          highlightReview={highlightReview}
         />
       )}
     </div>
@@ -1337,6 +1346,7 @@ function GroupTimeline({
   settingLatestFileId,
   clearingLatestGroupId,
   highlightExcelGrid = false,
+  highlightReview = false,
 }: {
   detail: LibraryGroupDetail
   historyState: HistoryDiffState | null
@@ -1347,6 +1357,7 @@ function GroupTimeline({
   settingLatestFileId: number | null
   clearingLatestGroupId: string | null
   highlightExcelGrid?: boolean
+  highlightReview?: boolean
 }) {
   const progressLabel = historyState
     ? historyState.total === 0
@@ -1357,7 +1368,11 @@ function GroupTimeline({
     : '변경점 계산 준비 중'
 
   return (
-    <div className="border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 space-y-4">
+    <div
+      className={`border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 space-y-4 ${
+        highlightReview ? 'tour-target tour-review-target' : ''
+      }`}
+    >
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <p className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
@@ -1967,9 +1982,11 @@ function excelGridCellTitle(cell: ExcelDiffGridCell) {
 function ExcelDiffGridModal({
   modal,
   onClose,
+  highlightReview = false,
 }: {
   modal: ExcelGridModalState
   onClose: () => void
+  highlightReview?: boolean
 }) {
   const [selectedCell, setSelectedCell] = useState<ExcelDiffGridCell | null>(null)
 
@@ -2000,7 +2017,9 @@ function ExcelDiffGridModal({
       }}
     >
       <div
-        className="flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] shadow-2xl"
+        className={`flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] shadow-2xl ${
+          highlightReview ? 'tour-target tour-review-target' : ''
+        }`}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="shrink-0 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/96">

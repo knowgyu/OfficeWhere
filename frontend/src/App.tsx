@@ -86,17 +86,36 @@ const TUTORIAL_TARGET_TAB: Record<TutorialStep, Tab | null> = {
   'example-folder': 'files',
   'document-refresh': 'files',
   search: 'search',
+  'search-results': 'search',
+  'search-review': 'search',
   'version-ppt': 'check',
+  'version-ppt-review': 'check',
   'version-excel': 'check',
+  'version-excel-review': 'check',
   'excel-table': 'check',
+  'excel-table-review': 'check',
   done: null,
+}
+
+const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
+  'search-review': 'version-ppt',
+  'version-ppt-review': 'version-excel',
+  'version-excel-review': 'excel-table',
+  'excel-table-review': 'done',
+}
+
+const TUTORIAL_REVIEW_DELAY_MS: Partial<Record<TutorialStep, number>> = {
+  'search-review': 2600,
+  'version-ppt-review': 2400,
+  'version-excel-review': 2400,
+  'excel-table-review': 2600,
 }
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
     eyebrow: 'Step 1 · 예제 시작',
-    title: '예제 폴더를 대상에 추가하세요',
-    description: '경로를 미리 입력해 두었습니다. 폴더 찾기는 그대로 두고, 강조된 대상 추가를 눌러주세요.',
+    title: '예제 폴더가 미리 선택되어 있습니다',
+    description: '실제 사용 때는 폴더 찾기로 업무 폴더를 고릅니다. 지금은 예제 경로가 들어가 있으니 대상 추가를 눌러주세요.',
     icon: 'drive_folder_upload',
   },
   'document-refresh': {
@@ -107,9 +126,21 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   search: {
     eyebrow: 'Step 3 · 검색 체험',
-    title: '예제 키워드를 검색하세요',
-    description: '검색어가 미리 입력되어 있습니다. 검색을 눌러 A 프로젝트 문서가 어떻게 찾아지는지 확인해 보세요.',
+    title: '초성만으로 예제 문서를 검색하세요',
+    description: '검색어 ㅍㄹㅈㅌ가 미리 입력되어 있습니다. 프로젝트를 다 치지 않아도 A 프로젝트 문서가 잡히는지 확인해 보세요.',
     icon: 'search',
+  },
+  'search-results': {
+    eyebrow: 'Step 3 · 본문 확인',
+    title: '본문 전체 열기로 실제 매칭을 확인하세요',
+    description: '초성 검색 결과를 바로 넘기지 않고, 펼쳐진 본문에서 A 프로젝트가 실제로 잡혔는지 확인합니다.',
+    icon: 'unfold_more',
+  },
+  'search-review': {
+    eyebrow: '확인 중',
+    title: '펼쳐진 본문 매칭을 잠깐 확인하세요',
+    description: '강조된 본문 조각을 확인한 뒤 버전 관리 단계로 부드럽게 이어갑니다.',
+    icon: 'visibility',
   },
   'version-ppt': {
     eyebrow: 'Step 4 · 발표자료 비교',
@@ -117,17 +148,35 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     description: '프로젝트상태 PowerPoint 비교 대상이 준비됩니다. 강조된 버전 진단 열기를 눌러보세요.',
     icon: 'timeline',
   },
+  'version-ppt-review': {
+    eyebrow: '확인 중',
+    title: 'PPT 변경 증거를 잠깐 확인하세요',
+    description: '계산된 변경점과 파일 순서를 확인한 뒤 다음 비교 대상으로 이어갑니다.',
+    icon: 'fact_check',
+  },
   'version-excel': {
     eyebrow: 'Step 5 · 스프레드시트 비교',
     title: 'Excel 변경점을 열어보세요',
     description: '사업예산 Excel 비교 대상으로 이동합니다. 강조된 버전 진단 열기를 눌러 값 변경을 확인해 주세요.',
     icon: 'difference',
   },
+  'version-excel-review': {
+    eyebrow: '확인 중',
+    title: 'Excel 변경 증거를 잠깐 확인하세요',
+    description: '값 변경 요약을 확인한 뒤 표로 보기 단계로 이어갑니다.',
+    icon: 'fact_check',
+  },
   'excel-table': {
     eyebrow: 'Step 6 · 셀 단위 확인',
     title: '표로 보기를 확인하세요',
     description: '강조된 표로 보기를 눌러 추가·삭제·수정된 셀을 한 번에 살펴보세요.',
     icon: 'table_chart',
+  },
+  'excel-table-review': {
+    eyebrow: '확인 중',
+    title: '표로 열린 셀 변경을 확인하세요',
+    description: '셀 단위 변경 화면이 열렸습니다. 잠시 확인한 뒤 예제 둘러보기를 마칩니다.',
+    icon: 'table_view',
   },
   done: {
     eyebrow: '완료',
@@ -138,6 +187,30 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+function getRectBoundaryPoint(rect: TourRect, from: Point): Point {
+  const center = {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+  }
+  const dx = from.x - center.x
+  const dy = from.y - center.y
+  if (dx === 0 && dy === 0) {
+    return { x: center.x, y: rect.top }
+  }
+
+  const halfWidth = Math.max(rect.width / 2, 1)
+  const halfHeight = Math.max(rect.height / 2, 1)
+  const scale = Math.min(
+    dx === 0 ? Number.POSITIVE_INFINITY : halfWidth / Math.abs(dx),
+    dy === 0 ? Number.POSITIVE_INFINITY : halfHeight / Math.abs(dy),
+  )
+
+  return {
+    x: center.x + dx * scale,
+    y: center.y + dy * scale,
+  }
+}
 
 const getViewport = () => ({
   width: typeof window === 'undefined' ? 1280 : window.innerWidth,
@@ -279,6 +352,19 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleTutorialKeyDown)
   }, [tutorialStep])
 
+  useEffect(() => {
+    if (!tutorialStep) return undefined
+    const nextStep = TUTORIAL_REVIEW_ADVANCE[tutorialStep]
+    if (!nextStep) return undefined
+
+    const delay = TUTORIAL_REVIEW_DELAY_MS[tutorialStep] ?? 2200
+    const timer = window.setTimeout(() => {
+      setTutorialStep((current) => (current === tutorialStep ? nextStep : current))
+    }, delay)
+
+    return () => window.clearTimeout(timer)
+  }, [tutorialStep])
+
   return (
     <div
       className={`app-text-${textSize} flex flex-1 min-h-screen bg-[var(--md-sys-color-background)] text-[var(--md-sys-color-on-surface)]`}
@@ -305,8 +391,8 @@ export default function App() {
             )}
             {activeTab === 'search' && (
               <FileSearch
-                tutorialActive={tutorialStep === 'search'}
-                onTutorialSearchComplete={() => handleTutorialStep('version-ppt')}
+                tutorialStep={tutorialStep}
+                onTutorialStep={handleTutorialStep}
               />
             )}
             {activeTab === 'join' && <JoinQuery />}
@@ -327,7 +413,6 @@ export default function App() {
         step={tutorialStep}
         activeTab={activeTab}
         targetTab={tutorialTargetTab}
-        onFinish={() => handleTutorialStep(null)}
       />
       <OnboardingCarousel
         open={onboardingOpen}
@@ -395,12 +480,10 @@ function GuidedTourHud({
   step,
   activeTab,
   targetTab,
-  onFinish,
 }: {
   step: TutorialStep | null
   activeTab: Tab
   targetTab: Tab | null
-  onFinish: () => void
 }) {
   const [pointer, setPointer] = useState<Point>(getInitialPointer)
   const [viewport, setViewport] = useState(getViewport)
@@ -500,6 +583,7 @@ function GuidedTourHud({
         y: targetRect.top + targetRect.height / 2,
       }
     : null
+  const targetAnchor = targetRect ? getRectBoundaryPoint(targetRect, pointer) : null
   const bubbleLeft = clamp(
     targetCenter && pointer.x < targetCenter.x ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
     16,
@@ -510,21 +594,21 @@ function GuidedTourHud({
     16,
     Math.max(16, viewport.height - bubbleHeight - 16),
   )
-  const curve = targetCenter
+  const curve = targetAnchor
     ? {
         startX: pointer.x,
         startY: pointer.y,
-        c1X: pointer.x + (targetCenter.x - pointer.x) * 0.36,
+        c1X: pointer.x + (targetAnchor.x - pointer.x) * 0.36,
         c1Y: pointer.y,
-        c2X: pointer.x + (targetCenter.x - pointer.x) * 0.74,
-        c2Y: targetCenter.y,
-        endX: targetCenter.x,
-        endY: targetCenter.y,
+        c2X: pointer.x + (targetAnchor.x - pointer.x) * 0.74,
+        c2Y: targetAnchor.y,
+        endX: targetAnchor.x,
+        endY: targetAnchor.y,
       }
     : null
 
   return (
-    <div className="fixed inset-0 z-[66] pointer-events-none">
+    <div className="fixed inset-0 z-[90] pointer-events-none">
       {curve && (
         <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
           <defs>
@@ -549,10 +633,7 @@ function GuidedTourHud({
           <circle cx={curve.endX} cy={curve.endY} r="18" className="tour-hud-target-halo" />
         </svg>
       )}
-      <div
-        className="tour-hud-bubble pointer-events-auto"
-        style={{ left: bubbleLeft, top: bubbleTop, width: bubbleWidth }}
-      >
+      <div className="tour-hud-bubble" style={{ left: bubbleLeft, top: bubbleTop, width: bubbleWidth }}>
         <div className="flex items-start gap-3">
           <div className="tour-hud-icon">
             <Icon name={content.icon} size={22} filled={step === 'done'} />
@@ -561,14 +642,11 @@ function GuidedTourHud({
             <p className="tour-hud-eyebrow">{content.eyebrow}</p>
             <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{content.title}</p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{content.description}</p>
-            <div className="flex items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-3 pt-2">
               <span className="tour-hud-kbd">
                 <kbd>Esc</kbd>
                 <span>그만보기</span>
               </span>
-              <Button size="sm" variant="text" leadingIcon="close" onClick={onFinish}>
-                그만보기
-              </Button>
             </div>
           </div>
         </div>

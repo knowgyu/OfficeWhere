@@ -407,6 +407,30 @@ body,
   z-index: -1;
 }
 
+.tour-review-target {
+  animation: tour-review-glow 1.45s ease-in-out infinite;
+}
+
+.tour-review-target::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    color-mix(in srgb, var(--md-sys-color-primary) 14%, transparent) 42%,
+    rgba(255, 255, 255, 0.42) 50%,
+    color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent) 58%,
+    transparent 100%
+  );
+  opacity: 0.55;
+  mix-blend-mode: screen;
+  transform: translateX(-115%);
+  animation: tour-review-sheen 1.45s ease-in-out infinite;
+}
+
 .tour-soft-scrim {
   background:
     radial-gradient(
@@ -596,10 +620,36 @@ body,
   }
 }
 
+@keyframes tour-review-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent),
+      0 18px 44px color-mix(in srgb, var(--md-sys-color-primary) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--md-sys-color-primary) 36%, transparent),
+      0 20px 52px color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent);
+  }
+}
+
+@keyframes tour-review-sheen {
+  0% {
+    transform: translateX(-115%);
+  }
+  72%,
+  100% {
+    transform: translateX(115%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tour-hud-bubble,
   .tour-hud-line,
-  .tour-hud-target-halo {
+  .tour-hud-target-halo,
+  .tour-review-target,
+  .tour-review-target::after {
     animation: none;
   }
 }
