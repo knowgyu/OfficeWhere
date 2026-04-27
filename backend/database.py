@@ -3,6 +3,8 @@ import json
 import os
 import re
 import sqlite3
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -21,6 +23,7 @@ DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
 SEARCH_INDEX_VERSION = "2"
+_DB_WRITE_LOCK = threading.RLock()
 
 
 def configure_database(data_dir: str | os.PathLike[str]):
@@ -35,11 +38,29 @@ def get_db_path() -> str:
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA cache_size=-32000")
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA mmap_size=134217728")
     return conn
+
+
+@contextmanager
+def _write_connection():
+    """Open a SQLite connection while holding the process-local write lock.
+
+    SQLite permits concurrent readers but only one writer.  Library rescans keep
+    Office parsing parallel, then enter this narrow section only while mutating
+    the database/FTS tables so worker threads do not race each other into
+    `database is locked` failures.
+    """
+    with _DB_WRITE_LOCK:
+        conn = _connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
 
 def _ensure_registered_files_columns(cursor: sqlite3.Cursor):
@@ -135,13 +156,25 @@ def _build_document_fingerprint(
     }
 
 
+def _chunk_insert_values(chunks: Sequence[Dict[str, str]]) -> List[Tuple[str, str, str]]:
+    return [
+        (
+            chunk["location"],
+            chunk["content"],
+            build_search_text(chunk["content"]),
+        )
+        for chunk in chunks
+    ]
+
+
 def _upsert_document_fingerprint(
     cursor: sqlite3.Cursor,
     file_id: int,
     chunks: Sequence[Dict[str, str]],
     source_mtime: Optional[float] = None,
+    fingerprint: Optional[Dict[str, Any]] = None,
 ):
-    fingerprint = _build_document_fingerprint(chunks, source_mtime)
+    fingerprint = fingerprint or _build_document_fingerprint(chunks, source_mtime)
     cursor.execute(
         """
         INSERT INTO document_fingerprints (
@@ -178,128 +211,127 @@ def _batched_values(values: Sequence[int], size: int = 900):
 
 def init_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
-    conn = _connect()
-    conn.execute("PRAGMA journal_mode=WAL")
-    cursor = conn.cursor()
+    with _write_connection() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS registered_files (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            path TEXT NOT NULL UNIQUE,
-            name TEXT NOT NULL,
-            file_type TEXT NOT NULL,
-            key_column TEXT NOT NULL,
-            column_count INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS registered_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                file_type TEXT NOT NULL,
+                key_column TEXT NOT NULL,
+                column_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
         )
-        """
-    )
-    _ensure_registered_files_columns(cursor)
+        _ensure_registered_files_columns(cursor)
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS file_chunks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id INTEGER NOT NULL,
-            location TEXT NOT NULL,
-            content TEXT NOT NULL
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS file_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id INTEGER NOT NULL,
+                location TEXT NOT NULL,
+                content TEXT NOT NULL
+            )
+            """
         )
-        """
-    )
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON file_chunks(file_id)")
-    _ensure_file_chunks_columns(cursor)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON file_chunks(file_id)")
+        _ensure_file_chunks_columns(cursor)
 
-    cursor.execute(
-        """
-        CREATE VIRTUAL TABLE IF NOT EXISTS file_search USING fts5(
-            content,
-            content='file_chunks',
-            content_rowid='id',
-            tokenize='unicode61'
+        cursor.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS file_search USING fts5(
+                content,
+                content='file_chunks',
+                content_rowid='id',
+                tokenize='unicode61'
+            )
+            """
         )
-        """
-    )
 
-    cursor.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON file_chunks BEGIN
-            INSERT INTO file_search(rowid, content) VALUES (new.id, new.content);
-        END
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON file_chunks BEGIN
-            INSERT INTO file_search(file_search, rowid, content)
-            VALUES ('delete', old.id, old.content);
-        END
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
+        cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON file_chunks BEGIN
+                INSERT INTO file_search(rowid, content) VALUES (new.id, new.content);
+            END
+            """
         )
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE VIRTUAL TABLE IF NOT EXISTS file_search_ko USING fts5(
-            search_text,
-            content='file_chunks',
-            content_rowid='id',
-            tokenize='unicode61'
+        cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON file_chunks BEGIN
+                INSERT INTO file_search(file_search, rowid, content)
+                VALUES ('delete', old.id, old.content);
+            END
+            """
         )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS chunks_ai_ko AFTER INSERT ON file_chunks BEGIN
-            INSERT INTO file_search_ko(rowid, search_text) VALUES (new.id, new.search_text);
-        END
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS chunks_ad_ko AFTER DELETE ON file_chunks BEGIN
-            INSERT INTO file_search_ko(file_search_ko, rowid, search_text)
-            VALUES ('delete', old.id, old.search_text);
-        END
-        """
-    )
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS document_fingerprints (
-            file_id INTEGER PRIMARY KEY,
-            normalized_hash TEXT NOT NULL,
-            content_hash TEXT NOT NULL,
-            content_chars INTEGER NOT NULL,
-            chunk_count INTEGER NOT NULL,
-            fingerprint_version INTEGER NOT NULL,
-            source_mtime REAL,
-            fingerprinted_at TEXT NOT NULL
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
         )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_document_fingerprints_normalized_hash
-        ON document_fingerprints(normalized_hash)
-        """
-    )
 
-    if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
-        _refresh_search_text(cursor)
-        cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('rebuild')")
-        _set_setting_with_cursor(cursor, "search_index_version", SEARCH_INDEX_VERSION)
+        cursor.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS file_search_ko USING fts5(
+                search_text,
+                content='file_chunks',
+                content_rowid='id',
+                tokenize='unicode61'
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS chunks_ai_ko AFTER INSERT ON file_chunks BEGIN
+                INSERT INTO file_search_ko(rowid, search_text) VALUES (new.id, new.search_text);
+            END
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS chunks_ad_ko AFTER DELETE ON file_chunks BEGIN
+                INSERT INTO file_search_ko(file_search_ko, rowid, search_text)
+                VALUES ('delete', old.id, old.search_text);
+            END
+            """
+        )
 
-    conn.commit()
-    conn.close()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS document_fingerprints (
+                file_id INTEGER PRIMARY KEY,
+                normalized_hash TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                content_chars INTEGER NOT NULL,
+                chunk_count INTEGER NOT NULL,
+                fingerprint_version INTEGER NOT NULL,
+                source_mtime REAL,
+                fingerprinted_at TEXT NOT NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_document_fingerprints_normalized_hash
+            ON document_fingerprints(normalized_hash)
+            """
+        )
+
+        if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
+            _refresh_search_text(cursor)
+            cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('rebuild')")
+            _set_setting_with_cursor(cursor, "search_index_version", SEARCH_INDEX_VERSION)
+
+        conn.commit()
 
 
 def register_file(
@@ -310,38 +342,115 @@ def register_file(
     column_count: int,
     parser_config: Optional[Dict[str, Any]] = None,
 ) -> int:
-    conn = _connect()
-    cursor = conn.cursor()
-    now = datetime.now().isoformat()
-    parser_config_json = json.dumps(parser_config or {}, ensure_ascii=False)
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        parser_config_json = json.dumps(parser_config or {}, ensure_ascii=False)
 
-    try:
-        cursor.execute(
-            """
-            INSERT INTO registered_files (
-                path, name, file_type, key_column, column_count, created_at, parser_config
+        try:
+            cursor.execute(
+                """
+                INSERT INTO registered_files (
+                    path, name, file_type, key_column, column_count, created_at, parser_config
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (path, name, file_type, key_column, column_count, now, parser_config_json),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (path, name, file_type, key_column, column_count, now, parser_config_json),
+            conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            cursor.execute(
+                """
+                UPDATE registered_files
+                SET name=?, file_type=?, key_column=?, column_count=?, created_at=?, parser_config=?
+                WHERE path=?
+                """,
+                (name, file_type, key_column, column_count, now, parser_config_json, path),
+            )
+            conn.commit()
+            cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
+            row = cursor.fetchone()
+            return row[0] if row else -1
+
+
+def save_indexed_file(
+    path: str,
+    name: str,
+    file_type: str,
+    key_column: str,
+    column_count: int,
+    chunks: List[Dict[str, str]],
+    file_mtime: float,
+    parser_config: Optional[Dict[str, Any]] = None,
+) -> int:
+    """Upsert file metadata, chunks, fingerprint, and mtime in one write turn."""
+    chunk_values = _chunk_insert_values(chunks)
+    fingerprint = _build_document_fingerprint(chunks, source_mtime=file_mtime)
+
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        parser_config_json = json.dumps(parser_config or {}, ensure_ascii=False)
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO registered_files (
+                    path, name, file_type, key_column, column_count,
+                    created_at, file_mtime, parser_config
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    path,
+                    name,
+                    file_type,
+                    key_column,
+                    column_count,
+                    now,
+                    file_mtime,
+                    parser_config_json,
+                ),
+            )
+            file_id = cursor.lastrowid
+        except sqlite3.IntegrityError:
+            cursor.execute(
+                """
+                UPDATE registered_files
+                SET name=?, file_type=?, key_column=?, column_count=?,
+                    created_at=?, file_mtime=?, parser_config=?
+                WHERE path=?
+                """,
+                (
+                    name,
+                    file_type,
+                    key_column,
+                    column_count,
+                    now,
+                    file_mtime,
+                    parser_config_json,
+                    path,
+                ),
+            )
+            cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
+            row = cursor.fetchone()
+            file_id = row[0] if row else -1
+
+        cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
+        cursor.executemany(
+            "INSERT INTO file_chunks (file_id, location, content, search_text) VALUES (?, ?, ?, ?)",
+            [(file_id, location, content, search_text) for location, content, search_text in chunk_values],
+        )
+        _upsert_document_fingerprint(
+            cursor,
+            file_id,
+            chunks,
+            source_mtime=file_mtime,
+            fingerprint=fingerprint,
         )
         conn.commit()
-        return cursor.lastrowid
-    except sqlite3.IntegrityError:
-        cursor.execute(
-            """
-            UPDATE registered_files
-            SET name=?, file_type=?, key_column=?, column_count=?, created_at=?, parser_config=?
-            WHERE path=?
-            """,
-            (name, file_type, key_column, column_count, now, parser_config_json, path),
-        )
-        conn.commit()
-        cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
-        row = cursor.fetchone()
-        return row[0] if row else -1
-    finally:
-        conn.close()
+        return file_id
 
 
 def get_all_files() -> List[Dict[str, Any]]:
@@ -459,48 +568,39 @@ def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
 
 
 def delete_file(file_id: int) -> bool:
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM file_chunks WHERE file_id=?", (file_id,))
-    cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
-    cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
-    affected = cursor.rowcount
-    conn.commit()
-    conn.close()
-    return affected > 0
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM file_chunks WHERE file_id=?", (file_id,))
+        cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
+        cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
+        affected = cursor.rowcount
+        conn.commit()
+        return affected > 0
 
 
 def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute("SELECT file_mtime FROM registered_files WHERE id = ?", (file_id,))
-    row = cursor.fetchone()
-    source_mtime = row[0] if row else None
-    cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
-    cursor.executemany(
-        "INSERT INTO file_chunks (file_id, location, content, search_text) VALUES (?, ?, ?, ?)",
-        [
-            (
-                file_id,
-                chunk["location"],
-                chunk["content"],
-                build_search_text(chunk["content"]),
-            )
-            for chunk in chunks
-        ],
-    )
-    _upsert_document_fingerprint(cursor, file_id, chunks, source_mtime=source_mtime)
-    conn.commit()
-    conn.close()
+    chunk_values = _chunk_insert_values(chunks)
+
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_mtime FROM registered_files WHERE id = ?", (file_id,))
+        row = cursor.fetchone()
+        source_mtime = row[0] if row else None
+        cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
+        cursor.executemany(
+            "INSERT INTO file_chunks (file_id, location, content, search_text) VALUES (?, ?, ?, ?)",
+            [(file_id, location, content, search_text) for location, content, search_text in chunk_values],
+        )
+        _upsert_document_fingerprint(cursor, file_id, chunks, source_mtime=source_mtime)
+        conn.commit()
 
 
 def update_file_mtime(file_id: int, mtime: float):
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE registered_files SET file_mtime = ? WHERE id = ?", (mtime, file_id))
-    cursor.execute("UPDATE document_fingerprints SET source_mtime = ? WHERE file_id = ?", (mtime, file_id))
-    conn.commit()
-    conn.close()
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE registered_files SET file_mtime = ? WHERE id = ?", (mtime, file_id))
+        cursor.execute("UPDATE document_fingerprints SET source_mtime = ? WHERE file_id = ?", (mtime, file_id))
+        conn.commit()
 
 
 def get_file_fingerprints(file_ids: Optional[Sequence[int]] = None) -> Dict[int, Dict[str, Any]]:
@@ -571,14 +671,15 @@ def ensure_file_fingerprints(file_ids: Sequence[int]) -> Dict[int, Dict[str, Any
                     {"location": row["location"], "content": row["content"]}
                 )
 
-        for file_id in stale_ids:
-            _upsert_document_fingerprint(
-                cursor,
-                file_id,
-                chunks_by_file.get(file_id, []),
-                source_mtime=registered.get(file_id),
-            )
-        conn.commit()
+        with _DB_WRITE_LOCK:
+            for file_id in stale_ids:
+                _upsert_document_fingerprint(
+                    cursor,
+                    file_id,
+                    chunks_by_file.get(file_id, []),
+                    source_mtime=registered.get(file_id),
+                )
+            conn.commit()
 
     rows: List[sqlite3.Row] = []
     for batch in _batched_values(unique_ids):
@@ -651,8 +752,7 @@ def get_setting(key: str, default: str = "") -> str:
 
 
 def set_setting(key: str, value: str):
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-    conn.commit()
-    conn.close()
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+        conn.commit()

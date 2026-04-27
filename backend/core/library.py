@@ -19,10 +19,8 @@ from ..database import (
     ensure_file_fingerprints,
     get_all_files,
     get_setting,
-    register_file,
-    save_file_chunks,
+    save_indexed_file,
     set_setting,
-    update_file_mtime,
 )
 from ..models.schemas import (
     FileInfo,
@@ -387,6 +385,13 @@ def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
             "error_type": error_type,
             "error_hint": "문서 파서가 숫자 필드를 처리하지 못했습니다. 파일을 다시 저장한 뒤 재스캔하고, 반복되면 진단 ID와 함께 로그를 확인해 주세요.",
         }
+    if "database is locked" in lower:
+        return {
+            "error_code": "database_locked",
+            "error_stage": "database",
+            "error_type": error_type,
+            "error_hint": "다른 OfficeWhere 프로세스나 백그라운드 색인이 DB를 쓰는 중일 수 있습니다. 잠시 뒤 재스캔해 주세요.",
+        }
     if error_type in {"ValueError", "TypeError", "KeyError"}:
         return {
             "error_code": "office_parser_error",
@@ -536,16 +541,16 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
             if info["file_type"] == "Excel":
                 key_column = suggest_key_column(info["columns"]) or ""
 
-            file_id = register_file(
+            file_id = save_indexed_file(
                 path=path,
                 name=info["name"],
                 file_type=info["file_type"],
                 key_column=key_column,
                 column_count=len(info["columns"]),
+                chunks=chunks,
+                file_mtime=current_mtime,
                 parser_config=info["parser_config"],
             )
-            save_file_chunks(file_id, chunks)
-            update_file_mtime(file_id, current_mtime)
             return LibraryRescanResult(
                 path=path,
                 name=info["name"],

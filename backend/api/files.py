@@ -17,9 +17,7 @@ from ..database import (
     get_all_files,
     get_file_by_id,
     list_files_page,
-    register_file,
-    save_file_chunks,
-    update_file_mtime,
+    save_indexed_file,
 )
 from ..models.schemas import (
     BulkRegisterItem,
@@ -148,20 +146,16 @@ def register(req: FileRegisterRequest):
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {exc}")
 
     key_column = _validate_registration_payload(path, info["file_type"], info["columns"], req.key_column)
-    file_id = register_file(
+    file_id = save_indexed_file(
         path=path,
         name=info["name"],
         file_type=info["file_type"],
         key_column=key_column,
         column_count=len(info["columns"]),
+        chunks=chunks,
+        file_mtime=os.path.getmtime(path),
         parser_config=info["parser_config"],
     )
-
-    try:
-        save_file_chunks(file_id, chunks)
-        update_file_mtime(file_id, os.path.getmtime(path))
-    except Exception:
-        pass
 
     return FileRegisterResponse(
         id=file_id,
@@ -311,19 +305,16 @@ def bulk_register(req: BulkRegisterRequest):
         try:
             info, chunks = inspect_and_chunk(path, parser_config=item.parser_config)
             key_column = _validate_registration_payload(path, info["file_type"], info["columns"], item.key_column)
-            file_id = register_file(
+            file_id = save_indexed_file(
                 path=path,
                 name=info["name"],
                 file_type=info["file_type"],
                 key_column=key_column,
                 column_count=len(info["columns"]),
+                chunks=chunks,
+                file_mtime=os.path.getmtime(path),
                 parser_config=info["parser_config"],
             )
-            try:
-                save_file_chunks(file_id, chunks)
-                update_file_mtime(file_id, os.path.getmtime(path))
-            except Exception:
-                pass
             return BulkRegisterResult(path=path, name=info["name"], success=True, file_id=file_id)
         except Exception as exc:
             return BulkRegisterResult(path=path, name=Path(path).name, success=False, error=str(exc))

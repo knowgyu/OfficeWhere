@@ -75,6 +75,18 @@ def test_classify_index_error_index_error_is_user_safe():
     assert "traceback" not in diagnostic["error_hint"].lower()
 
 
+def test_classify_index_error_database_locked_is_specific():
+    import sqlite3
+
+    from backend.core.library import classify_index_error
+
+    diagnostic = classify_index_error(sqlite3.OperationalError("database is locked"), "large.docx")
+
+    assert diagnostic["error_code"] == "database_locked"
+    assert diagnostic["error_stage"] == "database"
+    assert "재스캔" in diagnostic["error_hint"]
+
+
 def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch, caplog):
     from backend.core import library
 
@@ -191,3 +203,31 @@ def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path
     assert response.registered == 1
     row = get_all_files()[0]
     assert row["key_column"] == ""
+
+
+def test_parallel_indexed_file_saves_do_not_compete_for_sqlite_writer(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from backend.database import save_indexed_file
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    def save_one(index: int) -> int:
+        return save_indexed_file(
+            path=str(tmp_path / f"note-{index}.txt"),
+            name=f"note-{index}.txt",
+            file_type="Text",
+            key_column="",
+            column_count=0,
+            chunks=[{"location": "본문", "content": f"동시 저장 샘플 {index}"}],
+            file_mtime=float(index),
+            parser_config={},
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        file_ids = list(executor.map(save_one, range(40)))
+
+    assert len(set(file_ids)) == 40
+    assert len(get_all_files()) == 40
