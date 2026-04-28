@@ -3,6 +3,7 @@
 ## Why this log exists
 
 This is a narrative experiment log for later debugging, release notes, or a blog post. It is intentionally less formal than the decision record in `docs/indexing-performance-fast-mode.md` and captures the reasoning journey: symptoms, hypotheses, experiments, what was ruled out, and what changed.
+For the architecture plan that preserves these performance decisions while separating backend responsibilities, see `docs/backend-python-boundary-refactor-plan.md`.
 
 ## Starting symptoms
 

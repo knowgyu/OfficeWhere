@@ -49,6 +49,11 @@ This file tracks follow-up work that is not part of the formal release checklist
   - Mark known heavy Excel/PPT files and check whether parser tails or DB flush tails dominate.
   - Use `docs/performance-experiment-log.md` as the narrative template for future observations.
 
+- [ ] Keep Python backend boundary refactor staged and performance-guarded.
+  - Use `docs/backend-python-boundary-refactor-plan.md` as the source of truth before moving modules.
+  - Start with characterization tests and compatibility facades; do not begin with a broad package rewrite.
+  - Treat search/version first-paint and indexing throughput as acceptance criteria, not optional follow-up.
+
 - [ ] Revisit simple scheduling only if logs show a likely 10%+ wall-clock gain.
   - Candidate: Excel-first ordering with about half the worker slots reserved for Excel-heavy runs.
   - Avoid complex cost prediction until repeated traces justify it.

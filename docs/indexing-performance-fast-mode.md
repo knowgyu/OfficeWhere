@@ -5,6 +5,7 @@
 This is the version-controlled decision record for OfficeWhere's 0.4.x-0.5.0 performance work. It captures decisions that should survive beyond local `.omx/` planning files: indexing throughput, SQLite/FTS write strategy, search ordering, and follow-up scheduling ideas.
 
 For a narrative experiment log that is easier to reuse in a blog post, see `docs/performance-experiment-log.md`.
+For the docs-only backend role-separation/refactor plan that should guide future architecture work, see `docs/backend-python-boundary-refactor-plan.md`.
 
 ## Current behavior
 
