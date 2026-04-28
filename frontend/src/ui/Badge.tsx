@@ -52,14 +52,6 @@ export function FileTypeBadge({ fileType }: { fileType: string }) {
     tone = 'warning'
     label = 'PowerPoint'
     icon = 'slideshow'
-  } else if (raw.includes('markdown') || raw === 'md') {
-    tone = 'tertiary'
-    label = 'Markdown'
-    icon = 'notes'
-  } else if (raw.includes('text') || raw === 'txt') {
-    tone = 'neutral'
-    label = 'Text'
-    icon = 'description'
   }
   return (
     <span

@@ -256,7 +256,7 @@ export default function JoinQuery() {
       <Card variant="elevated">
         <CardSection
           title="통합할 Excel 파일 선택"
-          description="같은 기준 컬럼을 가진 Excel 파일을 하나의 표로 합칩니다. Word/PPT/텍스트 파일은 통합 대상에서 제외됩니다."
+          description="같은 기준 컬럼을 가진 Excel 파일을 하나의 표로 합칩니다. Word/PPT 파일은 통합 대상에서 제외됩니다."
           trailing={
             <div className="flex gap-2 flex-wrap">
               <Chip

@@ -11,7 +11,7 @@ Use this checklist before publishing a release tag.
 - [ ] `./venv/bin/python scripts/run_demo_checks.py` passes.
 
 ## Document registration and search
-- [ ] Register a folder containing Excel, Word, PowerPoint, text, and Markdown files.
+- [ ] Register a folder containing Excel, Word, and PowerPoint files.
 - [ ] Search by filename + body.
 - [ ] Search by filename only.
 - [ ] Search by body only.
@@ -25,7 +25,7 @@ Use this checklist before publishing a release tag.
 ## Version management
 - [ ] Same Office filename in two folders appears as a “same filename” group.
 - [ ] `v1.0`, `v1.1`, `260426`, or `2026-04-26` filename variants appear as a version-family group.
-- [ ] Text and Markdown files do not appear in version-management groups.
+- [ ] Text and Markdown files are not offered as supported registration/search formats.
 - [ ] Opening a group loads a timeline/detail view and calculates only that group’s adjacent version changes on demand.
 - [ ] While version changes are calculated, progress is visible as completed/total comparisons.
 - [ ] Word changes show page labels and side-by-side “기존 내용” / “변경 후 내용” panels.

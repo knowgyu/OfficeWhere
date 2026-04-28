@@ -22,6 +22,9 @@ def test_library_settings_interval_is_floored_and_minimum(tmp_path, monkeypatch)
 
 
 def test_library_settings_fast_worker_count_is_bounded_to_ui_steps(tmp_path, monkeypatch):
+    from backend.core.library import load_library_settings
+    from backend.database import set_setting
+
     monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
     init_db()
@@ -33,7 +36,22 @@ def test_library_settings_fast_worker_count_is_bounded_to_ui_steps(tmp_path, mon
     assert saved.fast_worker_count == 28
 
     saved = save_library_settings(LibrarySettings(fast_worker_count=99))
-    assert saved.fast_worker_count == 48
+    assert saved.fast_worker_count == 32
+
+    set_setting("library_settings", LibrarySettings(fast_worker_count=48).model_dump_json())
+    assert load_library_settings().fast_worker_count == 32
+
+
+def test_library_settings_excluded_folder_names_are_normalized(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    saved = save_library_settings(
+        LibrarySettings(excluded_folder_names=[" node_modules ", "NODE_MODULES", "", ".git"])
+    )
+
+    assert saved.excluded_folder_names == ["node_modules", ".git"]
 
 
 def test_cancel_library_rescan_marks_running_job(tmp_path, monkeypatch):
@@ -48,11 +66,11 @@ def test_cancel_library_rescan_marks_running_job(tmp_path, monkeypatch):
         LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
     )
 
-    def slow_collect(_path, _recursive):
+    def slow_collect(_path, _recursive, _excluded_folder_names=None):
         time.sleep(0.2)
-        return []
+        return library._ScanCollection(paths=[])
 
-    monkeypatch.setattr(library, "_collect_supported_paths", slow_collect)
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", slow_collect)
 
     library.start_library_rescan()
     cancelling = library.cancel_library_rescan()
@@ -83,11 +101,11 @@ def test_start_library_rescan_fast_status_and_running_job_mode_are_stable(tmp_pa
         LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
     )
 
-    def slow_collect(_path, _recursive):
+    def slow_collect(_path, _recursive, _excluded_folder_names=None):
         time.sleep(0.2)
-        return []
+        return library._ScanCollection(paths=[])
 
-    monkeypatch.setattr(library, "_collect_supported_paths", slow_collect)
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", slow_collect)
 
     first = library.start_library_rescan(mode="fast")
     second = library.start_library_rescan(mode="normal")
@@ -158,14 +176,20 @@ def test_collect_supported_paths_filters_supported_files_once(tmp_path):
     nested = tmp_path / "nested"
     nested.mkdir()
     (nested / "deck.pptx").write_text("x")
+    excluded = tmp_path / "node_modules"
+    excluded.mkdir()
+    (excluded / "hidden.docx").write_text("x")
+    similarly_named = tmp_path / "my-node_modules-docs"
+    similarly_named.mkdir()
+    (similarly_named / "kept.docx").write_text("x")
 
     recursive = _collect_supported_paths(str(tmp_path), recursive=True)
     flat = _collect_supported_paths(str(tmp_path), recursive=False)
 
-    assert {tmp_path / "note.md", tmp_path / "report.xlsx", nested / "deck.pptx"} == {
+    assert {tmp_path / "report.xlsx", nested / "deck.pptx", similarly_named / "kept.docx"} == {
         Path(path) for path in recursive
     }
-    assert {tmp_path / "note.md", tmp_path / "report.xlsx"} == {Path(path) for path in flat}
+    assert {tmp_path / "report.xlsx"} == {Path(path) for path in flat}
 
 
 def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch, caplog):
@@ -181,7 +205,7 @@ def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch,
         LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
     )
 
-    monkeypatch.setattr(library, "_collect_supported_paths", lambda _path, _recursive: [str(target)])
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(target)]))
 
     def fail_inspect(_path, parser_config=None):
         raise ValueError("parser_config row 범위가 시트 크기를 벗어났습니다.")
@@ -297,7 +321,7 @@ def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path
         LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
     )
 
-    monkeypatch.setattr(library, "_collect_supported_paths", lambda _path, _recursive: [str(target)])
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(target)]))
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
@@ -331,12 +355,12 @@ def test_parallel_indexed_file_saves_do_not_compete_for_sqlite_writer(tmp_path, 
 
     def save_one(index: int) -> int:
         return save_indexed_file(
-            path=str(tmp_path / f"note-{index}.txt"),
-            name=f"note-{index}.txt",
-            file_type="Text",
+            path=str(tmp_path / f"note-{index}.docx"),
+            name=f"note-{index}.docx",
+            file_type="Word",
             key_column="",
             column_count=0,
-            chunks=[{"location": "본문", "content": f"동시 저장 샘플 {index}"}],
+            chunks=[{"location": "문단", "content": f"동시 저장 샘플 {index}"}],
             file_mtime=float(index),
             parser_config={},
         )
@@ -358,12 +382,12 @@ def test_save_indexed_files_batch_indexes_multiple_files_in_one_commit(tmp_path,
 
     payloads = [
         prepare_indexed_file(
-            path=str(tmp_path / f"note-{index}.txt"),
-            name=f"note-{index}.txt",
-            file_type="Text",
+            path=str(tmp_path / f"note-{index}.docx"),
+            name=f"note-{index}.docx",
+            file_type="Word",
             key_column="",
             column_count=0,
-            chunks=[{"location": "본문", "content": f"배치 저장 샘플 {index}"}],
+            chunks=[{"location": "문단", "content": f"배치 저장 샘플 {index}"}],
             file_mtime=float(index),
             parser_config={},
         )
@@ -385,14 +409,14 @@ def test_save_indexed_files_batch_replaces_chunks_and_fingerprint(tmp_path, monk
     monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
     init_db()
 
-    target = tmp_path / "note.txt"
+    target = tmp_path / "note.docx"
     first_payload = prepare_indexed_file(
         path=str(target),
         name=target.name,
-        file_type="Text",
+        file_type="Word",
         key_column="",
         column_count=0,
-        chunks=[{"location": "본문", "content": "처음전용 배치 내용"}],
+        chunks=[{"location": "문단", "content": "처음전용 배치 내용"}],
         file_mtime=1.0,
         parser_config={},
     )
@@ -402,10 +426,10 @@ def test_save_indexed_files_batch_replaces_chunks_and_fingerprint(tmp_path, monk
     updated_payload = prepare_indexed_file(
         path=str(target),
         name=target.name,
-        file_type="Text",
+        file_type="Word",
         key_column="",
         column_count=0,
-        chunks=[{"location": "본문", "content": "교체전용 배치 내용"}],
+        chunks=[{"location": "문단", "content": "교체전용 배치 내용"}],
         file_mtime=2.0,
         parser_config={},
     )
@@ -433,25 +457,25 @@ def test_library_rescan_flushes_prepared_files_in_batches(tmp_path, monkeypatch)
 
     targets = []
     for index in range(3):
-        target = tmp_path / f"note-{index}.txt"
+        target = tmp_path / f"note-{index}.docx"
         target.write_text(f"샘플 {index}", encoding="utf-8")
         targets.append(target)
 
     save_library_settings(
         LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
     )
-    monkeypatch.setattr(library, "_collect_supported_paths", lambda _path, _recursive: [str(path) for path in targets])
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(path) for path in targets]))
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
         lambda path, parser_config=None: (
             {
                 "name": Path(path).name,
-                "file_type": "Text",
+                "file_type": "Word",
                 "columns": [],
                 "parser_config": {},
             },
-            [{"location": "본문", "content": f"{path} 배치 색인"}],
+            [{"location": "문단", "content": f"{path} 배치 색인"}],
         ),
     )
 
@@ -470,3 +494,159 @@ def test_library_rescan_flushes_prepared_files_in_batches(tmp_path, monkeypatch)
     assert response.registered == 3
     assert sorted(batch_sizes) == [1, 2]
     assert len(get_all_files()) == 3
+
+
+def test_library_rescan_flushes_by_chunk_count_and_emits_saving_stage(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_FILE_LIMIT", 99)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_CHUNK_LIMIT", 3)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_INTERVAL_SECONDS", 999.0)
+    init_db()
+
+    targets = []
+    for index in range(2):
+        target = tmp_path / f"chunky-{index}.docx"
+        target.write_text(f"샘플 {index}", encoding="utf-8")
+        targets.append(target)
+
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(
+            paths=[str(path) for path in targets]
+        ),
+    )
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda path, parser_config=None: (
+            {
+                "name": Path(path).name,
+                "file_type": "Word",
+                "columns": [],
+                "parser_config": {},
+            },
+            [
+                {"location": "문단 1", "content": f"{path} 청크 1"},
+                {"location": "문단 2", "content": f"{path} 청크 2"},
+            ],
+        ),
+    )
+
+    batch_chunk_counts = []
+    original_batch_save = library.save_indexed_files_batch
+
+    def recording_batch_save(payloads):
+        batch_chunk_counts.append(sum(payload.chunk_count for payload in payloads))
+        return original_batch_save(payloads)
+
+    progress = []
+    monkeypatch.setattr(library, "save_indexed_files_batch", recording_batch_save)
+
+    response = library.rescan_library(mode="fast", progress_callback=progress.append)
+
+    assert response.failed == 0
+    assert response.registered == 2
+    assert batch_chunk_counts == [2, 2]
+    assert any(item["stage"] == "saving" for item in progress)
+
+
+def test_rescan_prunes_legacy_text_and_markdown_rows_without_source_delete(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import get_file_by_id, save_file_chunks
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    legacy = tmp_path / "legacy.txt"
+    legacy.write_text("남아있는 원본", encoding="utf-8")
+    legacy_id = register_file(str(legacy), legacy.name, "Text", "", 0)
+    save_file_chunks(legacy_id, [{"location": "본문", "content": "예전 텍스트 색인"}])
+
+    target = tmp_path / "current.docx"
+    target.write_text("placeholder", encoding="utf-8")
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(target)]),
+    )
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda path, parser_config=None: (
+            {
+                "name": target.name,
+                "file_type": "Word",
+                "columns": [],
+                "parser_config": {},
+            },
+            [{"location": "문단", "content": "현재 워드 색인"}],
+        ),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.pruned_unsupported == 1
+    assert legacy.exists()
+    assert get_file_by_id(legacy_id) is None
+    assert [row["name"] for row in get_all_files()] == [target.name]
+
+
+def test_library_rescan_logs_single_large_file_flush_reason(tmp_path, monkeypatch):
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_FILE_LIMIT", 99)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_CHUNK_LIMIT", 3)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_INTERVAL_SECONDS", 999.0)
+    init_db()
+
+    target = tmp_path / "large.docx"
+    target.write_text("placeholder", encoding="utf-8")
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(target)]),
+    )
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda path, parser_config=None: (
+            {
+                "name": target.name,
+                "file_type": "Word",
+                "columns": [],
+                "parser_config": {},
+            },
+            [{"location": f"문단 {index}", "content": f"큰 파일 청크 {index}"} for index in range(4)],
+        ),
+    )
+
+    events = []
+    monkeypatch.setattr(library, "log_index_perf", lambda event, **fields: events.append((event, fields)))
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert any(
+        event == "db_flush_done"
+        and fields["reason"] == "single_large_file"
+        and fields["single_large_file"] is True
+        for event, fields in events
+    )

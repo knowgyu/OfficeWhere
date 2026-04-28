@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..database import (
+    delete_files_by_types,
     get_all_files,
     get_setting,
     save_file_chunks,
@@ -17,10 +18,10 @@ from ..database import (
     update_file_mtime,
 )
 from .excel_analysis import extract_excel_used_range, inspect_excel_file_with_recovery
+from .file_scope import SUPPORTED_EXTENSIONS
 from .index_perf import elapsed_ms, log_index_perf, timed_ms
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_slides
-from .text_analysis import extract_text_blocks, inspect_text_file
 from ..runtime import get_worker_count
 from .word_analysis import extract_word_blocks, inspect_word_blocks
 
@@ -80,13 +81,6 @@ def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, s
     return inspection, chunks
 
 
-def _inspect_and_chunk_text(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
-    inspection = inspect_text_file(path)
-    blocks = extract_text_blocks(path)
-    chunks = [{"location": block["location"], "content": block["text"]} for block in blocks]
-    return inspection, chunks
-
-
 def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     ext = Path(path).suffix.lower()
     if ext in (".xlsx", ".xls"):
@@ -95,8 +89,6 @@ def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None)
         inspection, chunks = _inspect_and_chunk_word(path)
     elif ext == ".pptx":
         inspection, chunks = _inspect_and_chunk_pptx(path)
-    elif ext in (".txt", ".md"):
-        inspection, chunks = _inspect_and_chunk_text(path)
     else:
         raise ValueError(f"지원하지 않는 파일 형식: {ext}")
 
@@ -129,8 +121,6 @@ def index_file(file_id: int, path: str, parser_config: Optional[Dict[str, Any]] 
             _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_word(path))
         elif ext == ".pptx":
             _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_pptx(path))
-        elif ext in (".txt", ".md"):
-            _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_text(path))
         else:
             log_index_perf(
                 "file_done",
@@ -199,10 +189,13 @@ def search(
 def reindex_all() -> Dict[str, int]:
     from concurrent.futures import ThreadPoolExecutor
 
+    pruned_legacy = delete_files_by_types(["Text", "Markdown"])
     files = get_all_files()
 
     def _reindex_one(file_info: Dict[str, Any]) -> str:
         path = file_info["path"]
+        if Path(path).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            return "skipped"
         if not os.path.exists(path):
             return "failed"
         try:
@@ -217,7 +210,11 @@ def reindex_all() -> Dict[str, int]:
         outcomes = list(executor.map(_reindex_one, files))
 
     set_setting("last_reindex_at", datetime.now().isoformat())
-    return {"success": outcomes.count("success"), "failed": outcomes.count("failed"), "skipped": 0}
+    return {
+        "success": outcomes.count("success"),
+        "failed": outcomes.count("failed"),
+        "skipped": pruned_legacy + outcomes.count("skipped"),
+    }
 
 
 def _do_reindex_incremental():

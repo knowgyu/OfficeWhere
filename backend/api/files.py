@@ -8,10 +8,11 @@ from typing import Annotated, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from ..core.file_access import inspect_file_path, pick_local_file, pick_local_folder, scan_folder
+from ..core.file_scope import SUPPORTED_EXTENSIONS, SUPPORTED_EXTENSIONS_LABEL
 from ..core.index_perf import elapsed_ms, log_index_perf, timed_ms
 from ..core.indexer import inspect_and_chunk
 from ..core.normalizer import suggest_key_column
-from ..core.parser import SUPPORTED_EXTENSIONS, get_file_schema
+from ..core.parser import get_file_schema
 from ..database import (
     count_files,
     count_files_by_type,
@@ -162,7 +163,7 @@ def register(req: FileRegisterRequest):
         )
         raise HTTPException(
             status_code=400,
-            detail=f"지원하지 않는 파일 형식입니다: {ext}. 지원 형식: .xlsx, .xls, .docx, .pptx",
+            detail=f"지원하지 않는 파일 형식입니다: {ext}. 지원 형식: {SUPPORTED_EXTENSIONS_LABEL}",
         )
 
     try:

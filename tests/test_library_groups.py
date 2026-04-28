@@ -42,8 +42,8 @@ def test_list_file_groups_separates_exact_name_and_version_family(tmp_path, monk
     _register("/tmp/a/보고서_v1.0.docx", "보고서_v1.0.docx", "Word")
     _register("/tmp/a/보고서_v1.1.docx", "보고서_v1.1.docx", "Word")
     _register("/tmp/a/보고서_260426.docx", "보고서_260426.docx", "Word")
-    _register("/tmp/a/동일.txt", "동일.txt", "Text")
-    _register("/tmp/b/동일.txt", "동일.txt", "Text")
+    _register("/tmp/a/동일.bin", "동일.bin", "Unknown")
+    _register("/tmp/b/동일.bin", "동일.bin", "Unknown")
 
     response = list_file_groups(limit=10)
     kinds = {group.group_kind for group in response.groups}

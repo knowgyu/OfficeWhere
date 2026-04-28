@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from ..core.file_scope import DEFAULT_EXCLUDED_FOLDER_NAMES
+
 
 class FileRegisterRequest(BaseModel):
     path: str
@@ -346,6 +348,7 @@ class WatchedFolder(BaseModel):
 
 class LibrarySettings(BaseModel):
     watched_folders: List[WatchedFolder] = Field(default_factory=list)
+    excluded_folder_names: List[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDED_FOLDER_NAMES))
     auto_rescan_mode: str = "interval"
     auto_rescan_interval_hours: float = 24.0
     auto_rescan_daily_time: str = "03:00"
@@ -374,6 +377,7 @@ class LibraryRescanResponse(BaseModel):
     failed: int
     results: List[LibraryRescanResult]
     cancelled: int = 0
+    pruned_unsupported: int = 0
 
 
 class LibraryRescanRequest(BaseModel):
@@ -400,6 +404,7 @@ class LibraryRescanStatus(BaseModel):
     skipped: int = 0
     failed: int = 0
     cancelled: int = 0
+    pruned_unsupported: int = 0
     cancel_requested: bool = False
     current_file: Optional[str] = None
     summary: Optional[LibraryRescanResponse] = None

@@ -53,6 +53,7 @@ function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
   if (!rescanning) return '최근 색인 결과'
   if (status?.stage === 'scanning') return '대상 폴더 스캔 중'
   if (status?.stage === 'indexing') return '변경 확인 및 파일 색인 중'
+  if (status?.stage === 'saving') return '색인 결과 저장 중'
   if (status?.stage === 'cancelling') return '정지 요청 처리 중'
   return '대상 폴더 색인 준비 중'
 }
@@ -68,7 +69,8 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
           ? `폴더 ${status.folders_processed}/${status.folders_total}`
           : '진행률 계산 중'
     const current = status.current_file ? ` · 현재 ${status.current_file}` : ''
-    return [foundText, modeText, progressText].filter(Boolean).join(' · ') + current
+    const cleanupText = status.pruned_unsupported > 0 ? `정리 ${status.pruned_unsupported}개` : ''
+    return [foundText, modeText, progressText, cleanupText].filter(Boolean).join(' · ') + current
   }
 
   const source = summary ?? status?.summary
@@ -76,7 +78,8 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
   const checked = source.registered + source.updated + source.skipped
   const unchanged = source.skipped > 0 ? ` · 변경 없음 ${source.skipped}` : ''
   const cancelled = source.cancelled > 0 ? ` · 정지 ${source.cancelled}` : ''
-  return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${cancelled} · 실패 ${source.failed}`
+  const cleanup = source.pruned_unsupported > 0 ? ` · 이전 미지원 항목 정리 ${source.pruned_unsupported}` : ''
+  return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${cancelled}${cleanup} · 실패 ${source.failed}`
 }
 
 function formatBytes(bytes?: number) {
@@ -93,9 +96,48 @@ function formatBytes(bytes?: number) {
 
 const REGISTERED_FILE_PAGE_SIZE = 50
 const INDEX_WORKER_MIN = 4
-const INDEX_WORKER_MAX = 48
+const INDEX_WORKER_MAX = 32
 const INDEX_WORKER_STEP = 4
 const INDEX_WORKER_RECOMMENDED = 24
+const DEFAULT_EXCLUDED_FOLDER_NAMES = [
+  '.git',
+  '.svn',
+  '.hg',
+  'node_modules',
+  'bower_components',
+  'vendor',
+  'venv',
+  '.venv',
+  'env',
+  '.tox',
+  '__pycache__',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.cache',
+  'dist',
+  'build',
+  'out',
+  'target',
+  'bin',
+  'obj',
+  '.next',
+  '.nuxt',
+  '.gradle',
+  '.m2',
+  '.cargo',
+  '.rustup',
+  '.vscode',
+  '.idea',
+  '.vs',
+  'AppData',
+  'Library',
+  'Application Support',
+  '.codex',
+  '.claude',
+  '.omx',
+  '.omc',
+]
 const SAFE_APP_DATA_IDS = new Set([
   'backend-data',
   'chromium-cache',
@@ -138,8 +180,21 @@ function workerCountLabel(value: number) {
   if (value <= 8) return '안정 우선'
   if (value < INDEX_WORKER_RECOMMENDED) return '일반 PC'
   if (value === INDEX_WORKER_RECOMMENDED) return '추천'
-  if (value <= 32) return '고성능 PC'
-  return '매우 높음'
+  return '고성능 PC'
+}
+
+function normalizeExcludedFolderNames(values: string[]) {
+  const seen = new Set<string>()
+  const output: string[] = []
+  values.forEach((value) => {
+    const name = value.trim()
+    if (!name) return
+    const key = name.toLocaleLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    output.push(name)
+  })
+  return output
 }
 
 export default function FileManager({
@@ -185,6 +240,7 @@ export default function FileManager({
   const [tourRefreshStartKey, setTourRefreshStartKey] = useState<number | null>(null)
   const [librarySettings, setLibrarySettings] = useState<LibrarySettings>({
     watched_folders: [],
+    excluded_folder_names: [...DEFAULT_EXCLUDED_FOLDER_NAMES],
     auto_rescan_mode: 'interval',
     auto_rescan_interval_hours: 24,
     auto_rescan_daily_time: '03:00',
@@ -210,6 +266,8 @@ export default function FileManager({
   const [clearAppDataResult, setClearAppDataResult] = useState<ClearAppDataResult | null>(null)
   const [indexSettingsOpen, setIndexSettingsOpen] = useState(false)
   const [indexWorkerDraft, setIndexWorkerDraft] = useState(INDEX_WORKER_RECOMMENDED)
+  const [excludedFolderDraft, setExcludedFolderDraft] = useState<string[]>(DEFAULT_EXCLUDED_FOLDER_NAMES)
+  const [excludedFolderInput, setExcludedFolderInput] = useState('')
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
   const [closeBehaviorLoading, setCloseBehaviorLoading] = useState(false)
   const officeWhereBridge = getOfficeWhereBridge()
@@ -319,7 +377,15 @@ export default function FileManager({
   useEffect(() => {
     if (!indexSettingsOpen) return
     setIndexWorkerDraft(normalizeIndexWorkerCount(librarySettings.fast_worker_count ?? INDEX_WORKER_RECOMMENDED))
-  }, [indexSettingsOpen, librarySettings.fast_worker_count])
+    setExcludedFolderDraft(
+      normalizeExcludedFolderNames(
+        librarySettings.excluded_folder_names?.length
+          ? librarySettings.excluded_folder_names
+          : DEFAULT_EXCLUDED_FOLDER_NAMES,
+      ),
+    )
+    setExcludedFolderInput('')
+  }, [indexSettingsOpen, librarySettings.fast_worker_count, librarySettings.excluded_folder_names])
 
   useEffect(() => {
     if (confirmDeleteFiles.length === 0) return
@@ -452,11 +518,21 @@ export default function FileManager({
 
   const handleSaveIndexWorkerCount = async () => {
     const value = normalizeIndexWorkerCount(indexWorkerDraft)
+    const excludedFolderNames = normalizeExcludedFolderNames(excludedFolderDraft)
     const saved = await saveLibrarySettings(
-      { ...librarySettings, fast_worker_count: value },
+      { ...librarySettings, fast_worker_count: value, excluded_folder_names: excludedFolderNames },
       '색인 성능 설정을 저장했습니다.',
     )
     if (saved) setIndexSettingsOpen(false)
+  }
+
+  const addExcludedFolderName = () => {
+    const next = normalizeExcludedFolderNames([...excludedFolderDraft, excludedFolderInput])
+    if (next.length === excludedFolderDraft.length && excludedFolderInput.trim()) {
+      snackbar.warn('이미 제외 목록에 있습니다.')
+    }
+    setExcludedFolderDraft(next)
+    setExcludedFolderInput('')
   }
 
   const openClearAppDataPreset = (candidateIds: string[]) => {
@@ -1193,7 +1269,7 @@ export default function FileManager({
             )}
           </div>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            지원 형식 · .xlsx · .xls · .docx · .pptx · .txt · .md
+            지원 형식 · .xlsx · .xls · .docx · .pptx
           </p>
         </CardSection>
       </Card>
@@ -1306,7 +1382,7 @@ export default function FileManager({
           <EmptyState
             icon="library_add"
             title="아직 등록된 파일이 없습니다"
-            description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT / 텍스트(.txt, .md) 파일을 추가해 보세요."
+            description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT 파일을 추가해 보세요."
             compact
           />
         ) : (
@@ -1582,7 +1658,7 @@ export default function FileManager({
         size="md"
         icon="tune"
         title="색인 성능 설정"
-        description="동시에 처리할 문서 수를 정합니다. 기본값 24를 권장합니다."
+        description="동시에 처리할 문서 수와 스캔에서 건너뛸 폴더 이름을 정합니다."
         actions={
           <>
             <Button variant="text" onClick={() => setIndexSettingsOpen(false)}>
@@ -1623,7 +1699,7 @@ export default function FileManager({
                 </p>
               </div>
               <div className="text-right type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                4 단위 · 최대 48
+                4 단위 · 최대 32
               </div>
             </div>
 
@@ -1637,8 +1713,8 @@ export default function FileManager({
               className="w-full accent-[var(--md-sys-color-primary)]"
               aria-label="색인 worker 수"
             />
-            <div className="grid grid-cols-5 gap-2 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">
-              {[4, 16, 24, 32, 48].map((value) => (
+            <div className="grid grid-cols-4 gap-2 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {[4, 16, 24, 32].map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -1656,8 +1732,71 @@ export default function FileManager({
             </div>
           </div>
 
+          <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">제외 폴더</p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  이름이 같은 폴더는 스캔하지 않습니다. 개발 산출물·캐시 폴더를 건너뛰면 큰 폴더에서도 빠르게 시작합니다.
+                </p>
+              </div>
+              <Button
+                variant="text"
+                onClick={() => setExcludedFolderDraft([...DEFAULT_EXCLUDED_FOLDER_NAMES])}
+              >
+                기본값
+              </Button>
+            </div>
+
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <TextField
+                  label="폴더 이름 추가"
+                  placeholder="예: node_modules"
+                  value={excludedFolderInput}
+                  onChange={(event) => setExcludedFolderInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return
+                    event.preventDefault()
+                    addExcludedFolderName()
+                  }}
+                />
+              </div>
+              <Button variant="tonal" leadingIcon="add" onClick={addExcludedFolderName}>
+                추가
+              </Button>
+            </div>
+
+            <div className="max-h-40 overflow-auto rounded-md bg-[var(--md-sys-color-surface-container-low)] p-2">
+              <div className="flex flex-wrap gap-2">
+                {excludedFolderDraft.length === 0 ? (
+                  <span className="type-body-sm px-2 py-1 text-[var(--md-sys-color-on-surface-variant)]">
+                    제외 폴더가 없습니다.
+                  </span>
+                ) : (
+                  excludedFolderDraft.map((name) => (
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() =>
+                        setExcludedFolderDraft((current) =>
+                          current.filter((item) => item.toLocaleLowerCase() !== name.toLocaleLowerCase()),
+                        )
+                      }
+                      className="inline-flex items-center gap-1 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 py-1 type-label-sm text-[var(--md-sys-color-on-surface)] transition-colors hover:bg-[var(--md-sys-color-error-container)] hover:text-[var(--md-sys-color-on-error-container)]"
+                      title="클릭하면 제외 목록에서 제거"
+                    >
+                      {name}
+                      <Icon name="close" size={14} />
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            네트워크 폴더나 외장 저장장치에서는 값을 너무 높이면 오히려 느려질 수 있습니다.
+            네트워크 폴더나 외장 저장장치에서는 작업 수를 너무 높이면 오히려 느려질 수 있습니다. 제외 폴더는 이름 기준으로만 적용됩니다.
           </p>
         </div>
       </Dialog>
@@ -1888,9 +2027,7 @@ function InspectionCard({
           <div className="flex gap-2 flex-wrap pt-1">
             <FileTypeBadge fileType={inspectedFile.fileType} />
             <Badge tone="primary">
-              {inspectedFile.fileType === 'Text' || inspectedFile.fileType === 'Markdown'
-                ? '검색 등록용'
-                : inspectedFile.compareMode === 'excel'
+              {inspectedFile.compareMode === 'excel'
                 ? 'Excel 검색/비교'
                 : inspectedFile.compareMode === 'word'
                   ? '문서 변경 비교'
@@ -2003,9 +2140,7 @@ function InspectionCard({
                   이 형식은 별도 행 기준 없이 등록됩니다.
                 </p>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  {inspectedFile.fileType === 'Text' || inspectedFile.fileType === 'Markdown'
-                    ? '검색과 내용 미리보기에 사용할 수 있습니다.'
-                    : '검색과 2개 파일 변경 비교에 사용할 수 있습니다.'}
+                  검색과 2개 파일 변경 비교에 사용할 수 있습니다.
                 </p>
               </div>
             )}

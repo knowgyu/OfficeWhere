@@ -82,7 +82,7 @@ async function apiPath(path: string): Promise<string> {
   return `${baseUrl}${path}`
 }
 
-export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Text' | 'Markdown' | 'Unknown'
+export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Unknown'
 export type CompareMode = 'excel' | 'word' | 'ppt'
 export type CellValue = string | number | boolean | null | undefined
 
@@ -496,6 +496,7 @@ export interface WatchedFolder {
 
 export interface LibrarySettings {
   watched_folders: WatchedFolder[]
+  excluded_folder_names: string[]
   auto_rescan_mode: 'manual' | 'interval' | 'daily'
   auto_rescan_interval_hours: number
   auto_rescan_daily_time: string
@@ -524,13 +525,14 @@ export interface LibraryRescanResponse {
   failed: number
   results: LibraryRescanResult[]
   cancelled: number
+  pruned_unsupported: number
 }
 
 export type LibraryRescanMode = 'normal' | 'fast'
 
 export interface LibraryRescanStatus {
   running: boolean
-  stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
+  stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'saving' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
   message: string
   mode: LibraryRescanMode
   worker_count: number
@@ -548,6 +550,7 @@ export interface LibraryRescanStatus {
   skipped: number
   failed: number
   cancelled: number
+  pruned_unsupported: number
   cancel_requested: boolean
   current_file?: string | null
   summary?: LibraryRescanResponse | null
@@ -704,8 +707,6 @@ export function normalizeFileType(fileType: unknown): FileType {
   if (raw.includes('excel')) return 'Excel'
   if (raw.includes('word')) return 'Word'
   if (raw.includes('power') || raw === 'ppt' || raw === 'pptx') return 'PowerPoint'
-  if (raw.includes('markdown') || raw === 'md') return 'Markdown'
-  if (raw.includes('text') || raw === 'txt') return 'Text'
   return 'Unknown'
 }
 
@@ -771,10 +772,7 @@ export function formatParserConfigSummary(parserConfig: ParserConfig | null | un
   ]
 }
 
-function buildCapabilitySummary(mode: CompareMode, fileType: FileType): string[] {
-  if (fileType === 'Text' || fileType === 'Markdown') {
-    return ['본문 검색 가능', '내용 미리보기 가능', '버전 관리 제외']
-  }
+function buildCapabilitySummary(mode: CompareMode, _fileType: FileType): string[] {
   if (mode === 'excel') return ['Excel 문서', '검색 및 비교 가능', '표 내용 확인 가능']
   if (mode === 'word') return ['Word 문서', '2개 문서 비교', '문단/표 행 변경 확인']
   return ['2개 발표자료 비교', '슬라이드 추가/삭제 확인', '슬라이드 내용 변경 확인']

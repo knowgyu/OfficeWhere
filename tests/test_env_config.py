@@ -64,7 +64,7 @@ def test_fast_worker_count_normalizes_ui_bounds_and_steps(monkeypatch):
     assert get_fast_worker_count() == 24
     assert normalize_fast_worker_count(2) == 4
     assert normalize_fast_worker_count(26) == 28
-    assert normalize_fast_worker_count(99) == 48
+    assert normalize_fast_worker_count(99) == 32
 
 
 def test_example_library_path_uses_repo_examples():

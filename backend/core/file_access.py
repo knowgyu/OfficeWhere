@@ -3,7 +3,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .normalizer import suggest_key_column
-from .parser import SUPPORTED_EXTENSIONS, get_file_schema, get_file_type
+from .file_scope import (
+    DEFAULT_EXCLUDED_FOLDER_NAMES,
+    SUPPORTED_EXTENSIONS,
+    SUPPORTED_EXTENSIONS_LABEL,
+    excluded_folder_key_set,
+    should_exclude_dir,
+)
+from .parser import get_file_schema, get_file_type
 from ..runtime import get_worker_count
 
 
@@ -17,9 +24,7 @@ def inspect_file_path(path: str) -> Dict[str, Any]:
 
     ext = Path(normalized_path).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
-        raise ValueError(
-            f"지원하지 않는 파일 형식입니다: {ext}. 지원 형식: .xlsx, .xls, .docx, .pptx, .txt, .md"
-        )
+        raise ValueError(f"지원하지 않는 파일 형식입니다: {ext}. 지원 형식: {SUPPORTED_EXTENSIONS_LABEL}")
 
     schema = get_file_schema(normalized_path)
     columns = schema["columns"]
@@ -61,11 +66,10 @@ def pick_local_file() -> str:
             parent=root,
             title="등록할 파일 선택",
             filetypes=[
-                ("지원 파일", "*.xlsx *.xls *.docx *.pptx *.txt *.md"),
+                ("지원 파일", "*.xlsx *.xls *.docx *.pptx"),
                 ("Excel", "*.xlsx *.xls"),
                 ("Word", "*.docx"),
                 ("PowerPoint", "*.pptx"),
-                ("텍스트", "*.txt *.md"),
                 ("모든 파일", "*.*"),
             ],
         )
@@ -83,7 +87,43 @@ def pick_local_file() -> str:
     return os.path.normpath(path) if path else ""
 
 
-def scan_folder(folder_path: str, recursive: bool = True) -> List[Dict[str, Any]]:
+def _scan_supported_paths(
+    folder: Path,
+    *,
+    recursive: bool,
+    excluded_folder_names: List[str] | None = None,
+) -> List[Path]:
+    excluded = excluded_folder_key_set(
+        DEFAULT_EXCLUDED_FOLDER_NAMES if excluded_folder_names is None else excluded_folder_names
+    )
+    found: List[Path] = []
+    if not recursive:
+        return sorted(
+            path
+            for path in folder.iterdir()
+            if path.is_file()
+            and not path.name.startswith("~$")
+            and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        )
+
+    stack = [folder]
+    while stack:
+        current = stack.pop()
+        for path in current.iterdir():
+            if path.is_dir():
+                if not should_exclude_dir(path, excluded):
+                    stack.append(path)
+                continue
+            if path.is_file() and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                found.append(path)
+    return sorted(found)
+
+
+def scan_folder(
+    folder_path: str,
+    recursive: bool = True,
+    excluded_folder_names: List[str] | None = None,
+) -> List[Dict[str, Any]]:
     """폴더 내 지원 파일을 병렬로 스캔하여 파일 정보 목록 반환."""
     from concurrent.futures import ThreadPoolExecutor
 
@@ -93,12 +133,7 @@ def scan_folder(folder_path: str, recursive: bool = True) -> List[Dict[str, Any]
     if not folder.is_dir():
         raise ValueError(f"폴더가 아닙니다: {folder_path}")
 
-    glob_pattern = "**/*" if recursive else "*"
-    found: List[Path] = sorted(
-        p for ext in SUPPORTED_EXTENSIONS
-        for p in folder.glob(f"{glob_pattern}{ext}")
-        if p.is_file() and not p.name.startswith("~$")
-    )
+    found = _scan_supported_paths(folder, recursive=recursive, excluded_folder_names=excluded_folder_names)
 
     def _inspect_one(file_path: Path) -> Dict[str, Any]:
         try:

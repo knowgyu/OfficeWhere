@@ -9,6 +9,7 @@ import re
 import threading
 import time
 import uuid
+from collections import Counter
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..database import (
     PreparedIndexedFile,
+    delete_files_by_types,
     ensure_file_fingerprints,
     get_all_files,
     get_registered_files_signature,
@@ -40,7 +42,14 @@ from ..models.schemas import (
 )
 from .indexer import inspect_and_chunk
 from .index_perf import elapsed_ms, log_index_perf, timed_ms
-from .parser import SUPPORTED_EXTENSIONS
+from .file_scope import (
+    DEFAULT_EXCLUDED_FOLDER_NAMES,
+    SUPPORTED_EXTENSIONS,
+    excluded_folder_key_set,
+    normalize_excluded_folder_names,
+    should_exclude_dir,
+    sorted_counter_map,
+)
 from .normalizer import suggest_key_column
 from .excel_analysis import normalize_excel_parser_config
 from ..runtime import get_fast_worker_count, get_worker_count, normalize_fast_worker_count
@@ -76,6 +85,16 @@ class _PreparedLibraryWrite:
     metrics: Dict[str, Any]
     file_started: float
     ready_at: float
+
+
+@dataclass
+class _ScanCollection:
+    paths: List[str]
+    visited_dir_count: int = 0
+    skipped_dir_count: int = 0
+    skipped_dirs_by_name: Dict[str, int] | None = None
+    unsupported_file_count: int = 0
+    unsupported_extensions_by_suffix: Dict[str, int] | None = None
 
 
 def _normalize_rescan_mode(mode: str = "normal") -> str:
@@ -146,7 +165,7 @@ def load_library_settings() -> LibrarySettings:
     try:
         settings = LibrarySettings(**json.loads(raw))
         settings.last_rescan_at = get_setting(LAST_RESCAN_KEY) or None
-        return settings
+        return _normalize_library_settings(settings)
     except Exception:
         return LibrarySettings()
 
@@ -157,8 +176,8 @@ def _normalize_interval_hours(value: float) -> int:
     return max(1, int(math.floor(float(value))))
 
 
-def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
-    normalized = LibrarySettings(
+def _normalize_library_settings(settings: LibrarySettings) -> LibrarySettings:
+    return LibrarySettings(
         watched_folders=[
             {
                 "path": os.path.normpath(folder.path.strip()),
@@ -167,12 +186,17 @@ def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
             for folder in settings.watched_folders
             if folder.path.strip()
         ],
+        excluded_folder_names=normalize_excluded_folder_names(settings.excluded_folder_names),
         auto_rescan_mode=settings.auto_rescan_mode,
         auto_rescan_interval_hours=_normalize_interval_hours(settings.auto_rescan_interval_hours),
         auto_rescan_daily_time=settings.auto_rescan_daily_time,
         fast_worker_count=normalize_fast_worker_count(settings.fast_worker_count),
         last_rescan_at=settings.last_rescan_at,
     )
+
+
+def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
+    normalized = _normalize_library_settings(settings)
     set_setting(SETTINGS_KEY, normalized.model_dump_json())
     normalized.last_rescan_at = get_setting(LAST_RESCAN_KEY) or None
     return normalized
@@ -343,22 +367,81 @@ def file_sort_key(file_info: FileInfo) -> Tuple[float, str]:
     return (0, file_info.name)
 
 
-def _collect_supported_paths(folder_path: str, recursive: bool) -> List[str]:
+def _collect_supported_paths_with_stats(
+    folder_path: str,
+    recursive: bool,
+    excluded_folder_names: Optional[List[str]] = None,
+) -> _ScanCollection:
     folder = Path(os.path.normpath(folder_path.strip()))
     if not folder.exists():
         raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
     if not folder.is_dir():
         raise ValueError(f"폴더가 아닙니다: {folder_path}")
 
-    iterator = folder.rglob("*") if recursive else folder.glob("*")
     supported = {extension.lower() for extension in SUPPORTED_EXTENSIONS}
-    return sorted(
-        os.path.normpath(str(path))
-        for path in iterator
-        if path.is_file()
-        and not path.name.startswith("~$")
-        and path.suffix.lower() in supported
+    excluded_keys = excluded_folder_key_set(
+        DEFAULT_EXCLUDED_FOLDER_NAMES if excluded_folder_names is None else excluded_folder_names
     )
+    paths: List[str] = []
+    skipped_dirs: Counter[str] = Counter()
+    unsupported_extensions: Counter[str] = Counter()
+    visited_dir_count = 0
+
+    def visit_file(path: Path) -> None:
+        if path.name.startswith("~$"):
+            return
+        suffix = path.suffix.lower()
+        if suffix in supported:
+            paths.append(os.path.normpath(str(path)))
+        elif suffix:
+            unsupported_extensions[suffix] += 1
+        else:
+            unsupported_extensions["<none>"] += 1
+
+    if not recursive:
+        visited_dir_count = 1
+        for path in folder.iterdir():
+            if path.is_file():
+                visit_file(path)
+        return _ScanCollection(
+            paths=sorted(paths),
+            visited_dir_count=visited_dir_count,
+            skipped_dir_count=0,
+            skipped_dirs_by_name={},
+            unsupported_file_count=sum(unsupported_extensions.values()),
+            unsupported_extensions_by_suffix=sorted_counter_map(unsupported_extensions),
+        )
+
+    stack = [folder]
+    while stack:
+        current = stack.pop()
+        visited_dir_count += 1
+        for path in current.iterdir():
+            if path.is_dir():
+                if should_exclude_dir(path, excluded_keys):
+                    skipped_dirs[path.name] += 1
+                elif not path.is_symlink():
+                    stack.append(path)
+                continue
+            if path.is_file():
+                visit_file(path)
+
+    return _ScanCollection(
+        paths=sorted(paths),
+        visited_dir_count=visited_dir_count,
+        skipped_dir_count=sum(skipped_dirs.values()),
+        skipped_dirs_by_name=sorted_counter_map(skipped_dirs),
+        unsupported_file_count=sum(unsupported_extensions.values()),
+        unsupported_extensions_by_suffix=sorted_counter_map(unsupported_extensions),
+    )
+
+
+def _collect_supported_paths(
+    folder_path: str,
+    recursive: bool,
+    excluded_folder_names: Optional[List[str]] = None,
+) -> List[str]:
+    return _collect_supported_paths_with_stats(folder_path, recursive, excluded_folder_names).paths
 
 
 def _cancelled_result(path: str) -> LibraryRescanResult:
@@ -493,6 +576,15 @@ def rescan_library(
     settings = load_library_settings()
     worker_count = _rescan_worker_count(mode, settings)
     rescan_started = time.perf_counter()
+    pruned_unsupported = delete_files_by_types(["Text", "Markdown"])
+    if pruned_unsupported:
+        log_index_perf(
+            "unsupported_records_pruned",
+            operation="library_rescan",
+            mode=mode,
+            worker_count=worker_count,
+            file_count=pruned_unsupported,
+        )
     if not settings.watched_folders:
         log_index_perf(
             "rescan_end",
@@ -503,6 +595,7 @@ def rescan_library(
             reason="no_watched_folders",
             total=0,
             processed=0,
+            pruned_unsupported=pruned_unsupported,
             duration_ms=elapsed_ms(rescan_started),
         )
         if progress_callback:
@@ -515,20 +608,39 @@ def rescan_library(
                     "percent": 100.0,
                     "total": 0,
                     "processed": 0,
+                    "pruned_unsupported": pruned_unsupported,
                 }
             )
-        return LibraryRescanResponse(registered=0, updated=0, skipped=0, failed=0, results=[])
+        return LibraryRescanResponse(
+            registered=0,
+            updated=0,
+            skipped=0,
+            failed=0,
+            results=[],
+            pruned_unsupported=pruned_unsupported,
+        )
 
     started_monotonic = time.monotonic()
     found_paths: Dict[str, str] = {}
     scan_errors: List[LibraryRescanResult] = []
     folders_total = len(settings.watched_folders)
+    scan_visited_dir_count = 0
+    scan_skipped_dir_count = 0
+    scan_unsupported_file_count = 0
+    scan_skipped_dirs_by_name: Counter[str] = Counter()
+    scan_unsupported_extensions_by_suffix: Counter[str] = Counter()
+    registered_chunk_count = 0
+    flush_count = 0
+    flush_total_ms = 0
+    flush_max_ms = 0
+    large_file_flush_count = 0
     log_index_perf(
         "rescan_start",
         operation="library_rescan",
         mode=mode,
         worker_count=worker_count,
         folders_total=folders_total,
+        excluded_folder_count=len(settings.excluded_folder_names),
     )
     if progress_callback:
         progress_callback(
@@ -556,8 +668,19 @@ def rescan_library(
         scan_success = True
         scan_error_type = ""
         scan_error = ""
+        scan_result = _ScanCollection(paths=[])
         try:
-            for path in _collect_supported_paths(folder.path, folder.recursive):
+            scan_result = _collect_supported_paths_with_stats(
+                folder.path,
+                folder.recursive,
+                settings.excluded_folder_names,
+            )
+            scan_visited_dir_count += scan_result.visited_dir_count
+            scan_skipped_dir_count += scan_result.skipped_dir_count
+            scan_unsupported_file_count += scan_result.unsupported_file_count
+            scan_skipped_dirs_by_name.update(scan_result.skipped_dirs_by_name or {})
+            scan_unsupported_extensions_by_suffix.update(scan_result.unsupported_extensions_by_suffix or {})
+            for path in scan_result.paths:
                 if _cancel_event.is_set():
                     break
                 found_paths[path] = Path(path).name
@@ -586,6 +709,11 @@ def rescan_library(
                 success=scan_success,
                 found_delta=len(found_paths) - found_before,
                 found_total=len(found_paths),
+                visited_dir_count=scan_result.visited_dir_count,
+                skipped_dir_count=scan_result.skipped_dir_count,
+                skipped_dirs_by_name=scan_result.skipped_dirs_by_name or {},
+                unsupported_file_count=scan_result.unsupported_file_count,
+                unsupported_extensions_by_suffix=scan_result.unsupported_extensions_by_suffix or {},
                 duration_ms=elapsed_ms(folder_started),
                 error_type=scan_error_type,
                 error=scan_error,
@@ -773,19 +901,34 @@ def rescan_library(
                 "eta_seconds": _estimate_eta_seconds(started_monotonic, processed, total),
                 "current_file": current_file,
                 "cancel_requested": _cancel_event.is_set(),
+                "pruned_unsupported": pruned_unsupported,
                 **counts,
             }
         )
 
-    def _should_flush_write_buffer() -> bool:
+    def _write_buffer_chunk_count() -> int:
+        return sum(item.payload.chunk_count for item in write_buffer)
+
+    def _flush_reason_after_append() -> Optional[str]:
         if not write_buffer:
-            return False
-        chunk_count = sum(item.payload.chunk_count for item in write_buffer)
-        return (
-            len(write_buffer) >= BATCH_FLUSH_FILE_LIMIT
-            or chunk_count >= BATCH_FLUSH_CHUNK_LIMIT
-            or (time.perf_counter() - last_flush_at) >= BATCH_FLUSH_INTERVAL_SECONDS
-        )
+            return None
+        if _write_buffer_chunk_count() >= BATCH_FLUSH_CHUNK_LIMIT:
+            return "chunk_limit"
+        if len(write_buffer) >= BATCH_FLUSH_FILE_LIMIT:
+            return "file_limit"
+        if (time.perf_counter() - last_flush_at) >= BATCH_FLUSH_INTERVAL_SECONDS:
+            return "interval"
+        return None
+
+    def _append_prepared_write(item: _PreparedLibraryWrite) -> Optional[str]:
+        current_chunk_count = _write_buffer_chunk_count()
+        item_chunk_count = item.payload.chunk_count
+        if write_buffer and current_chunk_count + item_chunk_count > BATCH_FLUSH_CHUNK_LIMIT:
+            _flush_write_buffer("chunk_limit")
+        write_buffer.append(item)
+        if item_chunk_count >= BATCH_FLUSH_CHUNK_LIMIT:
+            return "single_large_file"
+        return _flush_reason_after_append()
 
     def _success_result_from_prepared(
         item: _PreparedLibraryWrite,
@@ -817,7 +960,7 @@ def rescan_library(
         )
 
     def _flush_write_buffer(reason: str) -> None:
-        nonlocal last_flush_at
+        nonlocal flush_count, flush_total_ms, flush_max_ms, large_file_flush_count, last_flush_at, registered_chunk_count
         if not write_buffer:
             return
 
@@ -825,10 +968,37 @@ def rescan_library(
         write_buffer.clear()
         batch_chunk_count = sum(item.payload.chunk_count for item in batch)
         flush_started = time.perf_counter()
+        single_large_file = reason == "single_large_file"
+        if single_large_file:
+            large_file_flush_count += 1
+
+        if progress_callback:
+            counts = _result_counts([*results, *scan_errors])
+            progress_callback(
+                {
+                    "stage": "saving",
+                    "message": f"색인 결과 저장 중 · {len(batch)}개 문서 · 청크 {batch_chunk_count:,}개",
+                    "mode": mode,
+                    "worker_count": worker_count,
+                    "found": total,
+                    "total": total,
+                    "processed": processed,
+                    "percent": round((processed / total) * 100, 1) if total else 100.0,
+                    "eta_seconds": _estimate_eta_seconds(started_monotonic, processed, total),
+                    "current_file": batch[-1].name if batch else None,
+                    "cancel_requested": _cancel_event.is_set(),
+                    "pruned_unsupported": pruned_unsupported,
+                    **counts,
+                }
+            )
 
         try:
             file_ids = save_indexed_files_batch([item.payload for item in batch])
             batch_save_ms = elapsed_ms(flush_started)
+            flush_count += 1
+            registered_chunk_count += batch_chunk_count
+            flush_total_ms += batch_save_ms
+            flush_max_ms = max(flush_max_ms, batch_save_ms)
             log_index_perf(
                 "db_flush_done",
                 operation="library_rescan",
@@ -838,6 +1008,10 @@ def rescan_library(
                 success=True,
                 batch_file_count=len(batch),
                 batch_chunk_count=batch_chunk_count,
+                file_limit=BATCH_FLUSH_FILE_LIMIT,
+                chunk_limit=BATCH_FLUSH_CHUNK_LIMIT,
+                interval_seconds=BATCH_FLUSH_INTERVAL_SECONDS,
+                single_large_file=single_large_file,
                 duration_ms=batch_save_ms,
             )
             per_file_save_ms = round(batch_save_ms / max(len(batch), 1), 3)
@@ -854,6 +1028,9 @@ def rescan_library(
                 )
         except Exception as exc:
             batch_save_ms = elapsed_ms(flush_started)
+            flush_count += 1
+            flush_total_ms += batch_save_ms
+            flush_max_ms = max(flush_max_ms, batch_save_ms)
             log_index_perf(
                 "db_flush_done",
                 operation="library_rescan",
@@ -863,6 +1040,10 @@ def rescan_library(
                 success=False,
                 batch_file_count=len(batch),
                 batch_chunk_count=batch_chunk_count,
+                file_limit=BATCH_FLUSH_FILE_LIMIT,
+                chunk_limit=BATCH_FLUSH_CHUNK_LIMIT,
+                interval_seconds=BATCH_FLUSH_INTERVAL_SECONDS,
+                single_large_file=single_large_file,
                 duration_ms=batch_save_ms,
                 error_type=exc.__class__.__name__,
                 error=str(exc),
@@ -924,13 +1105,14 @@ def rescan_library(
                 "percent": 0.0 if total > 0 else 100.0,
                 "eta_seconds": None,
                 "cancel_requested": _cancel_event.is_set(),
+                "pruned_unsupported": pruned_unsupported,
                 **_result_counts(scan_errors),
             }
         )
 
     if _cancel_event.is_set():
         results.extend(scan_errors)
-        response = LibraryRescanResponse(results=results, **_result_counts(results))
+        response = LibraryRescanResponse(results=results, pruned_unsupported=pruned_unsupported, **_result_counts(results))
         if progress_callback:
             progress_callback(
                 {
@@ -945,6 +1127,7 @@ def rescan_library(
                     "eta_seconds": None,
                     "summary": response,
                     "cancel_requested": True,
+                    "pruned_unsupported": pruned_unsupported,
                     **_result_counts(results),
                 }
             )
@@ -974,8 +1157,9 @@ def rescan_library(
                             log_message="library worker future failed",
                         )
                     if isinstance(result, _PreparedLibraryWrite):
-                        write_buffer.append(result)
+                        flush_reason = _append_prepared_write(result)
                     else:
+                        flush_reason = None
                         _record_result(result)
 
                     if not _cancel_event.is_set():
@@ -983,8 +1167,8 @@ def rescan_library(
                         if next_path is not None:
                             futures[executor.submit(_register_or_update, next_path)] = next_path
 
-                    if _should_flush_write_buffer():
-                        _flush_write_buffer("batch_limit")
+                    if flush_reason:
+                        _flush_write_buffer(flush_reason)
                     elif not isinstance(result, _PreparedLibraryWrite):
                         _emit_indexing_progress(result.name)
                     break
@@ -1008,7 +1192,9 @@ def rescan_library(
                                 log_message="library worker future failed during cancel",
                             )
                         if isinstance(result, _PreparedLibraryWrite):
-                            write_buffer.append(result)
+                            flush_reason = _append_prepared_write(result)
+                            if flush_reason:
+                                _flush_write_buffer(flush_reason)
                         else:
                             _record_result(result)
                     futures.clear()
@@ -1021,7 +1207,7 @@ def rescan_library(
     results.extend(scan_errors)
     set_setting(LAST_RESCAN_KEY, datetime.now().isoformat())
     counts = _result_counts(results)
-    response = LibraryRescanResponse(results=results, **counts)
+    response = LibraryRescanResponse(results=results, pruned_unsupported=pruned_unsupported, **counts)
     cancelled = _cancel_event.is_set()
     log_index_perf(
         "rescan_end",
@@ -1032,6 +1218,18 @@ def rescan_library(
         cancel_requested=cancelled,
         found=total,
         processed=len(results) - len(scan_errors),
+        pruned_unsupported=pruned_unsupported,
+        visited_dir_count=scan_visited_dir_count,
+        skipped_dir_count=scan_skipped_dir_count,
+        skipped_dirs_by_name=sorted_counter_map(scan_skipped_dirs_by_name),
+        unsupported_file_count=scan_unsupported_file_count,
+        unsupported_extensions_by_suffix=sorted_counter_map(scan_unsupported_extensions_by_suffix),
+        flush_count=flush_count,
+        flush_total_ms=round(flush_total_ms, 3),
+        flush_avg_ms=round(flush_total_ms / flush_count, 3) if flush_count else 0,
+        flush_max_ms=round(flush_max_ms, 3),
+        registered_chunk_count=registered_chunk_count,
+        large_file_flush_count=large_file_flush_count,
         duration_ms=elapsed_ms(rescan_started),
         **counts,
     )
@@ -1050,6 +1248,7 @@ def rescan_library(
                 "current_file": None,
                 "summary": response,
                 "cancel_requested": cancelled,
+                "pruned_unsupported": pruned_unsupported,
                 **counts,
             }
         )
@@ -1070,6 +1269,7 @@ def _run_rescan_job(mode: str) -> None:
                 "percent": _rescan_status.get("percent", 100.0),
                 "eta_seconds": None,
                 "summary": summary,
+                "pruned_unsupported": summary.pruned_unsupported,
                 "cancel_requested": cancelled,
                 "error": None,
             }

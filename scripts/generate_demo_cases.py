@@ -431,30 +431,30 @@ def build_manual_test_library() -> None:
 
     search_dir = MANUAL_LIBRARY_DIR / "05_검색샘플"
     search_dir.mkdir(parents=True, exist_ok=True)
-    (search_dir / "운영메모.txt").write_text(
-        "A 프로젝트 체험 메모\n"
-        "- 본문만 검색에서 이 문장이 검색되어야 한다.\n"
-        "- 파일명에는 A 프로젝트가 없으므로 파일명만 검색에서는 잡히지 않는 것이 정상이다.\n",
-        encoding="utf-8",
+    _save_word_document(
+        search_dir / "운영메모.docx",
+        "A 프로젝트 체험 메모",
+        [
+            "본문만 검색에서 이 문장이 검색되어야 한다.",
+            "파일명에는 A 프로젝트가 없으므로 파일명만 검색에서는 잡히지 않는 것이 정상이다.",
+        ],
     )
-    (search_dir / "릴리즈체크리스트.md").write_text(
-        "# 릴리즈 체크리스트\n\n"
-        "- 본문만 검색: `보안 검토`, `예산 조정`, `A 프로젝트` 확인\n"
-        "- 정합성 검사: 같은 파일명/다른 내용, 버전 이력 그룹 확인\n",
-        encoding="utf-8",
+    _save_word_document(
+        search_dir / "릴리즈체크리스트.docx",
+        "릴리즈 체크리스트",
+        [
+            "본문만 검색: 보안 검토, 예산 조정, A 프로젝트 확인",
+            "정합성 검사: 같은 파일명/다른 내용, 버전 이력 그룹 확인",
+        ],
     )
-    (MANUAL_LIBRARY_DIR / "README_테스트방법.md").write_text(
-        "# OfficeWhere 실제 사례 테스트 라이브러리\n\n"
-        "앱에서 이 폴더를 문서 폴더로 추가한 뒤 문서 새로고침을 실행하세요.\n\n"
-        "## 검색 확인 키워드\n"
-        "- `A 프로젝트`: Word/PPT/TXT/MD 본문 검색 확인\n"
-        "- `예산 조정`: Excel v1.1과 부서B 회의록 본문 검색 확인\n"
-        "- `회의록`: 파일명 검색 확인\n\n"
-        "## 정합성 확인 시나리오\n"
-        "- `회의록.docx`: 부서A/부서B에 같은 파일명이지만 내용이 다른 문서\n"
-        "- `공통양식.xlsx`: 부서A/부서B에 같은 파일명이고 내용도 같은 문서\n"
-        "- `주간보고`, `프로젝트상태`, `사업예산`: v1 계열부터 v4까지 이어지는 버전 이력 문서\n",
-        encoding="utf-8",
+    _save_word_document(
+        MANUAL_LIBRARY_DIR / "README_테스트방법.docx",
+        "OfficeWhere 실제 사례 테스트 라이브러리",
+        [
+            "앱에서 이 폴더를 문서 폴더로 추가한 뒤 문서 새로고침을 실행하세요.",
+            "검색 확인 키워드: A 프로젝트(Word/PPT 본문), 예산 조정(Excel/Word 본문), 회의록(파일명)",
+            "정합성 확인: 회의록.docx, 공통양식.xlsx, 주간보고/프로젝트상태/사업예산 버전 이력",
+        ],
     )
 
 

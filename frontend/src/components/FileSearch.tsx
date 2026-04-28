@@ -23,8 +23,6 @@ const FILE_TYPE_FILTERS = [
   { label: 'Excel / XLSX·XLS', value: 'xlsx', icon: 'table_chart' },
   { label: 'Word / DOCX', value: 'docx', icon: 'article' },
   { label: 'PPT / PPTX', value: 'pptx', icon: 'slideshow' },
-  { label: 'Markdown / MD', value: 'md', icon: 'docs' },
-  { label: 'Text / TXT', value: 'txt', icon: 'description' },
 ]
 
 const SEARCH_SCOPE_STATUS: Record<SearchScope, string> = {
@@ -48,7 +46,7 @@ const SEARCH_SCOPE_EMPTY: Record<SearchScope, string> = {
 const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: string }> = {
   filename_content: {
     title: '파일명과 문서 내용을 한 번에 검색',
-    description: '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT, 텍스트 파일 안의 단어까지 검색할 수 있습니다.',
+    description: '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT 문서 안의 단어까지 검색할 수 있습니다.',
   },
   filename: {
     title: '파일명으로 빠르게 검색',
@@ -56,7 +54,7 @@ const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: stri
   },
   content: {
     title: '문서 본문만 정밀 검색',
-    description: '파일명 매칭을 제외하고 Excel, Word, PPT, 텍스트 파일의 색인된 본문에서만 검색합니다.',
+    description: '파일명 매칭을 제외하고 Excel, Word, PPT 문서의 색인된 본문에서만 검색합니다.',
   },
 }
 

@@ -799,6 +799,29 @@ def delete_file(file_id: int) -> bool:
         return affected > 0
 
 
+def delete_files_by_types(file_types: Sequence[str]) -> int:
+    """Remove app-owned registrations/indexes for the given file types."""
+    normalized = [str(file_type) for file_type in file_types if str(file_type)]
+    if not normalized:
+        return 0
+
+    placeholders = ",".join("?" for _ in normalized)
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT id FROM registered_files WHERE file_type IN ({placeholders})", normalized)
+        file_ids = [int(row[0]) for row in cursor.fetchall()]
+        if not file_ids:
+            return 0
+
+        id_placeholders = ",".join("?" for _ in file_ids)
+        cursor.execute(f"DELETE FROM file_chunks WHERE file_id IN ({id_placeholders})", file_ids)
+        cursor.execute(f"DELETE FROM document_fingerprints WHERE file_id IN ({id_placeholders})", file_ids)
+        cursor.execute(f"DELETE FROM registered_files WHERE id IN ({id_placeholders})", file_ids)
+        cursor.execute("DELETE FROM comparison_cache")
+        conn.commit()
+        return len(file_ids)
+
+
 def delete_all_files() -> int:
     """Remove all app-owned registrations and indexes without touching source files."""
     with _write_connection() as conn:
