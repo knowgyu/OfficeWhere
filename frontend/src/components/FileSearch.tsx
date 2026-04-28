@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, SchedulerSettings, SearchResult, SearchScope } from '../api/client'
+import { api, SchedulerSettings, SearchResponse, SearchResult, SearchScope } from '../api/client'
 import {
   Badge,
   Button,
@@ -61,8 +61,23 @@ const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: stri
 }
 
 const SEARCH_DEBOUNCE_MS = 600
+const INITIAL_SEARCH_FILE_LIMIT = 20
+const SEARCH_FILE_LIMIT_STEP = 20
+const MAX_SEARCH_FILE_LIMIT = 50
 
 type ModifiedDateFilter = 'all' | '7d' | '30d' | '90d' | 'custom'
+
+interface SearchMeta {
+  fileCount: number
+  fileLimit: number
+  hasMore: boolean
+}
+
+interface PrefetchedSearch {
+  key: string
+  fileLimit: number
+  data: SearchResponse
+}
 
 const MODIFIED_DATE_FILTERS: Array<{ label: string; value: ModifiedDateFilter }> = [
   { label: '전체', value: 'all' },
@@ -152,7 +167,14 @@ export default function FileSearch({
   const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
+  const [searchMeta, setSearchMeta] = useState<SearchMeta>({
+    fileCount: 0,
+    fileLimit: INITIAL_SEARCH_FILE_LIMIT,
+    hasMore: false,
+  })
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [prefetching, setPrefetching] = useState(false)
   const [searched, setSearched] = useState(false)
   const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>([])
   const [searchScope, setSearchScope] = useState<SearchScope>('filename_content')
@@ -168,6 +190,7 @@ export default function FileSearch({
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRequestSeq = useRef(0)
+  const prefetchedSearchRef = useRef<PrefetchedSearch | null>(null)
 
   useEffect(() => {
     api.search.getSettings().then((response) => {
@@ -206,6 +229,27 @@ export default function FileSearch({
     [customModifiedFrom, customModifiedTo, modifiedDateFilter],
   )
 
+  const searchKey = (
+    q: string,
+    fileTypes: string[],
+    scope: SearchScope,
+    dateFilter: ModifiedDateFilter,
+    customFrom: string,
+    customTo: string,
+  ) => JSON.stringify([q.trim(), [...fileTypes].sort(), scope, dateFilter, customFrom, customTo])
+
+  const applySearchResponse = (data: SearchResponse, fallbackFileLimit: number) => {
+    setResults(data.results)
+    setSearchMeta({
+      fileCount: data.file_count ?? new Set(data.results.map((item) => item.file_id)).size,
+      fileLimit: data.file_limit ?? fallbackFileLimit,
+      hasMore: Boolean(data.has_more),
+    })
+    setExpandedContentFiles(new Set())
+    setSearched(true)
+    return data.results.length > 0
+  }
+
   const doSearch = useCallback(
     async (
       q: string,
@@ -214,39 +258,98 @@ export default function FileSearch({
       dateFilter = modifiedDateFilter,
       customFrom = customModifiedFrom,
       customTo = customModifiedTo,
+      fileLimit = INITIAL_SEARCH_FILE_LIMIT,
+      mode: 'replace' | 'more' = 'replace',
     ) => {
       const requestId = searchRequestSeq.current + 1
       searchRequestSeq.current = requestId
 
       if (!q.trim()) {
         setResults([])
+        setSearchMeta({
+          fileCount: 0,
+          fileLimit: INITIAL_SEARCH_FILE_LIMIT,
+          hasMore: false,
+        })
         setSearched(false)
         setExpandedContentFiles(new Set())
         setLoading(false)
+        setLoadingMore(false)
+        setPrefetching(false)
+        prefetchedSearchRef.current = null
         return false
       }
-      setLoading(true)
+      const nextFileLimit = Math.min(Math.max(fileLimit, INITIAL_SEARCH_FILE_LIMIT), MAX_SEARCH_FILE_LIMIT)
+      const baseKey = searchKey(q, fileTypes, scope, dateFilter, customFrom, customTo)
+      const prefetched = prefetchedSearchRef.current
+      if (mode === 'replace') prefetchedSearchRef.current = null
+      if (mode === 'more') {
+        setLoadingMore(true)
+      } else {
+        setLoading(true)
+      }
       try {
         const modifiedDateParams = buildModifiedDateParams(dateFilter, customFrom, customTo)
-        const response = await api.search.query({
-          query: q,
-          limit: 200,
-          file_types: fileTypes.length > 0 ? fileTypes : undefined,
-          search_scope: scope,
-          ...modifiedDateParams,
-        })
+        const response =
+          mode === 'more' && prefetched?.key === baseKey && prefetched.fileLimit === nextFileLimit
+            ? { data: prefetched.data }
+            : await api.search.query({
+                query: q,
+                limit: nextFileLimit * 4,
+                file_limit: nextFileLimit,
+                file_types: fileTypes.length > 0 ? fileTypes : undefined,
+                search_scope: scope,
+                ...modifiedDateParams,
+              })
         if (requestId !== searchRequestSeq.current) return false
-        setResults(response.data.results)
-        setExpandedContentFiles(new Set())
-        setSearched(true)
-        return response.data.results.length > 0
+        prefetchedSearchRef.current = null
+        const hasResults = applySearchResponse(response.data, nextFileLimit)
+        const preloadFileLimit = Math.min(nextFileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
+        if (response.data.has_more && preloadFileLimit > nextFileLimit) {
+          setPrefetching(true)
+          void api.search
+            .query({
+              query: q,
+              limit: preloadFileLimit * 4,
+              file_limit: preloadFileLimit,
+              file_types: fileTypes.length > 0 ? fileTypes : undefined,
+              search_scope: scope,
+              ...modifiedDateParams,
+            })
+            .then((prefetchResponse) => {
+              if (requestId !== searchRequestSeq.current) return
+              prefetchedSearchRef.current = {
+                key: baseKey,
+                fileLimit: preloadFileLimit,
+                data: prefetchResponse.data,
+              }
+            })
+            .catch(() => {
+              if (requestId === searchRequestSeq.current) prefetchedSearchRef.current = null
+            })
+            .finally(() => {
+              if (requestId === searchRequestSeq.current) setPrefetching(false)
+            })
+        } else {
+          setPrefetching(false)
+        }
+        return hasResults
       } catch {
         if (requestId !== searchRequestSeq.current) return false
         setResults([])
+        setSearchMeta({
+          fileCount: 0,
+          fileLimit: INITIAL_SEARCH_FILE_LIMIT,
+          hasMore: false,
+        })
+        prefetchedSearchRef.current = null
         snackbar.error('검색에 실패했습니다.')
         return false
       } finally {
-        if (requestId === searchRequestSeq.current) setLoading(false)
+        if (requestId === searchRequestSeq.current) {
+          setLoading(false)
+          setLoadingMore(false)
+        }
       }
     },
     [
@@ -420,6 +523,21 @@ export default function FileSearch({
     setExpandedContentFiles(new Set())
   }
 
+  const loadMoreFiles = () => {
+    if (!searchMeta.hasMore || loadingMore || loading) return
+    const nextLimit = Math.min(searchMeta.fileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
+    void doSearch(
+      query,
+      selectedFileTypes,
+      searchScope,
+      modifiedDateFilter,
+      customModifiedFrom,
+      customModifiedTo,
+      nextLimit,
+      'more',
+    )
+  }
+
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -451,12 +569,20 @@ export default function FileSearch({
                     onClick={() => {
                       if (debounceRef.current) clearTimeout(debounceRef.current)
                       searchRequestSeq.current += 1
-                      setQuery('')
-                      setResults([])
-                      setSearched(false)
-                      setExpandedContentFiles(new Set())
-                      setLoading(false)
-                    }}
+	                      setQuery('')
+	                      setResults([])
+	                      setSearchMeta({
+	                        fileCount: 0,
+	                        fileLimit: INITIAL_SEARCH_FILE_LIMIT,
+	                        hasMore: false,
+	                      })
+	                      setSearched(false)
+	                      setExpandedContentFiles(new Set())
+	                      setLoading(false)
+	                      setLoadingMore(false)
+	                      setPrefetching(false)
+	                      prefetchedSearchRef.current = null
+	                    }}
                   />
                 ) : null
               }
@@ -697,7 +823,8 @@ export default function FileSearch({
       {hasResults && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/80 p-3">
-            <Chip label={`${results.length}건`} tone="primary" as="span" icon="filter_list" />
+            <Chip label={`${searchMeta.fileCount}개 파일`} tone="primary" as="span" icon="folder_open" />
+            <Chip label={`${results.length}개 위치`} tone="neutral" as="span" icon="filter_list" />
             {selectedFileTypes.length > 0 && (
               <Chip label={`형식 ${selectedFileTypes.length}개 선택`} tone="secondary" as="span" icon="checklist" />
             )}
@@ -705,7 +832,8 @@ export default function FileSearch({
               <Chip label={`수정일 ${activeModifiedDateLabel}`} tone="secondary" as="span" icon="event" />
             )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              {grouped.length}개 파일에서 매칭됨
+              먼저 {searchMeta.fileLimit}개 파일까지만 가볍게 보여줍니다
+              {prefetching ? ' · 다음 결과 준비 중' : ''}
             </span>
             {contentFileKeys.length > 0 && (
               <div className="ml-auto flex gap-2 flex-wrap">
@@ -797,6 +925,19 @@ export default function FileSearch({
               )
             })}
           </div>
+          {searchMeta.hasMore && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="tonal"
+                leadingIcon="expand_more"
+                onClick={loadMoreFiles}
+                loading={loadingMore}
+                disabled={loadingMore || loading}
+              >
+                더 보기 · 최대 {MAX_SEARCH_FILE_LIMIT}개 파일
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

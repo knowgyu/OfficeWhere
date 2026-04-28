@@ -140,6 +140,8 @@ def search(
     file_types: Optional[Sequence[str]] = None,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
+    file_limit: Optional[int] = None,
+    per_file_limit: int = 3,
 ) -> list:
     if not query.strip():
         return []
@@ -150,6 +152,8 @@ def search(
         raw_query=query,
         modified_from=modified_from,
         modified_to=modified_to,
+        file_limit=file_limit,
+        per_file_limit=per_file_limit,
     )
 
 

@@ -329,6 +329,7 @@ export default function ConsistencyCheck({
   const [pendingScrollGroupId, setPendingScrollGroupId] = useState<string | null>(null)
   const [excelGridModal, setExcelGridModal] = useState<ExcelGridModalState | null>(null)
   const historyRunRef = useRef(0)
+  const tutorialAppliedGroupFiltersRef = useRef(false)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setFilesLoading(true)
@@ -390,10 +391,21 @@ export default function ConsistencyCheck({
     if (tutorialStep !== 'version-ppt' && tutorialStep !== 'version-excel') return
     const query = tutorialStep === 'version-ppt' ? EXAMPLE_PPT_QUERY : EXAMPLE_EXCEL_QUERY
     const fileType = tutorialStep === 'version-ppt' ? 'PowerPoint' : 'Excel'
+    tutorialAppliedGroupFiltersRef.current = true
     setGroupQueryDraft(query)
     setActiveGroupDetail(null)
     setHistoryState(null)
     void fetchGroups(0, 'version_family', query, fileType, 'recent')
+  }, [tutorialStep])
+
+  useEffect(() => {
+    if (tutorialStep !== 'done' && tutorialStep !== null) return
+    if (!tutorialAppliedGroupFiltersRef.current) return
+    tutorialAppliedGroupFiltersRef.current = false
+    setGroupQueryDraft('')
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, 'all', '', 'all', 'recent')
   }, [tutorialStep])
 
   useEffect(() => {
@@ -826,6 +838,13 @@ export default function ConsistencyCheck({
     void fetchGroups(0, groupFilter, '', groupFileType, groupSort)
   }
 
+  const resetGroupFilters = () => {
+    setGroupQueryDraft('')
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, 'all', '', 'all', 'recent')
+  }
+
   const scrollToManualPicker = () => {
     setManualOpen(true)
     window.requestAnimationFrame(() => {
@@ -860,6 +879,8 @@ export default function ConsistencyCheck({
     (groupFilter === 'all' ? 0 : 1) +
     (groupFileType === 'all' ? 0 : 1) +
     (groupSort === 'recent' ? 0 : 1)
+  const hasActiveGroupFilters =
+    Boolean(groupQuery) || groupFilter !== 'all' || groupFileType !== 'all' || groupSort !== 'recent'
   const tutorialOpenTargetType =
     tutorialStep === 'version-ppt'
       ? 'PowerPoint'
@@ -926,12 +947,20 @@ export default function ConsistencyCheck({
               >
                 필터{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
               </Button>
-              {groupQuery && (
-                <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
-                  지우기
-                </Button>
-              )}
-            </div>
+	              {groupQuery && (
+	                <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
+	                  지우기
+	                </Button>
+	              )}
+	              <Button
+	                variant="text"
+	                leadingIcon="restart_alt"
+	                onClick={resetGroupFilters}
+	                disabled={groupsLoading || !hasActiveGroupFilters}
+	              >
+	                필터 초기화
+	              </Button>
+	            </div>
             {groupFilterOpen && (
               <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 p-3 shadow-elev-1">
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -997,7 +1026,7 @@ export default function ConsistencyCheck({
                 직접 파일 고르기
               </Button>
             </div>
-            {(groupQuery || groupFilter !== 'all' || groupFileType !== 'all' || groupSort !== 'recent') && (
+	            {hasActiveGroupFilters && (
               <div className="flex gap-2 flex-wrap">
                 {groupQuery && <Chip label={`검색어 · ${groupQuery}`} tone="secondary" icon="search" as="span" />}
                 {groupFilter !== 'all' && <Chip label={`구분 · ${groupFilterLabel}`} tone="primary" as="span" />}

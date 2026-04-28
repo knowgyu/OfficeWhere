@@ -145,6 +145,20 @@ def test_search_matches_hangul_choseong(tmp_path):
     assert "**회의록**" in results[0]["snippet"]
 
 
+def test_search_matches_long_korean_substring_with_fast_path(tmp_path):
+    text_path = tmp_path / "project.txt"
+    text_path.write_text("프로젝트 상태 보고서", encoding="utf-8")
+
+    file_id = register_file(str(text_path), "project.txt", "Text", "", 0)
+    index_file(file_id, str(text_path))
+
+    results = search("프로젝")
+
+    assert len(results) == 1
+    assert results[0]["file_id"] == file_id
+    assert "**프로젝**" in results[0]["snippet"]
+
+
 def test_reindex_on_file_change(tmp_path):
     xlsx = str(tmp_path / "change.xlsx")
     _make_excel(xlsx, {"항목": ["원래값"], "값": ["1"]})
@@ -337,3 +351,37 @@ def test_search_api_filters_by_file_modified_date(tmp_path):
 
     matched_ids = {item.file_id for item in response.results}
     assert matched_ids == {new_id}
+
+
+def test_search_api_caps_results_by_file_first(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    for index in range(25):
+        file_id = register_file(str(tmp_path / f"note-{index}.txt"), f"note-{index}.txt", "Text", "", 0)
+        save_file_chunks(file_id, [{"location": "본문", "content": f"프로젝트 공통키워드 {index}"}])
+
+    response = search_files(SearchRequest(query="공통키워드", search_scope="content", file_limit=20))
+
+    assert response.file_limit == 20
+    assert response.file_count == 20
+    assert len({item.file_id for item in response.results}) == 20
+    assert response.has_more is True
+
+
+def test_search_api_allows_more_files_up_to_max(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    for index in range(55):
+        file_id = register_file(str(tmp_path / f"bulk-{index}.txt"), f"bulk-{index}.txt", "Text", "", 0)
+        save_file_chunks(file_id, [{"location": "본문", "content": f"프로젝트 대량검색 {index}"}])
+
+    response = search_files(SearchRequest(query="대량검색", search_scope="content", file_limit=80))
+
+    assert response.file_limit == 50
+    assert response.file_count == 50
+    assert len({item.file_id for item in response.results}) == 50
+    assert response.has_more is False

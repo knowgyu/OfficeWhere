@@ -11,7 +11,7 @@ from ..models.schemas import (
     ReindexResponse,
 )
 from ..core.indexer import search, reindex_all
-from ..database import get_all_files, get_setting, set_setting
+from ..database import get_setting, search_file_names, set_setting
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -30,6 +30,9 @@ FILE_TYPE_ALIASES = {
     "xlsx": "Excel",
     "xls": "Excel",
 }
+DEFAULT_SEARCH_FILE_LIMIT = 20
+MAX_SEARCH_FILE_LIMIT = 50
+CONTENT_MATCHES_PER_FILE = 3
 
 
 def normalize_file_type_filters(values: list[str]) -> list[str]:
@@ -80,34 +83,59 @@ def _file_matches_modified_range(
     return True
 
 
+def _bounded_file_limit(value: int) -> int:
+    if value < 1:
+        return DEFAULT_SEARCH_FILE_LIMIT
+    return min(value, MAX_SEARCH_FILE_LIMIT)
+
+
+def _unique_file_count(results: list[dict]) -> int:
+    return len({int(item["file_id"]) for item in results})
+
+
+def _cap_unique_files(results: list[dict], file_limit: int) -> tuple[list[dict], bool]:
+    capped: list[dict] = []
+    seen: set[int] = set()
+    has_more = False
+    for item in results:
+        file_id = int(item["file_id"])
+        if file_id not in seen and len(seen) >= file_limit:
+            has_more = True
+            continue
+        seen.add(file_id)
+        capped.append(item)
+    return capped, has_more
+
+
 def _filename_matches(
     query: str,
     file_types: list[str],
+    limit: int,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
 ) -> list[dict]:
-    normalized_query = query.strip().lower()
+    normalized_query = query.strip()
     if not normalized_query:
         return []
 
-    active_filter = set(file_types)
     matches: list[dict] = []
-    for file_info in get_all_files():
-        if active_filter and file_info["file_type"] not in active_filter:
-            continue
-        if not _file_matches_modified_range(file_info, modified_from, modified_to):
-            continue
-        if normalized_query in file_info["name"].lower():
-            matches.append(
-                {
-                    "file_id": file_info["id"],
-                    "name": file_info["name"],
-                    "path": file_info["path"],
-                    "file_type": file_info["file_type"],
-                    "location": "파일명",
-                    "snippet": file_info["name"],
-                }
-            )
+    for file_info in search_file_names(
+        normalized_query,
+        file_types=file_types,
+        modified_from=modified_from,
+        modified_to=modified_to,
+        limit=limit,
+    ):
+        matches.append(
+            {
+                "file_id": file_info["id"],
+                "name": file_info["name"],
+                "path": file_info["path"],
+                "file_type": file_info["file_type"],
+                "location": "파일명",
+                "snippet": file_info["name"],
+            }
+        )
     return matches
 
 
@@ -115,6 +143,7 @@ def _content_matches(
     query: str,
     limit: int,
     file_types: list[str],
+    file_limit: int,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
 ) -> list[dict]:
@@ -124,6 +153,8 @@ def _content_matches(
         file_types=file_types,
         modified_from=modified_from,
         modified_to=modified_to,
+        file_limit=file_limit,
+        per_file_limit=CONTENT_MATCHES_PER_FILE,
     )
 
 
@@ -132,26 +163,32 @@ def search_files(req: SearchRequest):
     file_types = normalize_file_type_filters(req.file_types)
     modified_from = _parse_modified_bound(req.modified_from, end_of_day=False)
     modified_to = _parse_modified_bound(req.modified_to, end_of_day=True)
+    file_limit = _bounded_file_limit(req.file_limit)
+    query_limit = min(max(req.limit, file_limit * CONTENT_MATCHES_PER_FILE), file_limit * (CONTENT_MATCHES_PER_FILE + 1))
+    fetch_file_limit = file_limit + 1
 
     if req.search_scope == "filename":
-        name_matches = _filename_matches(req.query, file_types, modified_from, modified_to)
-        results = name_matches[: req.limit]
+        name_matches = _filename_matches(req.query, file_types, fetch_file_limit, modified_from, modified_to)
+        results, has_more = _cap_unique_files(name_matches, file_limit)
     elif req.search_scope == "content":
         results = _content_matches(
             req.query,
-            limit=req.limit,
+            limit=query_limit,
             file_types=file_types,
+            file_limit=fetch_file_limit,
             modified_from=modified_from,
             modified_to=modified_to,
-        )[: req.limit]
+        )
+        results, has_more = _cap_unique_files(results, file_limit)
     else:
-        name_matches = _filename_matches(req.query, file_types, modified_from, modified_to)
+        name_matches = _filename_matches(req.query, file_types, fetch_file_limit, modified_from, modified_to)
         seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
         content_results = []
         for item in _content_matches(
             req.query,
-            limit=req.limit,
+            limit=query_limit,
             file_types=file_types,
+            file_limit=fetch_file_limit,
             modified_from=modified_from,
             modified_to=modified_to,
         ):
@@ -160,12 +197,15 @@ def search_files(req: SearchRequest):
                 continue
             seen.add(key)
             content_results.append(item)
-        results = (name_matches + content_results)[: req.limit]
+        results, has_more = _cap_unique_files(name_matches + content_results, file_limit)
 
     return SearchResponse(
         query=req.query,
         total=len(results),
         results=[SearchResult(**r) for r in results],
+        file_count=_unique_file_count(results),
+        file_limit=file_limit,
+        has_more=has_more and file_limit < MAX_SEARCH_FILE_LIMIT,
     )
 
 

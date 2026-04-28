@@ -296,6 +296,7 @@ class BulkRegisterResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     limit: int = 100
+    file_limit: int = 20
     file_types: List[str] = Field(default_factory=list)
     search_scope: Literal["filename_content", "filename", "content"] = "filename_content"
     modified_from: Optional[str] = None
@@ -315,6 +316,9 @@ class SearchResponse(BaseModel):
     query: str
     total: int
     results: List[SearchResult]
+    file_count: int = 0
+    file_limit: int = 20
+    has_more: bool = False
 
 
 class SchedulerSettings(BaseModel):

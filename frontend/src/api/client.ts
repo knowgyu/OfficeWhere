@@ -455,6 +455,7 @@ export type SearchScope = 'filename_content' | 'filename' | 'content'
 export interface SearchRequest {
   query: string
   limit?: number
+  file_limit?: number
   file_types?: string[]
   search_scope?: SearchScope
   modified_from?: string
@@ -465,6 +466,9 @@ export interface SearchResponse {
   query: string
   total: number
   results: SearchResult[]
+  file_count: number
+  file_limit: number
+  has_more: boolean
 }
 
 export interface SchedulerSettings {

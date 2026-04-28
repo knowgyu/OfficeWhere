@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .core.hangul_search import build_search_text, make_search_snippet
+from .core.hangul_search import build_search_text, build_trigram_search_text, make_search_snippet
 
 
 def _default_db_dir() -> Path:
@@ -22,8 +22,9 @@ def _default_db_dir() -> Path:
 DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
-SEARCH_INDEX_VERSION = "2"
+SEARCH_INDEX_VERSION = "3"
 _DB_WRITE_LOCK = threading.RLock()
+_FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
 
 
 def configure_database(data_dir: str | os.PathLike[str]):
@@ -44,6 +45,22 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA mmap_size=134217728")
     return conn
+
+
+def _supports_fts5_trigram() -> bool:
+    global _FTS5_TRIGRAM_SUPPORTED
+    if _FTS5_TRIGRAM_SUPPORTED is not None:
+        return _FTS5_TRIGRAM_SUPPORTED
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE VIRTUAL TABLE fts5_trigram_probe USING fts5(value, tokenize='trigram')")
+        _FTS5_TRIGRAM_SUPPORTED = True
+    except sqlite3.Error:
+        _FTS5_TRIGRAM_SUPPORTED = False
+    finally:
+        conn.close()
+    return _FTS5_TRIGRAM_SUPPORTED
 
 
 @contextmanager
@@ -79,14 +96,16 @@ def _ensure_file_chunks_columns(cursor: sqlite3.Cursor):
 
     if "search_text" not in existing_columns:
         cursor.execute("ALTER TABLE file_chunks ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
+    if "trigram_text" not in existing_columns:
+        cursor.execute("ALTER TABLE file_chunks ADD COLUMN trigram_text TEXT NOT NULL DEFAULT ''")
 
 
 def _refresh_search_text(cursor: sqlite3.Cursor):
     cursor.execute("SELECT id, content FROM file_chunks")
     rows = cursor.fetchall()
     cursor.executemany(
-        "UPDATE file_chunks SET search_text = ? WHERE id = ?",
-        [(build_search_text(row[1]), row[0]) for row in rows],
+        "UPDATE file_chunks SET search_text = ?, trigram_text = ? WHERE id = ?",
+        [(build_search_text(row[1]), build_trigram_search_text(row[1]), row[0]) for row in rows],
     )
 
 
@@ -156,12 +175,13 @@ def _build_document_fingerprint(
     }
 
 
-def _chunk_insert_values(chunks: Sequence[Dict[str, str]]) -> List[Tuple[str, str, str]]:
+def _chunk_insert_values(chunks: Sequence[Dict[str, str]]) -> List[Tuple[str, str, str, str]]:
     return [
         (
             chunk["location"],
             chunk["content"],
             build_search_text(chunk["content"]),
+            build_trigram_search_text(chunk["content"]),
         )
         for chunk in chunks
     ]
@@ -323,6 +343,33 @@ def init_db():
             """
         )
 
+        if _supports_fts5_trigram():
+            cursor.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS file_search_trigram USING fts5(
+                    trigram_text,
+                    content='file_chunks',
+                    content_rowid='id',
+                    tokenize='trigram'
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS chunks_ai_trigram AFTER INSERT ON file_chunks BEGIN
+                    INSERT INTO file_search_trigram(rowid, trigram_text) VALUES (new.id, new.trigram_text);
+                END
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS chunks_ad_trigram AFTER DELETE ON file_chunks BEGIN
+                    INSERT INTO file_search_trigram(file_search_trigram, rowid, trigram_text)
+                    VALUES ('delete', old.id, old.trigram_text);
+                END
+                """
+            )
+
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS document_fingerprints (
@@ -347,6 +394,10 @@ def init_db():
         if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
             _refresh_search_text(cursor)
             cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('rebuild')")
+            cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('optimize')")
+            if _supports_fts5_trigram():
+                cursor.execute("INSERT INTO file_search_trigram(file_search_trigram) VALUES ('rebuild')")
+                cursor.execute("INSERT INTO file_search_trigram(file_search_trigram) VALUES ('optimize')")
             _set_setting_with_cursor(cursor, "search_index_version", SEARCH_INDEX_VERSION)
 
         conn.commit()
@@ -457,8 +508,11 @@ def save_indexed_file(
 
         cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
         cursor.executemany(
-            "INSERT INTO file_chunks (file_id, location, content, search_text) VALUES (?, ?, ?, ?)",
-            [(file_id, location, content, search_text) for location, content, search_text in chunk_values],
+            "INSERT INTO file_chunks (file_id, location, content, search_text, trigram_text) VALUES (?, ?, ?, ?, ?)",
+            [
+                (file_id, location, content, search_text, trigram_text)
+                for location, content, search_text, trigram_text in chunk_values
+            ],
         )
         _upsert_document_fingerprint(
             cursor,
@@ -585,6 +639,53 @@ def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
     return _decode_parser_config(dict(row)) if row else None
 
 
+def search_file_names(
+    query: str,
+    *,
+    limit: int = 50,
+    file_types: Optional[Sequence[str]] = None,
+    modified_from: Optional[float] = None,
+    modified_to: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    normalized_query = query.strip()
+    if not normalized_query:
+        return []
+
+    clauses = ["name LIKE ?"]
+    params: List[Any] = [f"%{normalized_query}%"]
+    filters = [file_type for file_type in (file_types or []) if file_type]
+    if filters:
+        placeholders = ",".join("?" for _ in filters)
+        clauses.append(f"file_type IN ({placeholders})")
+        params.extend(filters)
+    if modified_from is not None or modified_to is not None:
+        clauses.append("file_mtime IS NOT NULL")
+    if modified_from is not None:
+        clauses.append("file_mtime >= ?")
+        params.append(modified_from)
+    if modified_to is not None:
+        clauses.append("file_mtime <= ?")
+        params.append(modified_to)
+    params.append(max(1, limit))
+
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT *
+        FROM registered_files
+        WHERE {' AND '.join(clauses)}
+        ORDER BY file_mtime DESC, created_at DESC, id DESC
+        LIMIT ?
+        """,
+        params,
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_decode_parser_config(dict(row)) for row in rows]
+
+
 def delete_file(file_id: int) -> bool:
     with _write_connection() as conn:
         cursor = conn.cursor()
@@ -606,8 +707,11 @@ def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
         source_mtime = row[0] if row else None
         cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
         cursor.executemany(
-            "INSERT INTO file_chunks (file_id, location, content, search_text) VALUES (?, ?, ?, ?)",
-            [(file_id, location, content, search_text) for location, content, search_text in chunk_values],
+            "INSERT INTO file_chunks (file_id, location, content, search_text, trigram_text) VALUES (?, ?, ?, ?, ?)",
+            [
+                (file_id, location, content, search_text, trigram_text)
+                for location, content, search_text, trigram_text in chunk_values
+            ],
         )
         _upsert_document_fingerprint(cursor, file_id, chunks, source_mtime=source_mtime)
         conn.commit()
@@ -709,6 +813,28 @@ def ensure_file_fingerprints(file_ids: Sequence[int]) -> Dict[int, Dict[str, Any
     return {int(row["file_id"]): dict(row) for row in rows}
 
 
+def _search_terms_for_table(raw_query: str) -> List[str]:
+    cleaned = re.sub(r'["\*\(\)\[\]\{\}\^~\?\\]', " ", raw_query)
+    return [term.strip().lower() for term in cleaned.split() if term.strip()]
+
+
+def _search_table_for_query(raw_query: str) -> str:
+    terms = _search_terms_for_table(raw_query)
+    if _supports_fts5_trigram() and terms and all(len(term) >= 3 for term in terms):
+        return "file_search_trigram"
+    return "file_search_ko"
+
+
+def _search_row_dicts(rows: Sequence[sqlite3.Row], query_for_snippet: str) -> List[Dict[str, Any]]:
+    return [
+        {
+            **{key: row[key] for key in ("file_id", "name", "path", "file_type", "location")},
+            "snippet": make_search_snippet(row["content"], query_for_snippet),
+        }
+        for row in rows
+    ]
+
+
 def search_chunks(
     fts_query: str,
     limit: int = 100,
@@ -716,6 +842,8 @@ def search_chunks(
     raw_query: Optional[str] = None,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
+    file_limit: Optional[int] = None,
+    per_file_limit: int = 3,
 ) -> List[Dict[str, Any]]:
     conn = _connect()
     conn.row_factory = sqlite3.Row
@@ -735,29 +863,60 @@ def search_chunks(
     if modified_to is not None:
         filter_clause += " AND rf.file_mtime <= ?"
         params.append(modified_to)
-    params.append(limit)
+    search_table = _search_table_for_query(raw_query or fts_query)
+    if file_limit is None:
+        params.append(limit)
+        cursor.execute(
+            f"""
+            SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content
+            FROM {search_table}
+            JOIN file_chunks fc ON fc.id = {search_table}.rowid
+            JOIN registered_files rf ON rf.id = fc.file_id
+            WHERE {search_table} MATCH ?{filter_clause}
+            ORDER BY rank
+            LIMIT ?
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return _search_row_dicts(rows, raw_query or fts_query)
+
+    safe_file_limit = max(1, file_limit)
+    safe_per_file_limit = max(1, per_file_limit)
     cursor.execute(
         f"""
-        SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content
-        FROM file_search_ko
-        JOIN file_chunks fc ON fc.id = file_search_ko.rowid
+        WITH matched_files AS (
+            SELECT fc.file_id AS file_id, MIN(rank) AS best_rank
+            FROM {search_table}
+            JOIN file_chunks fc ON fc.id = {search_table}.rowid
+            JOIN registered_files rf ON rf.id = fc.file_id
+            WHERE {search_table} MATCH ?{filter_clause}
+            GROUP BY fc.file_id
+            ORDER BY best_rank
+            LIMIT ?
+        )
+        SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content,
+               matched_files.best_rank, rank AS chunk_rank
+        FROM matched_files
+        JOIN file_chunks fc ON fc.file_id = matched_files.file_id
+        JOIN {search_table} ON {search_table}.rowid = fc.id
         JOIN registered_files rf ON rf.id = fc.file_id
-        WHERE file_search_ko MATCH ?{filter_clause}
-        ORDER BY rank
-        LIMIT ?
+        WHERE {search_table} MATCH ?
+        ORDER BY matched_files.best_rank, matched_files.file_id, chunk_rank
         """,
-        params,
+        [*params, safe_file_limit, fts_query],
     )
-    rows = cursor.fetchall()
+    rows = []
+    counts_by_file: Dict[int, int] = {}
+    for row in cursor.fetchall():
+        file_id = int(row["file_id"])
+        if counts_by_file.get(file_id, 0) >= safe_per_file_limit:
+            continue
+        counts_by_file[file_id] = counts_by_file.get(file_id, 0) + 1
+        rows.append(row)
     conn.close()
-    query_for_snippet = raw_query or fts_query
-    return [
-        {
-            **{key: row[key] for key in ("file_id", "name", "path", "file_type", "location")},
-            "snippet": make_search_snippet(row["content"], query_for_snippet),
-        }
-        for row in rows
-    ]
+    return _search_row_dicts(rows, raw_query or fts_query)
 
 
 def get_setting(key: str, default: str = "") -> str:
