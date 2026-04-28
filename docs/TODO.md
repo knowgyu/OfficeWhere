@@ -1,6 +1,6 @@
 # OfficeWhere TODO
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 This file tracks follow-up work that is not part of the formal release checklist. Keep `docs/release-test-checklist.md` for release validation steps.
 
@@ -39,8 +39,14 @@ This file tracks follow-up work that is not part of the formal release checklist
   - If repeated comparisons accumulate too much app-data, add a comparison-cache retention policy by age/count.
   - Choseong-only search such as `ㅎㅇㄹ` is intentionally no longer guaranteed; keep 1-2 character Korean substring search working.
 
-- [ ] Decide whether `docs/content-fingerprint-roadmap.md` is still current after recent version-management changes.
-  - Keep file-level fingerprints as the default unless real usage shows chunk-level fingerprints are needed.
+- [ ] Re-test large-library indexing with both `index-performance.log` and `parsing-performance.log`.
+  - Compare 24-worker default against lower values on the same local folder.
+  - Mark known heavy Excel/PPT files and check whether parser tails or DB flush tails dominate.
+  - Use `docs/performance-experiment-log.md` as the narrative template for future observations.
+
+- [ ] Revisit simple scheduling only if logs show a likely 10%+ wall-clock gain.
+  - Candidate: Excel-first ordering with about half the worker slots reserved for Excel-heavy runs.
+  - Avoid complex cost prediction until repeated traces justify it.
 
 - [ ] Consider adding a lightweight dependency/security audit pass before release.
   - `frontend/package-lock.json` contains transitive deprecation notices from the Electron/Vite ecosystem; evaluate only if they affect release risk.

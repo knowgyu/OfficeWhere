@@ -6,6 +6,8 @@ OfficeWhere search and version management are user-facing review surfaces. They 
 
 This file is the durable decision record for the search/version-management UX choices made after the performance pass. Local `.omx/plans/*` files can be regenerated, so product-facing behavior decisions should be kept here before release.
 
+Related performance narrative: `docs/performance-experiment-log.md`. Backend indexing/search tradeoffs: `docs/indexing-performance-fast-mode.md`.
+
 ## Decisions
 
 - Search result cards already show the file name in the card header. Do not repeat a filename-only match as another row under the same card.
