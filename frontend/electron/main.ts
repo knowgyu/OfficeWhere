@@ -53,14 +53,17 @@ type AppResetState = {
 }
 
 let mainWindow: BrowserWindow | null = null
+let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let backendProcess: ChildProcess | null = null
 const expectedBackendExits = new WeakSet<ChildProcess>()
+const backendLogStreams = new WeakMap<ChildProcess, fs.WriteStream>()
 let backendBaseUrl = ''
 let backendLogPath = ''
 let isQuitting = false
 let appDataCleanupInProgress = false
 let closePromptInProgress = false
+let appShutdownInProgress = false
 
 app.setName('OfficeWhere')
 
@@ -75,12 +78,12 @@ if (!hasSingleInstanceLock) {
   app.on('before-quit', () => {
     isQuitting = true
     stopBackend()
-    tray?.destroy()
-    tray = null
+    destroyTray()
+    closeSplashWindow()
   })
 
   app.on('window-all-closed', () => {
-    if (!appDataCleanupInProgress) app.quit()
+    if (!appDataCleanupInProgress && !appShutdownInProgress) requestAppQuit()
   })
 
   app.on('activate', () => {
@@ -90,14 +93,16 @@ if (!hasSingleInstanceLock) {
   app.whenReady()
     .then(startApp)
     .catch((error: unknown) => {
+      closeSplashWindow()
       showFatalError('앱 시작 실패', error)
-      app.quit()
+      requestAppQuit(1)
     })
 }
 
 async function startApp() {
   app.setAppLogsPath(path.join(app.getPath('userData'), 'logs'))
   registerIpcHandlers()
+  createSplashWindow()
   ensureTray()
   await startBackendWithRetry()
   await createMainWindow()
@@ -136,7 +141,10 @@ async function createMainWindow() {
 
   mainWindow.removeMenu()
   mainWindow.setMenuBarVisibility(false)
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.once('ready-to-show', () => {
+    closeSplashWindow()
+    mainWindow?.show()
+  })
   mainWindow.on('close', (event) => {
     if (isQuitting || appDataCleanupInProgress) return
     event.preventDefault()
@@ -165,6 +173,192 @@ async function createMainWindow() {
   await mainWindow.loadURL('http://localhost:15173')
 }
 
+function createSplashWindow() {
+  if (splashWindow || isQuitting) return
+
+  splashWindow = new BrowserWindow({
+    width: 360,
+    height: 260,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    show: false,
+    center: true,
+    backgroundColor: '#f8fafc',
+    icon: getAppIconPath(),
+    autoHideMenuBar: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+
+  splashWindow.once('ready-to-show', () => splashWindow?.show())
+  splashWindow.on('closed', () => {
+    splashWindow = null
+  })
+  void splashWindow.loadURL(createSplashHtml()).catch(() => undefined)
+}
+
+function closeSplashWindow() {
+  if (!splashWindow || splashWindow.isDestroyed()) {
+    splashWindow = null
+    return
+  }
+  splashWindow.destroy()
+  splashWindow = null
+}
+
+function createSplashHtml(): string {
+  const logo = getLogoDataUrl()
+  const logoMarkup = logo
+    ? `<img class="logo" src="${escapeHtml(logo)}" alt="OfficeWhere" />`
+    : '<div class="logo-fallback" aria-hidden="true">OW</div>'
+  const html = `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      color: #0f172a;
+      background:
+        radial-gradient(circle at 32% 18%, rgba(59, 130, 246, 0.18), transparent 28%),
+        radial-gradient(circle at 78% 78%, rgba(37, 99, 235, 0.12), transparent 34%),
+        linear-gradient(145deg, #ffffff 0%, #f8fafc 48%, #eef4ff 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-app-region: drag;
+    }
+    .card {
+      width: 292px;
+      min-height: 196px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.26);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow:
+        0 24px 60px rgba(30, 41, 59, 0.14),
+        0 1px 0 rgba(255, 255, 255, 0.9) inset;
+      backdrop-filter: blur(18px);
+    }
+    .logo-wrap {
+      width: 76px;
+      height: 76px;
+      position: relative;
+      display: grid;
+      place-items: center;
+    }
+    .logo-wrap::before {
+      content: "";
+      position: absolute;
+      inset: 2px;
+      border-radius: 22px;
+      border: 2px solid rgba(59, 130, 246, 0.18);
+      border-top-color: rgba(37, 99, 235, 0.9);
+      animation: spin 1.35s linear infinite;
+    }
+    .logo, .logo-fallback {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      box-shadow: 0 12px 28px rgba(37, 99, 235, 0.2);
+    }
+    .logo {
+      object-fit: contain;
+      background: #fff;
+      padding: 6px;
+    }
+    .logo-fallback {
+      display: grid;
+      place-items: center;
+      color: #ffffff;
+      font-size: 17px;
+      font-weight: 750;
+      letter-spacing: -0.04em;
+      background: linear-gradient(135deg, #2563eb, #0f172a);
+    }
+    .title {
+      margin: 2px 0 0;
+      font-size: 18px;
+      font-weight: 760;
+      letter-spacing: -0.04em;
+    }
+    .subtitle {
+      margin: 0;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 560;
+      letter-spacing: -0.01em;
+    }
+    .dots {
+      display: flex;
+      gap: 5px;
+      margin-top: 2px;
+    }
+    .dots span {
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: #2563eb;
+      animation: pulse 1.2s ease-in-out infinite;
+      opacity: 0.34;
+    }
+    .dots span:nth-child(2) { animation-delay: 0.16s; }
+    .dots span:nth-child(3) { animation-delay: 0.32s; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.32; }
+      40% { transform: translateY(-4px); opacity: 0.9; }
+    }
+  </style>
+</head>
+<body>
+  <main class="card" aria-label="OfficeWhere 시작 중">
+    <div class="logo-wrap">${logoMarkup}</div>
+    <h1 class="title">OfficeWhere</h1>
+    <p class="subtitle">문서 검색 준비 중</p>
+    <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+  </main>
+</body>
+</html>`
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+}
+
+function getLogoDataUrl(): string {
+  const logoPath = getAppIconPath()
+  if (!fs.existsSync(logoPath)) return ''
+  try {
+    const ext = path.extname(logoPath).toLowerCase()
+    const mime = ext === '.ico' ? 'image/x-icon' : 'image/png'
+    return `data:${mime};base64,${fs.readFileSync(logoPath).toString('base64')}`
+  } catch {
+    return ''
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 function getRendererIndexPath(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'renderer', 'index.html')
@@ -173,6 +367,15 @@ function getRendererIndexPath(): string {
 }
 
 function getAppIconPath(): string {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, 'renderer', 'officewhere-logo.png')]
+    : [
+        path.join(app.getAppPath(), 'dist', 'officewhere-logo.png'),
+        path.join(app.getAppPath(), 'public', 'officewhere-logo.png'),
+      ]
+  const found = candidates.find((candidate) => fs.existsSync(candidate))
+  if (found) return found
+
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'renderer', 'officewhere-logo.png')
   }
@@ -185,6 +388,8 @@ function getTrayIconPath(): string {
     ? path.join(process.resourcesPath, 'renderer')
     : path.join(app.getAppPath(), 'dist')
   const iconPath = path.join(basePath, iconName)
+  const publicIconPath = path.join(app.getAppPath(), 'public', iconName)
+  if (fs.existsSync(publicIconPath)) return publicIconPath
   return fs.existsSync(iconPath) ? iconPath : getAppIconPath()
 }
 
@@ -295,10 +500,7 @@ function ensureTray() {
       { type: 'separator' },
       {
         label: '종료',
-        click: () => {
-          isQuitting = true
-          app.quit()
-        },
+        click: () => requestAppQuit(),
       },
     ])
   )
@@ -307,6 +509,11 @@ function ensureTray() {
 
 function showMainWindow() {
   if (isQuitting || appDataCleanupInProgress) return
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.show()
+    splashWindow.focus()
+    return
+  }
   if (!mainWindow || mainWindow.isDestroyed()) {
     void createMainWindow()
     return
@@ -325,8 +532,7 @@ async function handleMainWindowClose() {
     return
   }
   if (behavior === 'quit') {
-    isQuitting = true
-    app.quit()
+    requestAppQuit()
     return
   }
 
@@ -351,12 +557,48 @@ async function handleMainWindowClose() {
     }
     if (result.response === 1) {
       if (result.checkboxChecked) writeSettings({ closeBehavior: 'quit' })
-      isQuitting = true
-      app.quit()
+      requestAppQuit()
     }
   } finally {
     closePromptInProgress = false
   }
+}
+
+function destroyTray() {
+  tray?.destroy()
+  tray = null
+}
+
+function destroyAppWindows() {
+  closeSplashWindow()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.destroy()
+  }
+  mainWindow = null
+}
+
+function requestAppQuit(exitCode = 0) {
+  void shutdownApp(exitCode)
+}
+
+async function shutdownApp(exitCode = 0) {
+  if (appShutdownInProgress) return
+
+  appShutdownInProgress = true
+  isQuitting = true
+  closePromptInProgress = false
+  destroyTray()
+  destroyAppWindows()
+
+  const stopped = await stopBackendAndWait(2_500).catch(() => false)
+  if (!stopped && backendProcess) {
+    await forceKillProcessTree(backendProcess).catch(() => undefined)
+    await waitForProcessExit(backendProcess, 1_000).catch(() => false)
+  }
+
+  destroyTray()
+  destroyAppWindows()
+  app.exit(exitCode)
 }
 
 async function startBackendWithRetry() {
@@ -419,6 +661,7 @@ async function startBackend(port: number) {
 
   child.stdout?.pipe(logStream, { end: false })
   child.stderr?.pipe(logStream, { end: false })
+  backendLogStreams.set(child, logStream)
 
   child.once('error', (error) => {
     spawnError = error
@@ -427,8 +670,11 @@ async function startBackend(port: number) {
 
   child.once('exit', (code, signal) => {
     exited = true
+    child.stdout?.unpipe(logStream)
+    child.stderr?.unpipe(logStream)
     logStream.write(`[officewhere] backend exited code=${code ?? ''} signal=${signal ?? ''}\n`)
     logStream.end()
+    backendLogStreams.delete(child)
 
     const expectedExit = isQuitting || expectedBackendExits.has(child)
     if (backendProcess === child) {
@@ -440,7 +686,7 @@ async function startBackend(port: number) {
         'OfficeWhere backend 종료',
         `Python backend가 예기치 않게 종료되었습니다.\n\n로그: ${backendLogPath}`
       )
-      app.quit()
+      requestAppQuit(1)
     }
   })
 
@@ -487,6 +733,9 @@ function getPythonExecutable(repoRoot: string): string {
 function stopBackend() {
   if (!backendProcess) return
   expectedBackendExits.add(backendProcess)
+  const logStream = backendLogStreams.get(backendProcess)
+  backendProcess.stdout?.unpipe(logStream)
+  backendProcess.stderr?.unpipe(logStream)
   if (!backendProcess.killed) backendProcess.kill()
 }
 
@@ -505,6 +754,7 @@ async function stopBackendAndWait(timeoutMs = 5_000): Promise<boolean> {
 
 function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   if (backendProcess !== child) return Promise.resolve(true)
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true)
 
   return new Promise((resolve) => {
     let settled = false
@@ -812,8 +1062,7 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
   appDataCleanupInProgress = true
   if (shouldExitAfterClear) {
     isQuitting = true
-    tray?.destroy()
-    tray = null
+    destroyTray()
   }
   try {
     result.backendStopped = await stopBackendAndWait()
@@ -844,10 +1093,7 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
 
     if (shouldExitAfterClear) {
       result.exitScheduled = true
-      setTimeout(() => {
-        app.quit()
-        setTimeout(() => app.exit(0), 1_000)
-      }, 250)
+      setTimeout(() => requestAppQuit(), 250)
     }
 
     return result
