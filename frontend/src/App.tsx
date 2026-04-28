@@ -91,26 +91,36 @@ const TUTORIAL_TARGET_TAB: Record<TutorialStep, Tab | null> = {
   'search-review': 'search',
   'version-ppt': 'check',
   'version-ppt-review': 'check',
+  'version-ppt-detail': 'check',
+  'version-excel-search': 'check',
   'version-excel': 'check',
   'version-excel-review': 'check',
   'excel-table': 'check',
-  'excel-table-review': 'check',
+  'excel-table-cell': 'check',
+  'excel-table-history': 'check',
   done: null,
 }
 
 const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
   'search-review': 'version-ppt',
-  'version-ppt-review': 'version-excel',
+  'version-ppt-detail': 'version-excel-search',
   'version-excel-review': 'excel-table',
-  'excel-table-review': 'done',
+  'excel-table-history': 'done',
 }
 
 const TUTORIAL_REVIEW_DELAY_MS: Partial<Record<TutorialStep, number>> = {
   'search-review': 2520,
-  'version-ppt-review': 3500,
+  'version-ppt-detail': 3300,
   'version-excel-review': 3640,
-  'excel-table-review': 3920,
+  'excel-table-history': 3600,
 }
+
+const TUTORIAL_GENTLE_TARGET_STEPS = new Set<TutorialStep>([
+  'version-excel',
+  'excel-table',
+  'excel-table-cell',
+  'excel-table-history',
+])
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
@@ -121,8 +131,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'document-refresh': {
     eyebrow: 'Step 2 · 문서 준비',
-    title: '문서를 읽어옵니다',
-    description: '새로고침을 누르면 예제 문서를 검색할 수 있게 준비합니다.',
+    title: '문서 새로고침을 눌러보세요',
+    description: '파일이 바뀌었을 때 이 버튼으로 다시 색인합니다.',
     icon: 'sync',
   },
   search: {
@@ -151,9 +161,21 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'version-ppt-review': {
     eyebrow: 'PPT 변경',
-    title: '바뀐 슬라이드가 잡혔어요',
-    description: '빛나는 카드가 실제 변경 증거입니다.',
-    icon: 'fact_check',
+    title: '자세히 보기를 눌러보세요',
+    description: '접힌 슬라이드를 열면 실제 변경 내용을 볼 수 있습니다.',
+    icon: 'unfold_more',
+  },
+  'version-ppt-detail': {
+    eyebrow: 'PPT 변경',
+    title: '실제 변경 내용입니다',
+    description: '슬라이드별로 바뀐 텍스트만 펼쳐서 확인합니다.',
+    icon: 'visibility',
+  },
+  'version-excel-search': {
+    eyebrow: 'Step 5 · Excel 찾기',
+    title: '사업예산을 찾아보세요',
+    description: '검색어는 넣어뒀어요. 찾기 버튼을 누르면 됩니다.',
+    icon: 'search',
   },
   'version-excel': {
     eyebrow: 'Step 5 · Excel 버전',
@@ -169,20 +191,26 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'excel-table': {
     eyebrow: 'Step 6 · 셀 단위',
-    title: '표로 더 자세히 봅니다',
-    description: '추가·삭제·수정된 셀을 색으로 확인합니다.',
+    title: '표로 보기를 눌러보세요',
+    description: '셀 단위로 바뀐 지점을 색으로 확인합니다.',
     icon: 'table_chart',
   },
-  'excel-table-review': {
+  'excel-table-cell': {
     eyebrow: '셀 변경',
-    title: '색이 들어간 셀을 보세요',
-    description: '초록 추가, 빨강 삭제, 노랑 수정입니다.',
+    title: 'D7 셀을 눌러보세요',
+    description: '색이 있는 셀을 누르면 아래에 변경 이력이 열립니다.',
     icon: 'table_view',
+  },
+  'excel-table-history': {
+    eyebrow: '셀 변경 이력',
+    title: '이 셀이 어떻게 바뀌었는지 확인하세요',
+    description: '수정 전과 수정 후 값이 아래에 따로 정리됩니다.',
+    icon: 'history',
   },
   done: {
     eyebrow: '완료',
-    title: '예제 둘러보기가 끝났습니다',
-    description: '이제 내 문서 폴더로 같은 흐름을 사용해 보세요.',
+    title: '둘러보기가 끝났습니다',
+    description: '이제 내 문서 폴더에서도 같은 흐름으로 확인해 보세요.',
     icon: 'task_alt',
   },
 }
@@ -408,6 +436,10 @@ export default function App() {
 
   useEffect(() => {
     if (!tutorialStep) return undefined
+    if (tutorialStep === 'done') {
+      const timer = window.setTimeout(() => setTutorialStep(null), 3000)
+      return () => window.clearTimeout(timer)
+    }
     const nextStep = TUTORIAL_REVIEW_ADVANCE[tutorialStep]
     if (!nextStep) return undefined
 
@@ -587,7 +619,8 @@ function GuidedTourHud({
       })
 
       const key = `${step}:${activeTab}:${target.textContent?.trim() ?? target.tagName}`
-      if (shouldScroll && activeTab === targetTab && scrolledKeyRef.current !== key) {
+      const shouldGentlyPointOnly = TUTORIAL_GENTLE_TARGET_STEPS.has(step)
+      if (shouldScroll && !shouldGentlyPointOnly && activeTab === targetTab && scrolledKeyRef.current !== key) {
         scrolledKeyRef.current = key
         target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
         window.clearTimeout(settleRead)

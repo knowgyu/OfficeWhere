@@ -466,7 +466,7 @@ export default function FileManager({
     setFolderPathDraft('')
     if (tutorialStep === 'example-folder') {
       onTutorialStep?.('document-refresh')
-      snackbar.success('예제 폴더를 추가했습니다. 이제 문서 새로고침을 눌러주세요.')
+      snackbar.success('예제 폴더를 추가했습니다. 문서 새로고침을 한 번 눌러 확인해 보세요.')
       return
     }
     await startRescan('added', 'fast')
@@ -1002,7 +1002,7 @@ export default function FileManager({
                 disabled={settingsLoading || rescanning || librarySettings.watched_folders.length === 0}
                 className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
                 data-tour-target={tutorialStep === 'document-refresh' ? 'document-refresh' : undefined}
-                title="CPU/RAM을 더 사용해 빠르게 색인합니다."
+                title="새 파일이나 수정된 파일을 다시 색인합니다."
               >
                 문서 새로고침
               </Button>

@@ -388,14 +388,24 @@ export default function ConsistencyCheck({
   }, [])
 
   useEffect(() => {
-    if (tutorialStep !== 'version-ppt' && tutorialStep !== 'version-excel') return
-    const query = tutorialStep === 'version-ppt' ? EXAMPLE_PPT_QUERY : EXAMPLE_EXCEL_QUERY
-    const fileType = tutorialStep === 'version-ppt' ? 'PowerPoint' : 'Excel'
+    if (tutorialStep !== 'version-ppt') return
     tutorialAppliedGroupFiltersRef.current = true
-    setGroupQueryDraft(query)
+    setGroupQueryDraft(EXAMPLE_PPT_QUERY)
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, 'version_family', query, fileType, 'recent', false)
+    void fetchGroups(0, 'version_family', EXAMPLE_PPT_QUERY, 'PowerPoint', 'recent', false)
+  }, [tutorialStep])
+
+  useEffect(() => {
+    if (tutorialStep !== 'version-excel-search') return
+    tutorialAppliedGroupFiltersRef.current = true
+    setGroupQueryDraft(EXAMPLE_EXCEL_QUERY)
+    setGroupFilter('version_family')
+    setGroupFileType('Excel')
+    setGroupSort('recent')
+    setShowDuplicateGroups(false)
+    setActiveGroupDetail(null)
+    setHistoryState(null)
   }, [tutorialStep])
 
   useEffect(() => {
@@ -417,29 +427,6 @@ export default function ConsistencyCheck({
       setPendingScrollGroupId(null)
     })
   }, [activeGroupDetail?.id, pendingScrollGroupId])
-
-  useEffect(() => {
-    if (
-      tutorialStep !== 'version-ppt-review' &&
-      tutorialStep !== 'version-excel-review' &&
-      tutorialStep !== 'excel-table-review'
-    ) {
-      return undefined
-    }
-
-    const timers = [180, 760, 1500].map((delay, index) =>
-      window.setTimeout(() => {
-        const target = document.querySelector<HTMLElement>(`[data-tour-target="${tutorialStep}"]`)
-        target?.scrollIntoView({
-          behavior: 'smooth',
-          block: index === 0 ? 'center' : 'nearest',
-          inline: 'center',
-        })
-      }, delay),
-    )
-
-    return () => timers.forEach((timer) => window.clearTimeout(timer))
-  }, [tutorialStep])
 
   const knownFilesById = useMemo(() => {
     const byId = new Map<number, FileInfo>()
@@ -837,7 +824,7 @@ export default function ConsistencyCheck({
 
   const openGuidedExcelGrid = async (detail: LibraryGroupDetail, currentHistoryState: HistoryDiffState | null) => {
     const opened = await openExcelGrid(detail, currentHistoryState)
-    if (opened && tutorialStep === 'excel-table') onTutorialStep?.('excel-table-review')
+    if (opened && tutorialStep === 'excel-table') onTutorialStep?.('excel-table-cell')
   }
 
   const openFile = async (file: FileInfo) => {
@@ -894,7 +881,13 @@ export default function ConsistencyCheck({
     const nextQuery = groupQueryDraft.trim()
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, groupFilter, nextQuery, groupFileType, groupSort, showDuplicateGroups)
+    const nextFilter = tutorialStep === 'version-excel-search' ? 'version_family' : groupFilter
+    const nextFileType = tutorialStep === 'version-excel-search' ? 'Excel' : groupFileType
+    const nextSort = tutorialStep === 'version-excel-search' ? 'recent' : groupSort
+    const nextShowDuplicates = tutorialStep === 'version-excel-search' ? false : showDuplicateGroups
+    void fetchGroups(0, nextFilter, nextQuery, nextFileType, nextSort, nextShowDuplicates).then(() => {
+      if (tutorialStep === 'version-excel-search') onTutorialStep?.('version-excel')
+    })
   }
 
   const clearGroupSearch = () => {
@@ -1007,7 +1000,14 @@ export default function ConsistencyCheck({
                   helper="예: 사업예산, 주간보고, 프로젝트명, 부서명"
                 />
               </div>
-              <Button variant="filled" leadingIcon="search" onClick={handleGroupSearch} disabled={groupsLoading}>
+              <Button
+                variant="filled"
+                leadingIcon="search"
+                onClick={handleGroupSearch}
+                disabled={groupsLoading}
+                className={tutorialStep === 'version-excel-search' ? 'attention-pulse tour-target' : ''}
+                data-tour-target={tutorialStep === 'version-excel-search' ? 'version-excel-search' : undefined}
+              >
                 찾기
               </Button>
               <Button
@@ -1144,7 +1144,8 @@ export default function ConsistencyCheck({
                 const highlightExcelGrid = tutorialStep === 'excel-table' && activeGroupDetail?.id === group.id
                 const highlightReview =
                   activeGroupDetail?.id === group.id &&
-                  ((tutorialStep === 'version-ppt-review' && normalizedType === 'PowerPoint') ||
+                  (((tutorialStep === 'version-ppt-review' || tutorialStep === 'version-ppt-detail') &&
+                    normalizedType === 'PowerPoint') ||
                     (tutorialStep === 'version-excel-review' && normalizedType === 'Excel'))
                 return (
                   <GroupCard
@@ -1172,6 +1173,8 @@ export default function ConsistencyCheck({
                     excelGridTourTarget={highlightExcelGrid ? (tutorialStep ?? undefined) : undefined}
                     highlightReview={highlightReview}
                     reviewTourTarget={highlightReview ? (tutorialStep ?? undefined) : undefined}
+                    tutorialStep={tutorialStep}
+                    onTutorialStep={onTutorialStep}
                   />
                 )
               })}
@@ -1371,7 +1374,9 @@ export default function ConsistencyCheck({
         <ExcelDiffGridModal
           modal={excelGridModal}
           onClose={() => setExcelGridModal(null)}
-          highlightReview={tutorialStep === 'excel-table-review'}
+          highlightReview={tutorialStep === 'excel-table-cell' || tutorialStep === 'excel-table-history'}
+          tutorialStep={tutorialStep}
+          onTutorialStep={onTutorialStep}
         />
       )}
     </div>
@@ -1398,6 +1403,8 @@ function GroupCard({
   excelGridTourTarget,
   highlightReview = false,
   reviewTourTarget,
+  tutorialStep,
+  onTutorialStep,
 }: {
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
@@ -1418,6 +1425,8 @@ function GroupCard({
   excelGridTourTarget?: TutorialStep
   highlightReview?: boolean
   reviewTourTarget?: TutorialStep
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
 
@@ -1518,6 +1527,8 @@ function GroupCard({
           excelGridTourTarget={excelGridTourTarget}
           highlightReview={highlightReview}
           reviewTourTarget={reviewTourTarget}
+          tutorialStep={tutorialStep}
+          onTutorialStep={onTutorialStep}
         />
       )}
     </div>
@@ -1539,6 +1550,8 @@ function GroupTimeline({
   excelGridTourTarget,
   highlightReview = false,
   reviewTourTarget,
+  tutorialStep,
+  onTutorialStep,
 }: {
   detail: LibraryGroupDetail
   historyState: HistoryDiffState | null
@@ -1554,6 +1567,8 @@ function GroupTimeline({
   excelGridTourTarget?: TutorialStep
   highlightReview?: boolean
   reviewTourTarget?: TutorialStep
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const [showAllVersions, setShowAllVersions] = useState(false)
   useEffect(() => {
@@ -1577,6 +1592,8 @@ function GroupTimeline({
         ? '선택한 두 파일 계산 중…'
         : '선택한 두 파일 계산 완료'
     : '변경점 계산 준비 중'
+  const shouldMarkReviewContainer =
+    highlightReview && reviewTourTarget !== 'version-ppt-review' && reviewTourTarget !== 'version-ppt-detail'
 
   return (
     <div className="border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 space-y-4">
@@ -1619,9 +1636,9 @@ function GroupTimeline({
 
       <div
         className={`rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4 ${
-          highlightReview ? 'tour-target tour-review-target tour-version-review-target' : ''
+          shouldMarkReviewContainer ? 'tour-target tour-review-target tour-version-review-target' : ''
         }`}
-        data-tour-target={highlightReview ? reviewTourTarget : undefined}
+        data-tour-target={shouldMarkReviewContainer ? reviewTourTarget : undefined}
       >
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
@@ -1629,7 +1646,7 @@ function GroupTimeline({
             <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               1번 파일에서 2번 파일로 바뀐 내용만 보여줍니다.
             </p>
-            {highlightReview && (
+            {shouldMarkReviewContainer && (
               <span className="tour-evidence-note tour-version-note mt-2">
                 <Icon name="auto_awesome" size={14} />
                 변경 증거를 찾았습니다
@@ -1654,6 +1671,8 @@ function GroupTimeline({
           transitions={historyState?.transitions ?? []}
           highlightReview={highlightReview}
           onOpenFile={onOpenFile}
+          tutorialStep={tutorialStep}
+          onTutorialStep={onTutorialStep}
         />
       </div>
 
@@ -1833,10 +1852,14 @@ function HistoryTransitions({
   transitions,
   highlightReview = false,
   onOpenFile,
+  tutorialStep,
+  onTutorialStep,
 }: {
   transitions: HistoryTransition[]
   highlightReview?: boolean
   onOpenFile: (file: FileInfo) => void
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   if (transitions.length === 0) {
     return (
@@ -1854,6 +1877,8 @@ function HistoryTransitions({
           transition={transition}
           highlightReview={highlightReview && index === 0}
           onOpenFile={onOpenFile}
+          tutorialStep={tutorialStep}
+          onTutorialStep={onTutorialStep}
         />
       ))}
     </div>
@@ -1871,10 +1896,14 @@ function HistoryTransitionCard({
   transition,
   highlightReview = false,
   onOpenFile,
+  tutorialStep,
+  onTutorialStep,
 }: {
   transition: HistoryTransition
   highlightReview?: boolean
   onOpenFile: (file: FileInfo) => void
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const count = changeCount(transition.result)
   const statusTone =
@@ -1953,14 +1982,29 @@ function HistoryTransitionCard({
       )}
       {transition.status === 'done' && transition.result && (
         <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3">
-          <HistoryTransitionResult result={transition.result} />
+          <HistoryTransitionResult
+            result={transition.result}
+            highlightReview={highlightReview}
+            tutorialStep={tutorialStep}
+            onTutorialStep={onTutorialStep}
+          />
         </div>
       )}
     </div>
   )
 }
 
-function HistoryTransitionResult({ result }: { result: CheckResponse }) {
+function HistoryTransitionResult({
+  result,
+  highlightReview = false,
+  tutorialStep,
+  onTutorialStep,
+}: {
+  result: CheckResponse
+  highlightReview?: boolean
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
+}) {
   if (result.mode === 'excel') return <ExcelCheckResult result={result} compact />
   return (
     <div className="space-y-3">
@@ -1970,7 +2014,13 @@ function HistoryTransitionResult({ result }: { result: CheckResponse }) {
       {result.mode === 'word' ? (
         <WordCheckResult diffs={result.diffs} compact />
       ) : (
-        <PptCheckResult slides={result.slides} compact />
+        <PptCheckResult
+          slides={result.slides}
+          compact
+          highlightReview={highlightReview}
+          tutorialStep={tutorialStep}
+          onTutorialStep={onTutorialStep}
+        />
       )}
     </div>
   )
@@ -2360,10 +2410,14 @@ function ExcelDiffGridModal({
   modal,
   onClose,
   highlightReview = false,
+  tutorialStep,
+  onTutorialStep,
 }: {
   modal: ExcelGridModalState
   onClose: () => void
   highlightReview?: boolean
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const [selectedCell, setSelectedCell] = useState<ExcelDiffGridCell | null>(null)
 
@@ -2443,9 +2497,11 @@ function ExcelDiffGridModal({
                   selectedCell={selectedCell}
                   onSelectCell={setSelectedCell}
                   highlightReview={highlightReview && index === 0}
+                  tutorialStep={tutorialStep}
+                  onTutorialStep={onTutorialStep}
                 />
               ))}
-              <ExcelDiffGridCellDetail cell={selectedCell} />
+              <ExcelDiffGridCellDetail cell={selectedCell} tutorialStep={tutorialStep} />
             </>
           ) : null}
         </div>
@@ -2490,11 +2546,15 @@ function ExcelDiffGridSectionView({
   selectedCell,
   onSelectCell,
   highlightReview = false,
+  tutorialStep,
+  onTutorialStep,
 }: {
   section: ExcelDiffGridResponse['sections'][number]
   selectedCell: ExcelDiffGridCell | null
   onSelectCell: (cell: ExcelDiffGridCell) => void
   highlightReview?: boolean
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -2514,18 +2574,15 @@ function ExcelDiffGridSectionView({
 
   return (
     <section
-      className={`border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden ${
-        highlightReview ? 'tour-target tour-review-target rounded-xl' : ''
-      }`}
-      data-tour-target={highlightReview ? 'excel-table-review' : undefined}
+      className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden"
     >
       <div className="px-4 py-3 border-b border-[var(--md-sys-color-outline-variant)]">
         <div className="flex items-center gap-2 flex-wrap">
           <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{section.title}</p>
-          {highlightReview && (
+          {highlightReview && tutorialStep === 'excel-table-cell' && (
             <span className="tour-evidence-note">
               <Icon name="auto_awesome" size={14} />
-              색이 들어간 셀이 변경 지점입니다
+              D7 셀을 눌러 변경 이력을 열어보세요
             </span>
           )}
         </div>
@@ -2563,14 +2620,23 @@ function ExcelDiffGridSectionView({
                   const selected =
                     selectedCell?.row_index === cell.row_index &&
                     selectedCell?.column_index === cell.column_index
+                  const isTutorialCell =
+                    highlightReview &&
+                    tutorialStep === 'excel-table-cell' &&
+                    row.row_number === 7 &&
+                    cell.column_letter === 'D'
                   return (
                     <td
                       key={`${cell.row_index}-${cell.column_index}`}
                       title={excelGridCellTitle(cell)}
                       className={`w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-pointer hover:ring-1 hover:ring-inset hover:ring-[var(--md-sys-color-primary)] ${excelGridHighlightClass(cell.highlight)} ${
                         selected ? 'outline outline-2 outline-[var(--md-sys-color-primary)] outline-offset-[-2px]' : ''
-                      }`}
-                      onClick={() => onSelectCell(cell)}
+                      } ${isTutorialCell ? 'attention-pulse tour-target' : ''}`}
+                      data-tour-target={isTutorialCell ? 'excel-table-cell' : undefined}
+                      onClick={() => {
+                        onSelectCell(cell)
+                        if (isTutorialCell) onTutorialStep?.('excel-table-history')
+                      }}
                     >
                       <div className="truncate">{displayExcelGridValue(cell.value)}</div>
                     </td>
@@ -2585,7 +2651,13 @@ function ExcelDiffGridSectionView({
   )
 }
 
-function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell | null }) {
+function ExcelDiffGridCellDetail({
+  cell,
+  tutorialStep,
+}: {
+  cell: ExcelDiffGridCell | null
+  tutorialStep?: TutorialStep | null
+}) {
   if (!cell) {
     return (
       <aside className="border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
@@ -2604,15 +2676,27 @@ function ExcelDiffGridCellDetail({ cell }: { cell: ExcelDiffGridCell | null }) {
         ? 'success'
         : cell.highlight === 'changed'
           ? 'warning'
-          : 'neutral'
+      : 'neutral'
+  const isTutorialHistoryTarget = tutorialStep === 'excel-table-history'
 
   return (
-    <aside className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
+    <aside
+      className={`border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3 ${
+        isTutorialHistoryTarget ? 'tour-target tour-review-target rounded-xl' : ''
+      }`}
+      data-tour-target={isTutorialHistoryTarget ? 'excel-table-history' : undefined}
+    >
       <div className="flex items-center gap-2 flex-wrap">
         <Badge tone={badgeTone}>{excelGridHighlightLabel(cell.highlight)}</Badge>
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
           {cell.row_number}행 {cell.column_letter}열
         </p>
+        {isTutorialHistoryTarget && (
+          <span className="tour-evidence-note">
+            <Icon name="auto_awesome" size={14} />
+            셀 변경 이력이 아래에 정리됩니다
+          </span>
+        )}
       </div>
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
         현재 최신본 값: <span className="font-mono text-[var(--md-sys-color-on-surface)]">{displayExcelGridValue(cell.value)}</span>
@@ -2752,9 +2836,15 @@ function groupPptSlides(slides: PptSlideCard[]): PptSlideGroup[] {
 function PptCheckResult({
   slides,
   compact = false,
+  highlightReview = false,
+  tutorialStep,
+  onTutorialStep,
 }: {
   slides: PptSlideCard[]
   compact?: boolean
+  highlightReview?: boolean
+  tutorialStep?: TutorialStep | null
+  onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const inserted = slides.filter((slide) => slide.type === 'inserted_slide').length
   const removed = slides.filter((slide) => slide.type === 'removed_slide').length
@@ -2814,9 +2904,13 @@ function PptCheckResult({
           </p>
         ) : (
           <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-            {slideGroups.map((group) => {
+            {slideGroups.map((group, groupIndex) => {
               const expanded = expandedSlideIds.has(group.id)
               const representative = group.changes[0]
+              const isTutorialReviewTarget =
+                highlightReview && tutorialStep === 'version-ppt-review' && !expanded && groupIndex === 0
+              const isTutorialDetailTarget =
+                highlightReview && tutorialStep === 'version-ppt-detail' && expanded && groupIndex === 0
               const tone =
                 representative.type === 'inserted_slide'
                   ? 'success'
@@ -2827,8 +2921,14 @@ function PptCheckResult({
                 <li key={group.id} className="px-4 py-3 sm:px-6">
                   <button
                     type="button"
-                    className="flex w-full items-start justify-between gap-3 text-left"
-                    onClick={() => toggleSlideGroup(group.id)}
+                    className={`flex w-full items-start justify-between gap-3 text-left ${
+                      isTutorialReviewTarget ? 'attention-pulse tour-target rounded-lg ring-1 ring-[var(--md-sys-color-primary)]/40' : ''
+                    }`}
+                    data-tour-target={isTutorialReviewTarget ? 'version-ppt-review' : undefined}
+                    onClick={() => {
+                      toggleSlideGroup(group.id)
+                      if (isTutorialReviewTarget) onTutorialStep?.('version-ppt-detail')
+                    }}
                     aria-expanded={expanded}
                   >
                     <div className="min-w-0 space-y-1">
@@ -2855,7 +2955,18 @@ function PptCheckResult({
                   </button>
 
                   {expanded && (
-                    <div className="mt-3 space-y-3">
+                    <div
+                      className={`mt-3 space-y-3 ${
+                        isTutorialDetailTarget ? 'tour-target tour-review-target rounded-xl p-2' : ''
+                      }`}
+                      data-tour-target={isTutorialDetailTarget ? 'version-ppt-detail' : undefined}
+                    >
+                      {isTutorialDetailTarget && (
+                        <span className="tour-evidence-note">
+                          <Icon name="auto_awesome" size={14} />
+                          슬라이드 안에서 바뀐 문구만 모아 보여줍니다
+                        </span>
+                      )}
                       {group.changes.map((slide, index) => (
                         <div
                           key={slide.id}
