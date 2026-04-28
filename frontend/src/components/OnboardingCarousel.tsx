@@ -32,10 +32,9 @@ type Slide = {
 const slides: Slide[] = [
   {
     eyebrow: 'Find',
-    title: '흩어진 문서를 바로 찾습니다',
-    description:
-      '파일명과 본문을 함께 색인해 Word, PowerPoint, Excel, 텍스트 문서를 한 번에 검색합니다.',
-    proof: '흩어진 업무 폴더를 검색 가능한 문서 라이브러리로 바꿉니다.',
+    title: '흩어진 문서를 빠르게 찾습니다',
+    description: '파일명과 본문을 함께 읽어 필요한 문서를 바로 찾습니다.',
+    proof: '초성만 입력해도 본문 속 프로젝트 문서까지 이어집니다.',
     accent: '#4257b2',
     previewTitle: 'ㅍㄹㅈㅌ 초성 검색',
     previewSubtitle: 'A 프로젝트 본문 결과 8개',
@@ -49,10 +48,9 @@ const slides: Slide[] = [
   },
   {
     eyebrow: 'Compare',
-    title: '문서의 버전 흐름을 봅니다',
-    description:
-      'v1, 날짜, 제목이 조금 다른 파일도 한 묶음으로 보고 어떤 내용이 바뀌었는지 따라갑니다.',
-    proof: '문서 하나하나를 열어 대조하는 시간을 줄이고, 변경점에 바로 도착합니다.',
+    title: '버전 차이를 바로 봅니다',
+    description: '비슷한 파일을 묶고 바뀐 부분만 먼저 보여줍니다.',
+    proof: 'PPT 슬라이드와 Excel 값 변경을 증거 중심으로 확인합니다.',
     accent: '#6d5a86',
     previewTitle: '프로젝트상태 버전 묶음',
     previewSubtitle: '5개 파일 · 최신 v4.0',
@@ -66,10 +64,9 @@ const slides: Slide[] = [
   },
   {
     eyebrow: 'Try',
-    title: '초성 검색부터 먼저 둘러보세요',
-    description:
-      '문서 새로고침, 검색, 버전 진단, Excel 표로 보기를 직접 눌러보며 핵심 흐름을 확인합니다.',
-    proof: '실제 문서를 건드리지 않고 준비된 예제로 OfficeWhere가 맞는지 빠르게 판단합니다.',
+    title: '예제로 핵심만 둘러보세요',
+    description: '강조된 곳을 따라가며 검색, 버전 차이, 셀 변경을 확인합니다.',
+    proof: '원본 문서는 건드리지 않고 준비된 예제로 확인합니다.',
     accent: '#146c2e',
     previewTitle: '예제 둘러보기 경로',
     previewSubtitle: '6단계 안내 · 직접 클릭',
@@ -272,7 +269,7 @@ function ProductPreview({ slide }: { slide: Slide }) {
           <span className="h-2 w-2 rounded-full bg-[var(--ow-onboarding-accent)]" />
           Guided step
         </div>
-        <p className="mt-2 text-sm leading-5 text-white/[0.85]">강조된 버튼만 따라가면 핵심 기능을 확인합니다.</p>
+        <p className="mt-2 text-sm leading-5 text-white/[0.85]">빛나는 곳에서 결과를 확인하세요.</p>
       </div>
     </div>
   )

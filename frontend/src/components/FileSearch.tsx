@@ -106,12 +106,21 @@ function SnippetText({ snippet }: { snippet: string }) {
 function SearchResultListItem({
   item,
   onOpen,
+  highlightTour = false,
+  tourHint,
 }: {
   item: SearchResult
   onOpen: (fileId: number, fileName: string) => void
+  highlightTour?: boolean
+  tourHint?: string
 }) {
   return (
-    <li className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors">
+    <li
+      className={`px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors ${
+        highlightTour ? 'tour-target tour-review-target rounded-xl' : ''
+      }`}
+      data-tour-target={highlightTour ? 'search-review' : undefined}
+    >
       <button
         type="button"
         onClick={() => onOpen(item.file_id, item.name)}
@@ -121,6 +130,12 @@ function SearchResultListItem({
           <Icon name="my_location" size={14} />
           {item.location}
         </p>
+        {tourHint && (
+          <span className="tour-evidence-note mb-2">
+            <Icon name="auto_awesome" size={14} />
+            {tourHint}
+          </span>
+        )}
         <SnippetText snippet={item.snippet} />
       </button>
     </li>
@@ -380,6 +395,7 @@ export default function FileSearch({
   const allContentMatchesExpanded =
     contentFileKeys.length > 0 && contentFileKeys.every((key) => expandedContentFiles.has(key))
   const hasResults = !loading && results.length > 0
+  const tutorialSearchReviewKey = tutorialStep === 'search-review' ? contentFileKeys[0] : null
 
   const expandAllContentMatches = () => {
     setExpandedContentFiles(new Set(contentFileKeys))
@@ -462,6 +478,7 @@ export default function FileSearch({
               }}
               disabled={!query.trim() || loading}
               className={tutorialStep === 'search' ? 'attention-pulse tour-target' : ''}
+              data-tour-target={tutorialStep === 'search' ? 'search' : undefined}
             >
               검색
             </Button>
@@ -699,6 +716,7 @@ export default function FileSearch({
                   onClick={expandAllContentMatches}
                   disabled={allContentMatchesExpanded}
                   className={tutorialStep === 'search-results' ? 'attention-pulse tour-target' : ''}
+                  data-tour-target={tutorialStep === 'search-results' ? 'search-results' : undefined}
                 >
                   본문 전체 열기
                 </Button>
@@ -714,7 +732,7 @@ export default function FileSearch({
               </div>
             )}
           </div>
-          <div className={tutorialStep === 'search-review' ? 'tour-target tour-review-target rounded-2xl' : ''}>
+          <div>
             {grouped.map(([fileName, items]) => {
               const fileKey = `${items[0].file_id}:${fileName}`
               const filenameItems = items.filter((item) => item.location === '파일명')
@@ -766,6 +784,12 @@ export default function FileSearch({
                           key={`content-${item.file_id}-${item.location}-${index}`}
                           item={item}
                           onOpen={handleOpenFile}
+                          highlightTour={fileKey === tutorialSearchReviewKey && index === 0}
+                          tourHint={
+                            fileKey === tutorialSearchReviewKey && index === 0
+                              ? '초성이 본문 매칭으로 이어졌어요'
+                              : undefined
+                          }
                         />
                       ))}
                   </ul>

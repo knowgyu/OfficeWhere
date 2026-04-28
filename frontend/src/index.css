@@ -389,6 +389,7 @@ body,
   position: relative;
   z-index: 65;
   isolation: isolate;
+  scroll-margin: 7rem;
 }
 
 .tour-target::before {
@@ -408,7 +409,24 @@ body,
 }
 
 .tour-review-target {
-  animation: tour-review-glow 1.45s ease-in-out infinite;
+  animation: tour-review-glow 1.3s ease-in-out infinite;
+}
+
+.tour-review-target::before {
+  inset: -10px;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      circle at 18% 20%,
+      color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--md-sys-color-tertiary) 20%, transparent),
+      transparent 68%
+    );
+  animation: tour-evidence-breathe 1.25s ease-in-out infinite;
 }
 
 .tour-review-target::after {
@@ -428,7 +446,33 @@ body,
   opacity: 0.55;
   mix-blend-mode: screen;
   transform: translateX(-115%);
-  animation: tour-review-sheen 1.45s ease-in-out infinite;
+  animation: tour-review-sheen 1.25s ease-in-out infinite;
+}
+
+.tour-evidence-note {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 26%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--md-sys-color-primary-container) 82%, white 18%),
+      color-mix(in srgb, var(--md-sys-color-tertiary-container) 76%, white 24%)
+    );
+  padding: 0.18rem 0.6rem;
+  color: var(--md-sys-color-on-primary-container);
+  font-size: 0.74rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent),
+    0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  animation: tour-note-pop 1.45s ease-in-out infinite;
 }
 
 .tour-soft-scrim {
@@ -526,17 +570,15 @@ body,
 
 .tour-hud-line {
   fill: none;
-  stroke: color-mix(in srgb, var(--md-sys-color-primary) 82%, white 18%);
-  stroke-width: 3;
+  stroke: color-mix(in srgb, var(--md-sys-color-primary) 74%, white 26%);
+  stroke-width: 3.25;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 9 11;
-  animation: tour-hud-dash 1.2s linear infinite;
-  filter: drop-shadow(0 8px 14px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent));
-}
-
-.tour-hud-arrowhead {
-  fill: color-mix(in srgb, var(--md-sys-color-primary) 88%, white 12%);
+  stroke-dasharray: 2 12;
+  animation: tour-hud-dash 1.05s linear infinite;
+  filter:
+    drop-shadow(0 8px 14px color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent))
+    drop-shadow(0 0 8px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent));
 }
 
 .tour-hud-target-core {
@@ -620,6 +662,28 @@ body,
   }
 }
 
+@keyframes tour-evidence-breathe {
+  0%,
+  100% {
+    opacity: 0.92;
+    transform: scale(0.985);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.015);
+  }
+}
+
+@keyframes tour-note-pop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
 @keyframes tour-review-glow {
   0%,
   100% {
@@ -649,7 +713,9 @@ body,
   .tour-hud-line,
   .tour-hud-target-halo,
   .tour-review-target,
-  .tour-review-target::after {
+  .tour-review-target::before,
+  .tour-review-target::after,
+  .tour-evidence-note {
     animation: none;
   }
 }

@@ -837,6 +837,15 @@ export default function ConsistencyCheck({
     (groupFilter === 'all' ? 0 : 1) +
     (groupFileType === 'all' ? 0 : 1) +
     (groupSort === 'recent' ? 0 : 1)
+  const tutorialOpenTargetType =
+    tutorialStep === 'version-ppt'
+      ? 'PowerPoint'
+      : tutorialStep === 'version-excel'
+        ? 'Excel'
+        : null
+  const tutorialOpenTargetGroupId = tutorialOpenTargetType
+    ? (groups.find((group) => normalizeFileType(group.file_type) === tutorialOpenTargetType)?.id ?? null)
+    : null
 
   if (fileTotal === 0 && groupTotal === 0 && !filesLoading && !groupsLoading) {
     return (
@@ -988,32 +997,37 @@ export default function ConsistencyCheck({
             />
           ) : (
             <div className="space-y-3">
-              {groups.map((group) => (
-                <GroupCard
-                  key={group.id}
-                  group={group}
-                  activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
-                  historyState={historyState?.groupId === group.id ? historyState : null}
-                  loading={groupLoadingId === group.id}
-                  onOpen={() => void openGuidedGroup(group)}
-                  onOpenFile={(file) => void openFile(file)}
-                  onOpenExcelGrid={(detail, state) => void openGuidedExcelGrid(detail, state)}
-                  onSetLatestFile={(detail, file) => void setGroupLatestFile(detail, file)}
-                  onClearLatestFile={(detail) => void clearGroupLatestFile(detail)}
-                  settingLatestFileId={settingLatestFileId}
-                  clearingLatestGroupId={clearingLatestGroupId}
-                  highlightOpen={
-                    (tutorialStep === 'version-ppt' && normalizeFileType(group.file_type) === 'PowerPoint') ||
-                    (tutorialStep === 'version-excel' && normalizeFileType(group.file_type) === 'Excel')
-                  }
-                  highlightExcelGrid={tutorialStep === 'excel-table' && activeGroupDetail?.id === group.id}
-                  highlightReview={
-                    activeGroupDetail?.id === group.id &&
-                    ((tutorialStep === 'version-ppt-review' && normalizeFileType(group.file_type) === 'PowerPoint') ||
-                      (tutorialStep === 'version-excel-review' && normalizeFileType(group.file_type) === 'Excel'))
-                  }
-                />
-              ))}
+              {groups.map((group) => {
+                const normalizedType = normalizeFileType(group.file_type)
+                const highlightOpen = tutorialOpenTargetGroupId === group.id
+                const highlightExcelGrid = tutorialStep === 'excel-table' && activeGroupDetail?.id === group.id
+                const highlightReview =
+                  activeGroupDetail?.id === group.id &&
+                  ((tutorialStep === 'version-ppt-review' && normalizedType === 'PowerPoint') ||
+                    (tutorialStep === 'version-excel-review' && normalizedType === 'Excel'))
+                return (
+                  <GroupCard
+                    key={group.id}
+                    group={group}
+                    activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
+                    historyState={historyState?.groupId === group.id ? historyState : null}
+                    loading={groupLoadingId === group.id}
+                    onOpen={() => void openGuidedGroup(group)}
+                    onOpenFile={(file) => void openFile(file)}
+                    onOpenExcelGrid={(detail, state) => void openGuidedExcelGrid(detail, state)}
+                    onSetLatestFile={(detail, file) => void setGroupLatestFile(detail, file)}
+                    onClearLatestFile={(detail) => void clearGroupLatestFile(detail)}
+                    settingLatestFileId={settingLatestFileId}
+                    clearingLatestGroupId={clearingLatestGroupId}
+                    highlightOpen={highlightOpen}
+                    openTourTarget={highlightOpen ? (tutorialStep ?? undefined) : undefined}
+                    highlightExcelGrid={highlightExcelGrid}
+                    excelGridTourTarget={highlightExcelGrid ? (tutorialStep ?? undefined) : undefined}
+                    highlightReview={highlightReview}
+                    reviewTourTarget={highlightReview ? (tutorialStep ?? undefined) : undefined}
+                  />
+                )
+              })}
             </div>
           )}
 
@@ -1230,8 +1244,11 @@ function GroupCard({
   settingLatestFileId,
   clearingLatestGroupId,
   highlightOpen = false,
+  openTourTarget,
   highlightExcelGrid = false,
+  excelGridTourTarget,
   highlightReview = false,
+  reviewTourTarget,
 }: {
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
@@ -1245,8 +1262,11 @@ function GroupCard({
   settingLatestFileId: number | null
   clearingLatestGroupId: string | null
   highlightOpen?: boolean
+  openTourTarget?: TutorialStep
   highlightExcelGrid?: boolean
+  excelGridTourTarget?: TutorialStep
   highlightReview?: boolean
+  reviewTourTarget?: TutorialStep
 }) {
   const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
@@ -1312,6 +1332,7 @@ function GroupCard({
             onClick={onOpen}
             loading={historyLoading}
             className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
+            data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
           >
             {activeDetail ? '진단 접기' : '버전 진단 열기'}
           </Button>
@@ -1329,7 +1350,9 @@ function GroupCard({
           settingLatestFileId={settingLatestFileId}
           clearingLatestGroupId={clearingLatestGroupId}
           highlightExcelGrid={highlightExcelGrid}
+          excelGridTourTarget={excelGridTourTarget}
           highlightReview={highlightReview}
+          reviewTourTarget={reviewTourTarget}
         />
       )}
     </div>
@@ -1346,7 +1369,9 @@ function GroupTimeline({
   settingLatestFileId,
   clearingLatestGroupId,
   highlightExcelGrid = false,
+  excelGridTourTarget,
   highlightReview = false,
+  reviewTourTarget,
 }: {
   detail: LibraryGroupDetail
   historyState: HistoryDiffState | null
@@ -1357,7 +1382,9 @@ function GroupTimeline({
   settingLatestFileId: number | null
   clearingLatestGroupId: string | null
   highlightExcelGrid?: boolean
+  excelGridTourTarget?: TutorialStep
   highlightReview?: boolean
+  reviewTourTarget?: TutorialStep
 }) {
   const progressLabel = historyState
     ? historyState.total === 0
@@ -1368,11 +1395,7 @@ function GroupTimeline({
     : '변경점 계산 준비 중'
 
   return (
-    <div
-      className={`border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 space-y-4 ${
-        highlightReview ? 'tour-target tour-review-target' : ''
-      }`}
-    >
+    <div className="border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <p className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
@@ -1399,6 +1422,7 @@ function GroupTimeline({
               variant="filled"
               leadingIcon="table_chart"
               className={`shadow-elev-1 ${highlightExcelGrid ? 'attention-pulse tour-target' : ''}`}
+              data-tour-target={highlightExcelGrid ? excelGridTourTarget : undefined}
               onClick={onOpenExcelGrid}
             >
               표로 보기
@@ -1407,13 +1431,24 @@ function GroupTimeline({
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+      <div
+        className={`rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4 ${
+          highlightReview ? 'tour-target tour-review-target' : ''
+        }`}
+        data-tour-target={highlightReview ? reviewTourTarget : undefined}
+      >
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 진단</p>
             <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               바로 이전 버전과 다음 버전만 순서대로 비교해 변경 증거를 분리합니다.
             </p>
+            {highlightReview && (
+              <span className="tour-evidence-note mt-2">
+                <Icon name="auto_awesome" size={14} />
+                실제 변경 증거가 여기에 모입니다
+              </span>
+            )}
           </div>
           <Badge tone={historyState?.loading ? 'warning' : 'neutral'}>
             {historyState?.loading && <Spinner size={14} />} {progressLabel}
@@ -2017,9 +2052,7 @@ function ExcelDiffGridModal({
       }}
     >
       <div
-        className={`flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] shadow-2xl ${
-          highlightReview ? 'tour-target tour-review-target' : ''
-        }`}
+        className="flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="shrink-0 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/96">
@@ -2061,12 +2094,13 @@ function ExcelDiffGridModal({
           ) : modal.data ? (
             <>
               <ExcelDiffGridSummary data={modal.data} />
-              {modal.data.sections.map((section) => (
+              {modal.data.sections.map((section, index) => (
                 <ExcelDiffGridSectionView
                   key={section.id}
                   section={section}
                   selectedCell={selectedCell}
                   onSelectCell={setSelectedCell}
+                  highlightReview={highlightReview && index === 0}
                 />
               ))}
               <ExcelDiffGridCellDetail cell={selectedCell} />
@@ -2113,10 +2147,12 @@ function ExcelDiffGridSectionView({
   section,
   selectedCell,
   onSelectCell,
+  highlightReview = false,
 }: {
   section: ExcelDiffGridResponse['sections'][number]
   selectedCell: ExcelDiffGridCell | null
   onSelectCell: (cell: ExcelDiffGridCell) => void
+  highlightReview?: boolean
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -2135,9 +2171,22 @@ function ExcelDiffGridSectionView({
   }, [])
 
   return (
-    <section className="border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden">
+    <section
+      className={`border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] overflow-hidden ${
+        highlightReview ? 'tour-target tour-review-target rounded-xl' : ''
+      }`}
+      data-tour-target={highlightReview ? 'excel-table-review' : undefined}
+    >
       <div className="px-4 py-3 border-b border-[var(--md-sys-color-outline-variant)]">
-        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{section.title}</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{section.title}</p>
+          {highlightReview && (
+            <span className="tour-evidence-note">
+              <Icon name="auto_awesome" size={14} />
+              색이 들어간 셀이 변경 지점입니다
+            </span>
+          )}
+        </div>
         <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
           {section.description} 표시 범위: {section.row_start}-{section.row_end}행, {section.col_start}-{section.col_end}열
         </p>

@@ -105,83 +105,83 @@ const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
 }
 
 const TUTORIAL_REVIEW_DELAY_MS: Partial<Record<TutorialStep, number>> = {
-  'search-review': 2600,
-  'version-ppt-review': 2400,
-  'version-excel-review': 2400,
-  'excel-table-review': 2600,
+  'search-review': 3600,
+  'version-ppt-review': 3400,
+  'version-excel-review': 3400,
+  'excel-table-review': 3800,
 }
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
-    eyebrow: 'Step 1 · 예제 시작',
-    title: '예제 폴더가 미리 선택되어 있습니다',
-    description: '실제 사용 때는 폴더 찾기로 업무 폴더를 고릅니다. 지금은 예제 경로가 들어가 있으니 대상 추가를 눌러주세요.',
+    eyebrow: 'Step 1 · 예제 폴더',
+    title: '예제 폴더를 추가하세요',
+    description: '경로는 채워졌어요. 대상 추가만 누르면 됩니다.',
     icon: 'drive_folder_upload',
   },
   'document-refresh': {
-    eyebrow: 'Step 2 · 라이브러리 준비',
-    title: '문서 새로고침을 실행하세요',
-    description: '예제 문서를 색인합니다. 강조된 문서 새로고침 버튼을 눌러 새 문서와 변경점을 확인해 주세요.',
+    eyebrow: 'Step 2 · 문서 준비',
+    title: '문서를 읽어옵니다',
+    description: '새로고침을 누르면 예제 문서를 검색할 수 있게 준비합니다.',
     icon: 'sync',
   },
   search: {
-    eyebrow: 'Step 3 · 검색 체험',
-    title: '초성만으로 예제 문서를 검색하세요',
-    description: '검색어 ㅍㄹㅈㅌ가 미리 입력되어 있습니다. 프로젝트를 다 치지 않아도 A 프로젝트 문서가 잡히는지 확인해 보세요.',
+    eyebrow: 'Step 3 · 초성 검색',
+    title: 'ㅍㄹㅈㅌ로 검색해 보세요',
+    description: '프로젝트를 다 쓰지 않아도 문서를 찾습니다.',
     icon: 'search',
   },
   'search-results': {
-    eyebrow: 'Step 3 · 본문 확인',
-    title: '본문 전체 열기로 실제 매칭을 확인하세요',
-    description: '초성 검색 결과를 바로 넘기지 않고, 펼쳐진 본문에서 A 프로젝트가 실제로 잡혔는지 확인합니다.',
+    eyebrow: 'Step 3 · 본문 매칭',
+    title: '본문 매칭을 펼치세요',
+    description: '어디에서 검색됐는지 바로 확인합니다.',
     icon: 'unfold_more',
   },
   'search-review': {
-    eyebrow: '확인 중',
-    title: '펼쳐진 본문 매칭을 잠깐 확인하세요',
-    description: '강조된 본문 조각을 확인한 뒤 버전 관리 단계로 부드럽게 이어갑니다.',
+    eyebrow: '검색 결과',
+    title: '본문 속 매칭을 찾았어요',
+    description: '빛나는 줄이 실제 검색된 위치입니다.',
     icon: 'visibility',
   },
   'version-ppt': {
-    eyebrow: 'Step 4 · 발표자료 비교',
-    title: 'PPT 변경점을 열어보세요',
-    description: '프로젝트상태 PowerPoint 비교 대상이 준비됩니다. 강조된 버전 진단 열기를 눌러보세요.',
+    eyebrow: 'Step 4 · PPT 버전',
+    title: 'PPT 변경 증거를 엽니다',
+    description: '버전 진단 열기로 바뀐 슬라이드를 확인합니다.',
     icon: 'timeline',
   },
   'version-ppt-review': {
-    eyebrow: '확인 중',
-    title: 'PPT 변경 증거를 잠깐 확인하세요',
-    description: '계산된 변경점과 파일 순서를 확인한 뒤 다음 비교 대상으로 이어갑니다.',
+    eyebrow: 'PPT 변경',
+    title: '슬라이드 변화가 표시됐어요',
+    description: '변경 건수와 버전 흐름을 여기서 봅니다.',
     icon: 'fact_check',
   },
   'version-excel': {
-    eyebrow: 'Step 5 · 스프레드시트 비교',
-    title: 'Excel 변경점을 열어보세요',
-    description: '사업예산 Excel 비교 대상으로 이동합니다. 강조된 버전 진단 열기를 눌러 값 변경을 확인해 주세요.',
+    eyebrow: 'Step 5 · Excel 버전',
+    title: 'Excel 값 변경을 엽니다',
+    description: '버전 진단 열기로 바뀐 값을 확인합니다.',
     icon: 'difference',
   },
   'version-excel-review': {
-    eyebrow: '확인 중',
-    title: 'Excel 변경 증거를 잠깐 확인하세요',
-    description: '값 변경 요약을 확인한 뒤 표로 보기 단계로 이어갑니다.',
+    eyebrow: 'Excel 변경',
+    title: '값 차이가 표시됐어요',
+    description: '색으로 표시된 변경 요약을 확인하세요.',
     icon: 'fact_check',
   },
   'excel-table': {
-    eyebrow: 'Step 6 · 셀 단위 확인',
-    title: '표로 보기를 확인하세요',
-    description: '강조된 표로 보기를 눌러 추가·삭제·수정된 셀을 한 번에 살펴보세요.',
+    eyebrow: 'Step 6 · 셀 단위',
+    title: '표로 더 자세히 봅니다',
+    description: '추가·삭제·수정된 셀을 색으로 확인합니다.',
     icon: 'table_chart',
   },
   'excel-table-review': {
-    eyebrow: '확인 중',
-    title: '표로 열린 셀 변경을 확인하세요',
-    description: '셀 단위 변경 화면이 열렸습니다. 잠시 확인한 뒤 예제 둘러보기를 마칩니다.',
+    eyebrow: '셀 변경',
+    title: '바뀐 셀이 보입니다',
+    description: '색이 들어간 셀이 실제 변경 지점입니다.',
     icon: 'table_view',
   },
   done: {
     eyebrow: '완료',
-    title: '예제로 둘러보기를 마쳤습니다',
-    description: '이제 검색, 버전 관리, Excel 통합을 자유롭게 사용해도 됩니다.',
+    title: '예제 둘러보기가 끝났습니다',
+    description: '이제 내 문서 폴더로 같은 흐름을 사용해 보세요.',
     icon: 'task_alt',
   },
 }
@@ -237,13 +237,18 @@ function getTutorialCopy(step: TutorialStep | null, activeTab: Tab): TourCopy | 
     const tab = TABS.find((item) => item.id === targetTab)
     return {
       eyebrow: '다음 위치',
-      title: `${tab?.short ?? tab?.label ?? '다음'} 탭으로 이동하세요`,
-      description: `자동으로 이동하지 않습니다. 왼쪽의 ${tab?.label ?? '다음 탭'}을 직접 눌러 이어가세요.`,
+      title: `${tab?.short ?? tab?.label ?? '다음'} 탭으로 이동`,
+      description: `왼쪽의 강조된 ${tab?.short ?? '탭'}에서 이어집니다.`,
       icon: 'touch_app',
     }
   }
 
   return TUTORIAL_COPY[step]
+}
+
+function getTutorialTargetElement(step: TutorialStep) {
+  const targeted = document.querySelector<HTMLElement>(`[data-tour-target="${step}"]`)
+  return targeted ?? document.querySelector<HTMLElement>('.tour-target')
 }
 
 export default function App() {
@@ -518,7 +523,7 @@ function GuidedTourHud({
         return
       }
 
-      const target = document.querySelector<HTMLElement>('.tour-target')
+      const target = getTutorialTargetElement(step)
       if (!target) {
         setTargetRect(null)
         return
@@ -611,23 +616,9 @@ function GuidedTourHud({
     <div className="fixed inset-0 z-[90] pointer-events-none">
       {curve && (
         <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
-          <defs>
-            <marker
-              id="tour-arrowhead"
-              markerWidth="10"
-              markerHeight="10"
-              refX="8.5"
-              refY="5"
-              orient="auto"
-              markerUnits="strokeWidth"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" className="tour-hud-arrowhead" />
-            </marker>
-          </defs>
           <path
             d={`M ${curve.startX} ${curve.startY} C ${curve.c1X} ${curve.c1Y}, ${curve.c2X} ${curve.c2Y}, ${curve.endX} ${curve.endY}`}
             className="tour-hud-line"
-            markerEnd="url(#tour-arrowhead)"
           />
           <circle cx={curve.endX} cy={curve.endY} r="7" className="tour-hud-target-core" />
           <circle cx={curve.endX} cy={curve.endY} r="18" className="tour-hud-target-halo" />

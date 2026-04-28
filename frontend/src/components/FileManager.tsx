@@ -844,6 +844,7 @@ export default function FileManager({
               loading={rescanning}
               disabled={settingsLoading || librarySettings.watched_folders.length === 0}
               className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
+              data-tour-target={tutorialStep === 'document-refresh' ? 'document-refresh' : undefined}
             >
               문서 새로고침
             </Button>
@@ -855,6 +856,7 @@ export default function FileManager({
                 ? 'tour-target rounded-2xl ring-1 ring-[var(--md-sys-color-primary)]/25'
                 : ''
             }`}
+            data-tour-target={tutorialStep === 'example-folder' ? 'example-folder' : undefined}
           >
             <div className="flex-1 min-w-0">
               <TextField
