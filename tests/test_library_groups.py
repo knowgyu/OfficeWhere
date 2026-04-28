@@ -101,6 +101,38 @@ def test_library_groups_type_filter_and_limit_cap(tmp_path, monkeypatch):
     assert {group.file_type for group in response.groups} == {"Excel"}
 
 
+def test_library_group_cache_reuses_full_group_build_and_invalidates(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.core.library import list_file_groups
+
+    _setup_db(tmp_path, monkeypatch)
+    _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
+    _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
+
+    calls = 0
+    real_get_all_files = library.get_all_files
+
+    def counted_get_all_files():
+        nonlocal calls
+        calls += 1
+        return real_get_all_files()
+
+    monkeypatch.setattr(library, "get_all_files", counted_get_all_files)
+
+    first = list_file_groups(kind="version_family", limit=10)
+    second = list_file_groups(kind="version_family", limit=10)
+
+    assert first.total == second.total == 1
+    assert calls == 1
+
+    _register("/tmp/a/보고서_v3.docx", "보고서_v3.docx", "Word")
+    third = list_file_groups(kind="version_family", limit=10)
+
+    assert third.total == 1
+    assert third.groups[0].file_count == 3
+    assert calls == 2
+
+
 def test_library_groups_searches_names_paths_and_sorts(tmp_path, monkeypatch):
     from backend.api.library import get_library_groups
 

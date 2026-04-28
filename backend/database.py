@@ -8,9 +8,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .core.hangul_search import build_search_text, build_trigram_search_text, make_search_snippet
+from .core.index_perf import elapsed_ms, log_index_perf
 
 
 def _default_db_dir() -> Path:
@@ -23,7 +25,8 @@ def _default_db_dir() -> Path:
 DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
-SEARCH_INDEX_VERSION = "3"
+SEARCH_INDEX_VERSION = "4"
+COMPARISON_CACHE_VERSION = 1
 _DB_WRITE_LOCK = threading.RLock()
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
 
@@ -124,6 +127,13 @@ def _refresh_search_text(cursor: sqlite3.Cursor):
         "UPDATE file_chunks SET search_text = ?, trigram_text = ? WHERE id = ?",
         [(build_search_text(row[1]), build_trigram_search_text(row[1]), row[0]) for row in rows],
     )
+
+
+def _drop_legacy_file_search(cursor: sqlite3.Cursor):
+    """Remove the unused base FTS table and its triggers from older DBs."""
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ai")
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ad")
+    cursor.execute("DROP TABLE IF EXISTS file_search")
 
 
 def _get_setting_with_cursor(cursor: sqlite3.Cursor, key: str, default: str = "") -> str:
@@ -385,33 +395,7 @@ def init_db():
         )
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON file_chunks(file_id)")
         _ensure_file_chunks_columns(cursor)
-
-        cursor.execute(
-            """
-            CREATE VIRTUAL TABLE IF NOT EXISTS file_search USING fts5(
-                content,
-                content='file_chunks',
-                content_rowid='id',
-                tokenize='unicode61'
-            )
-            """
-        )
-
-        cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON file_chunks BEGIN
-                INSERT INTO file_search(rowid, content) VALUES (new.id, new.content);
-            END
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON file_chunks BEGIN
-                INSERT INTO file_search(file_search, rowid, content)
-                VALUES ('delete', old.id, old.content);
-            END
-            """
-        )
+        _drop_legacy_file_search(cursor)
 
         cursor.execute(
             """
@@ -493,6 +477,23 @@ def init_db():
             """
             CREATE INDEX IF NOT EXISTS idx_document_fingerprints_normalized_hash
             ON document_fingerprints(normalized_hash)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS comparison_cache (
+                cache_key TEXT PRIMARY KEY,
+                file_ids TEXT NOT NULL,
+                comparison_scope TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_comparison_cache_created_at
+            ON comparison_cache(created_at DESC)
             """
         )
 
@@ -609,6 +610,29 @@ def get_all_files() -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     return [_decode_parser_config(dict(row)) for row in rows]
+
+
+def get_registered_files_signature() -> str:
+    """Return a cheap stable signature for group-cache invalidation."""
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, path, name, file_type, key_column, column_count,
+               created_at, file_mtime, parser_config
+        FROM registered_files
+        ORDER BY id
+        """
+    )
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    payload = {
+        "db_path": str(DB_PATH),
+        "count": len(rows),
+        "rows": rows,
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _build_file_list_filters(
@@ -769,6 +793,8 @@ def delete_file(file_id: int) -> bool:
         cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
         affected = cursor.rowcount
+        if affected:
+            cursor.execute("DELETE FROM comparison_cache")
         conn.commit()
         return affected > 0
 
@@ -781,6 +807,7 @@ def delete_all_files() -> int:
         count = int(cursor.fetchone()[0])
         cursor.execute("DELETE FROM file_chunks")
         cursor.execute("DELETE FROM document_fingerprints")
+        cursor.execute("DELETE FROM comparison_cache")
         cursor.execute("DELETE FROM registered_files")
         conn.commit()
         return count
@@ -811,6 +838,50 @@ def update_file_mtime(file_id: int, mtime: float):
         cursor = conn.cursor()
         cursor.execute("UPDATE registered_files SET file_mtime = ? WHERE id = ?", (mtime, file_id))
         cursor.execute("UPDATE document_fingerprints SET source_mtime = ? WHERE file_id = ?", (mtime, file_id))
+        conn.commit()
+
+
+def get_cached_comparison_result(cache_key: str) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT result_json FROM comparison_cache WHERE cache_key = ?", (cache_key,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        result = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return result if isinstance(result, dict) else None
+
+
+def save_cached_comparison_result(
+    cache_key: str,
+    file_ids: Sequence[int],
+    comparison_scope: str,
+    result: Dict[str, Any],
+) -> None:
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO comparison_cache (cache_key, file_ids, comparison_scope, result_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+                file_ids=excluded.file_ids,
+                comparison_scope=excluded.comparison_scope,
+                result_json=excluded.result_json,
+                created_at=excluded.created_at
+            """,
+            (
+                cache_key,
+                json.dumps([int(file_id) for file_id in file_ids], ensure_ascii=False),
+                comparison_scope,
+                json.dumps(result, ensure_ascii=False),
+                datetime.now().isoformat(),
+            ),
+        )
         conn.commit()
 
 
@@ -924,6 +995,41 @@ def _search_row_dicts(rows: Sequence[sqlite3.Row], query_for_snippet: str) -> Li
     ]
 
 
+def _log_search_done(
+    *,
+    started: float,
+    search_table: str,
+    query_text: str,
+    filters: Sequence[str],
+    modified_from: Optional[float],
+    modified_to: Optional[float],
+    file_limit: Optional[int],
+    per_file_limit: int,
+    result: Optional[Sequence[Dict[str, Any]]] = None,
+    error: Optional[Exception] = None,
+) -> None:
+    payload: Dict[str, Any] = {
+        "search_table": search_table,
+        "raw_query_length": len(query_text),
+        "term_count": len(_search_terms_for_table(query_text)),
+        "file_limit": file_limit,
+        "per_file_limit": per_file_limit,
+        "filter_count": len(filters),
+        "has_modified_filter": modified_from is not None or modified_to is not None,
+        "total_ms": elapsed_ms(started),
+    }
+    if result is not None:
+        payload.update(
+            {
+                "row_count": len(result),
+                "file_count": len({row["file_id"] for row in result}),
+            }
+        )
+    if error is not None:
+        payload.update({"success": False, "error_type": error.__class__.__name__})
+    log_index_perf("search_done", **payload)
+
+
 def search_chunks(
     fts_query: str,
     limit: int = 100,
@@ -934,6 +1040,9 @@ def search_chunks(
     file_limit: Optional[int] = None,
     per_file_limit: int = 3,
 ) -> List[Dict[str, Any]]:
+    started = perf_counter()
+    query_text = raw_query or fts_query
+    search_table = _search_table_for_query(query_text)
     conn = _connect()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -952,60 +1061,97 @@ def search_chunks(
     if modified_to is not None:
         filter_clause += " AND rf.file_mtime <= ?"
         params.append(modified_to)
-    search_table = _search_table_for_query(raw_query or fts_query)
-    if file_limit is None:
-        params.append(limit)
+
+    try:
+        if file_limit is None:
+            params.append(limit)
+            cursor.execute(
+                f"""
+                SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content
+                FROM {search_table}
+                JOIN file_chunks fc ON fc.id = {search_table}.rowid
+                JOIN registered_files rf ON rf.id = fc.file_id
+                WHERE {search_table} MATCH ?{filter_clause}
+                ORDER BY rank
+                LIMIT ?
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+            result = _search_row_dicts(rows, query_text)
+            _log_search_done(
+                started=started,
+                search_table=search_table,
+                query_text=query_text,
+                filters=filters,
+                modified_from=modified_from,
+                modified_to=modified_to,
+                file_limit=None,
+                per_file_limit=per_file_limit,
+                result=result,
+            )
+            return result
+
+        safe_file_limit = max(1, file_limit)
+        safe_per_file_limit = max(1, per_file_limit)
         cursor.execute(
             f"""
-            SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content
-            FROM {search_table}
-            JOIN file_chunks fc ON fc.id = {search_table}.rowid
-            JOIN registered_files rf ON rf.id = fc.file_id
-            WHERE {search_table} MATCH ?{filter_clause}
-            ORDER BY rank
-            LIMIT ?
+            WITH matched_files AS (
+                SELECT fc.file_id AS file_id, MIN(rank) AS best_rank
+                FROM {search_table}
+                JOIN file_chunks fc ON fc.id = {search_table}.rowid
+                JOIN registered_files rf ON rf.id = fc.file_id
+                WHERE {search_table} MATCH ?{filter_clause}
+                GROUP BY fc.file_id
+                ORDER BY best_rank
+                LIMIT ?
+            ),
+            ranked_chunks AS (
+                SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content,
+                       matched_files.best_rank, rank AS chunk_rank,
+                       ROW_NUMBER() OVER (PARTITION BY fc.file_id ORDER BY rank) AS chunk_number
+                FROM matched_files
+                JOIN file_chunks fc ON fc.file_id = matched_files.file_id
+                JOIN {search_table} ON {search_table}.rowid = fc.id
+                JOIN registered_files rf ON rf.id = fc.file_id
+                WHERE {search_table} MATCH ?
+            )
+            SELECT file_id, name, path, file_type, location, content
+            FROM ranked_chunks
+            WHERE chunk_number <= ?
+            ORDER BY best_rank, file_id, chunk_number
             """,
-            params,
+            [*params, safe_file_limit, fts_query, safe_per_file_limit],
         )
         rows = cursor.fetchall()
-        conn.close()
-        return _search_row_dicts(rows, raw_query or fts_query)
-
-    safe_file_limit = max(1, file_limit)
-    safe_per_file_limit = max(1, per_file_limit)
-    cursor.execute(
-        f"""
-        WITH matched_files AS (
-            SELECT fc.file_id AS file_id, MIN(rank) AS best_rank
-            FROM {search_table}
-            JOIN file_chunks fc ON fc.id = {search_table}.rowid
-            JOIN registered_files rf ON rf.id = fc.file_id
-            WHERE {search_table} MATCH ?{filter_clause}
-            GROUP BY fc.file_id
-            ORDER BY best_rank
-            LIMIT ?
+        result = _search_row_dicts(rows, query_text)
+        _log_search_done(
+            started=started,
+            search_table=search_table,
+            query_text=query_text,
+            filters=filters,
+            modified_from=modified_from,
+            modified_to=modified_to,
+            file_limit=safe_file_limit,
+            per_file_limit=safe_per_file_limit,
+            result=result,
         )
-        SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content,
-               matched_files.best_rank, rank AS chunk_rank
-        FROM matched_files
-        JOIN file_chunks fc ON fc.file_id = matched_files.file_id
-        JOIN {search_table} ON {search_table}.rowid = fc.id
-        JOIN registered_files rf ON rf.id = fc.file_id
-        WHERE {search_table} MATCH ?
-        ORDER BY matched_files.best_rank, matched_files.file_id, chunk_rank
-        """,
-        [*params, safe_file_limit, fts_query],
-    )
-    rows = []
-    counts_by_file: Dict[int, int] = {}
-    for row in cursor.fetchall():
-        file_id = int(row["file_id"])
-        if counts_by_file.get(file_id, 0) >= safe_per_file_limit:
-            continue
-        counts_by_file[file_id] = counts_by_file.get(file_id, 0) + 1
-        rows.append(row)
-    conn.close()
-    return _search_row_dicts(rows, raw_query or fts_query)
+        return result
+    except Exception as exc:
+        _log_search_done(
+            started=started,
+            search_table=search_table,
+            query_text=query_text,
+            filters=filters,
+            modified_from=modified_from,
+            modified_to=modified_to,
+            file_limit=file_limit,
+            per_file_limit=per_file_limit,
+            error=exc,
+        )
+        raise
+    finally:
+        conn.close()
 
 
 def get_setting(key: str, default: str = "") -> str:

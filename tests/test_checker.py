@@ -836,3 +836,115 @@ def test_check_api_rejects_mixed_file_types(monkeypatch):
         consistency_check(CheckRequest(file_ids=[1, 2]))
 
     assert exc_info.value.status_code == 400
+
+
+def test_check_api_reuses_comparison_cache_and_recomputes_on_file_change(tmp_path, monkeypatch):
+    from backend.database import init_db, register_file
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    left = tmp_path / "left.docx"
+    right = tmp_path / "right.docx"
+    left.write_text("left", encoding="utf-8")
+    right.write_text("right", encoding="utf-8")
+    left_id = register_file(str(left), "left.docx", "Word", "", 0)
+    right_id = register_file(str(right), "right.docx", "Word", "", 0)
+
+    calls = 0
+
+    def fake_run(file_infos, comparison_scope="registered_table"):
+        nonlocal calls
+        calls += 1
+        return {
+            "mode": "word",
+            "excel": None,
+            "word": {
+                "files": [
+                    {"file_id": file_infos[0]["id"], "file_name": file_infos[0]["name"]},
+                    {"file_id": file_infos[1]["id"], "file_name": file_infos[1]["name"]},
+                ],
+                "changes": [],
+            },
+            "ppt": None,
+        }
+
+    monkeypatch.setattr("backend.api.check.run_consistency_check", fake_run)
+
+    first = consistency_check(CheckRequest(file_ids=[left_id, right_id]))
+    second = consistency_check(CheckRequest(file_ids=[left_id, right_id]))
+
+    assert first.mode == second.mode == "word"
+    assert calls == 1
+
+    right.write_text("right changed", encoding="utf-8")
+    third = consistency_check(CheckRequest(file_ids=[left_id, right_id]))
+
+    assert third.mode == "word"
+    assert calls == 2
+
+
+def test_check_api_cache_separates_scope_and_recovers_from_corrupt_entry(tmp_path, monkeypatch):
+    from backend.api.check import _comparison_cache_key
+    from backend.database import init_db, register_file
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    left = tmp_path / "left.xlsx"
+    right = tmp_path / "right.xlsx"
+    left.write_text("left", encoding="utf-8")
+    right.write_text("right", encoding="utf-8")
+    left_id = register_file(str(left), "left.xlsx", "Excel", "id", 1)
+    right_id = register_file(str(right), "right.xlsx", "Excel", "id", 1)
+
+    calls = 0
+
+    def fake_run(file_infos, comparison_scope="registered_table"):
+        nonlocal calls
+        calls += 1
+        return {
+            "mode": "excel",
+            "excel": {"total_keys": 0, "matched_keys": 0, "issues": []},
+            "word": None,
+            "ppt": None,
+        }
+
+    monkeypatch.setattr("backend.api.check.run_consistency_check", fake_run)
+
+    consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="registered_table"))
+    consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="version_history"))
+
+    assert calls == 2
+
+    file_infos = [
+        {
+            "id": left_id,
+            "path": str(left),
+            "name": "left.xlsx",
+            "file_type": "Excel",
+            "key_column": "id",
+            "parser_config": {},
+        },
+        {
+            "id": right_id,
+            "path": str(right),
+            "name": "right.xlsx",
+            "file_type": "Excel",
+            "key_column": "id",
+            "parser_config": {},
+        },
+    ]
+    cache_key = _comparison_cache_key(file_infos, "registered_table")
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_path / "test.db")
+    conn.execute("UPDATE comparison_cache SET result_json = ? WHERE cache_key = ?", ("{bad json", cache_key))
+    conn.commit()
+    conn.close()
+
+    consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="registered_table"))
+
+    assert calls == 3

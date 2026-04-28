@@ -39,6 +39,7 @@ import { EXAMPLE_EXCEL_QUERY, EXAMPLE_PPT_QUERY, TutorialStep } from '../tutoria
 const CHECK_FILE_PAGE_SIZE = 60
 const GROUP_PAGE_SIZE = 50
 const GROUP_DETAIL_FILE_LIMIT = 200
+const HISTORY_DIFF_CONCURRENCY = 3
 type GroupFilter = 'all' | LibraryGroupKind
 type GroupFileTypeFilter = 'all' | 'Excel' | 'Word' | 'PowerPoint'
 type GroupSort = 'recent' | 'count' | 'name'
@@ -589,9 +590,8 @@ export default function ConsistencyCheck({
 
     if (total === 0) return
 
-    for (let index = 0; index < transitions.length; index += 1) {
+    const runTransition = async (transition: HistoryTransition) => {
       if (!isCurrentRun()) return
-      const transition = transitions[index]
       setHistoryState((current) =>
         current?.groupId === detail.id && isCurrentRun()
           ? {
@@ -643,6 +643,16 @@ export default function ConsistencyCheck({
         )
       }
     }
+
+    const workerCount = Math.min(HISTORY_DIFF_CONCURRENCY, transitions.length)
+    await Promise.all(
+      Array.from({ length: workerCount }, async (_, workerIndex) => {
+        for (let index = workerIndex; index < transitions.length; index += workerCount) {
+          if (!isCurrentRun()) return
+          await runTransition(transitions[index])
+        }
+      }),
+    )
 
     setHistoryState((current) =>
       current?.groupId === detail.id && isCurrentRun() ? { ...current, loading: false } : current,

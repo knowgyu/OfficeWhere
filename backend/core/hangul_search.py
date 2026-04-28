@@ -57,13 +57,14 @@ def _ngrams(value: str, *, min_size: int = 2, max_size: int = 6) -> Iterable[str
             yield value[start : start + size]
 
 
-def build_search_text(value: object, *, max_extra_tokens: int = 600) -> str:
-    """Build an FTS-friendly text that supports Korean substring and choseong search.
+def build_search_text(value: object, *, max_extra_tokens: int = 240) -> str:
+    """Build compact FTS fallback text for short Korean substring search.
 
     SQLite FTS tokenizes Korean words as whole tokens, so a query like "회의" may
-    not match the indexed word "회의록".  We keep the original text for ordinary
-    search and add bounded character n-grams plus choseong n-grams as helper
-    tokens.  Results still display the original chunk content.
+    not match the indexed word "회의록".  Trigram FTS handles 3+ character
+    searches, so this fallback now keeps only bounded 2-character helper tokens
+    for short Korean/Latin snippets instead of expanding broad n-grams and
+    choseong tokens.  Results still display the original chunk content.
     """
 
     original = WHITESPACE_PATTERN.sub(" ", str(value or "").strip()).lower()
@@ -81,14 +82,8 @@ def build_search_text(value: object, *, max_extra_tokens: int = 600) -> str:
 
     for match in TOKEN_PATTERN.finditer(original):
         token = match.group(0)
-        for ngram in _ngrams(token):
+        for ngram in _ngrams(token, min_size=2, max_size=2):
             add(ngram)
-
-        choseong = get_choseong(token)
-        if choseong:
-            add(choseong)
-            for ngram in _ngrams(choseong):
-                add(ngram)
 
         if len(extra_tokens) >= max_extra_tokens:
             break
@@ -99,25 +94,15 @@ def build_search_text(value: object, *, max_extra_tokens: int = 600) -> str:
 def build_trigram_search_text(value: object) -> str:
     """Build compact text for the FTS5 trigram fast path.
 
-    The existing unicode61 index stores explicit Korean/choseong n-grams so
-    short queries such as "회의" and "ㅎㅇ" keep working.  The trigram index is
-    only used for 3+ character terms, so it can stay compact: original text
-    plus full choseong strings for Korean tokens.
+    The trigram index is only used for 3+ character terms, so it can stay
+    compact and store the original normalized text without choseong helpers.
     """
 
     original = WHITESPACE_PATTERN.sub(" ", str(value or "").strip()).lower()
     if not original:
         return ""
 
-    helper_tokens: list[str] = []
-    seen: set[str] = set()
-    for match in TOKEN_PATTERN.finditer(original):
-        choseong = get_choseong(match.group(0))
-        if choseong and choseong not in seen:
-            seen.add(choseong)
-            helper_tokens.append(choseong)
-
-    return " ".join([original, *helper_tokens])
+    return original
 
 
 def _query_terms(raw_query: str) -> list[str]:

@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import time
 import tempfile
 from datetime import datetime
@@ -131,7 +132,7 @@ def test_search_matches_korean_substrings_inside_words(tmp_path):
     assert "**회의**" in results[0]["snippet"]
 
 
-def test_search_matches_hangul_choseong(tmp_path):
+def test_search_no_longer_guarantees_hangul_choseong(tmp_path):
     text_path = tmp_path / "meeting.txt"
     text_path.write_text("주간 회의록 작성 후 공유", encoding="utf-8")
 
@@ -140,9 +141,7 @@ def test_search_matches_hangul_choseong(tmp_path):
 
     results = search("ㅎㅇㄹ")
 
-    assert len(results) == 1
-    assert results[0]["file_id"] == file_id
-    assert "**회의록**" in results[0]["snippet"]
+    assert results == []
 
 
 def test_search_matches_long_korean_substring_with_fast_path(tmp_path):
@@ -157,6 +156,73 @@ def test_search_matches_long_korean_substring_with_fast_path(tmp_path):
     assert len(results) == 1
     assert results[0]["file_id"] == file_id
     assert "**프로젝**" in results[0]["snippet"]
+
+
+def test_init_db_removes_unused_base_file_search():
+    from backend.database import DB_PATH
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE name = 'file_search'")
+    assert cursor.fetchone() is None
+    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IN ('chunks_ai', 'chunks_ad')")
+    assert cursor.fetchall() == []
+    cursor.execute("SELECT name FROM sqlite_master WHERE name = 'file_search_ko'")
+    assert cursor.fetchone() == ("file_search_ko",)
+    conn.close()
+
+
+def test_init_db_migrates_legacy_base_file_search(tmp_path, monkeypatch):
+    from backend.database import DB_PATH, init_db, register_file, save_file_chunks
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE VIRTUAL TABLE file_search USING fts5(
+            content,
+            content='file_chunks',
+            content_rowid='id',
+            tokenize='unicode61'
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TRIGGER chunks_ai AFTER INSERT ON file_chunks BEGIN
+            INSERT INTO file_search(rowid, content) VALUES (new.id, new.content);
+        END
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TRIGGER chunks_ad AFTER DELETE ON file_chunks BEGIN
+            INSERT INTO file_search(file_search, rowid, content)
+            VALUES ('delete', old.id, old.content);
+        END
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    init_db()
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE name = 'file_search'")
+    assert cursor.fetchone() is None
+    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name IN ('chunks_ai', 'chunks_ad')")
+    assert cursor.fetchall() == []
+    conn.close()
+
+    file_id = register_file(str(tmp_path / "meeting.txt"), "meeting.txt", "Text", "", 0)
+    save_file_chunks(file_id, [{"location": "본문", "content": "주간 회의록"}])
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT rowid FROM file_search_ko WHERE file_search_ko MATCH ?", ('"회의"',))
+    assert cursor.fetchone() is not None
+    conn.close()
 
 
 def test_reindex_on_file_change(tmp_path):

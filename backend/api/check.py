@@ -1,13 +1,44 @@
+import hashlib
+import json
 import os
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
 
 from ..core.checker import run_consistency_check
 from ..core.excel_diff_grid import build_excel_diff_grid
-from ..database import get_file_by_id
+from ..database import (
+    COMPARISON_CACHE_VERSION,
+    get_cached_comparison_result,
+    get_file_by_id,
+    save_cached_comparison_result,
+)
 from ..models.schemas import CheckRequest, CheckResponse, ExcelDiffGridRequest, ExcelDiffGridResponse
 
 router = APIRouter(prefix="/api/check", tags=["check"])
+
+
+def _comparison_cache_key(file_infos: List[Dict[str, Any]], comparison_scope: str) -> str:
+    files: List[Dict[str, Any]] = []
+    for info in file_infos:
+        stat_result = os.stat(info["path"])
+        files.append(
+            {
+                "id": info["id"],
+                "path": info["path"],
+                "file_type": info["file_type"],
+                "key_column": info.get("key_column", ""),
+                "parser_config": info.get("parser_config", {}),
+                "mtime_ns": stat_result.st_mtime_ns,
+                "size": stat_result.st_size,
+            }
+        )
+    payload = {
+        "version": COMPARISON_CACHE_VERSION,
+        "comparison_scope": comparison_scope,
+        "files": files,
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
 
 
 @router.post("", response_model=CheckResponse)
@@ -36,6 +67,18 @@ def consistency_check(req: CheckRequest):
             }
         )
 
+    file_types = {info["file_type"] for info in file_infos}
+    if len(file_types) != 1:
+        raise HTTPException(status_code=400, detail="서로 다른 파일 형식은 함께 비교할 수 없습니다.")
+
+    cache_key = _comparison_cache_key(file_infos, req.comparison_scope)
+    cached = get_cached_comparison_result(cache_key)
+    if cached is not None:
+        try:
+            return CheckResponse(**cached)
+        except Exception:
+            cached = None
+
     try:
         result = run_consistency_check(file_infos, comparison_scope=req.comparison_scope)
     except ValueError as exc:
@@ -43,7 +86,10 @@ def consistency_check(req: CheckRequest):
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"정합성 검사 중 오류가 발생했습니다: {exc}")
 
-    return CheckResponse(**result)
+    response = CheckResponse(**result)
+    save_cached_comparison_result(cache_key, req.file_ids, req.comparison_scope, response.model_dump())
+    return response
+
 
 
 @router.post("/excel-grid", response_model=ExcelDiffGridResponse)

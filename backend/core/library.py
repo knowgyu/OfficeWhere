@@ -20,6 +20,7 @@ from ..database import (
     PreparedIndexedFile,
     ensure_file_fingerprints,
     get_all_files,
+    get_registered_files_signature,
     get_setting,
     prepare_indexed_file,
     save_indexed_files_batch,
@@ -61,6 +62,9 @@ BATCH_FLUSH_INTERVAL_SECONDS = 1.0
 _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
 _cancel_event = threading.Event()
+_group_cache_lock = threading.Lock()
+_group_cache_signature: Optional[str] = None
+_group_cache_details: Optional[List[LibraryGroupDetail]] = None
 
 
 @dataclass
@@ -1286,7 +1290,7 @@ def _group_detail(
     )
 
 
-def _all_file_group_details() -> List[LibraryGroupDetail]:
+def _build_all_file_group_details() -> List[LibraryGroupDetail]:
     exact_buckets: Dict[Tuple[str, str], List[FileInfo]] = {}
     version_buckets: Dict[Tuple[str, str], List[Tuple[FileInfo, Dict[str, Any]]]] = {}
     manual_latest_by_group = _load_manual_latest_map()
@@ -1350,6 +1354,35 @@ def _all_file_group_details() -> List[LibraryGroupDetail]:
         ),
         reverse=True,
     )
+    return groups
+
+
+def _group_cache_key() -> str:
+    payload = {
+        "files": get_registered_files_signature(),
+        "manual_latest": get_setting(MANUAL_LATEST_SETTING_KEY, "{}"),
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def clear_group_cache() -> None:
+    global _group_cache_signature, _group_cache_details
+    with _group_cache_lock:
+        _group_cache_signature = None
+        _group_cache_details = None
+
+
+def _all_file_group_details() -> List[LibraryGroupDetail]:
+    global _group_cache_signature, _group_cache_details
+    signature = _group_cache_key()
+    with _group_cache_lock:
+        if _group_cache_signature == signature and _group_cache_details is not None:
+            return list(_group_cache_details)
+
+    groups = _build_all_file_group_details()
+    with _group_cache_lock:
+        _group_cache_signature = signature
+        _group_cache_details = list(groups)
     return groups
 
 

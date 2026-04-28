@@ -33,6 +33,12 @@ This file tracks follow-up work that is not part of the formal release checklist
   - Packaged backend should keep using a dynamic localhost port.
   - Dev scripts should default to backend `18765` and frontend `15173`.
 
+- [ ] Re-test large-library search/version responsiveness after the search-version performance pass.
+  - Current direction: base `file_search` is no longer maintained, `file_search_ko` is a compact short-query fallback, version groups are cached by registered-file signature, and unchanged comparison results are reused by file stat/scope cache key.
+  - If the first version-tab load is still slow, consider materializing group summaries in app-owned SQLite instead of rebuilding from all registered files after each process start.
+  - If repeated comparisons accumulate too much app-data, add a comparison-cache retention policy by age/count.
+  - Choseong-only search such as `ㅎㅇㄹ` is intentionally no longer guaranteed; keep 1-2 character Korean substring search working.
+
 - [ ] Decide whether `docs/content-fingerprint-roadmap.md` is still current after recent version-management changes.
   - Keep file-level fingerprints as the default unless real usage shows chunk-level fingerprints are needed.
 
