@@ -415,6 +415,7 @@ def test_search_api_filename_scope_excludes_content_only_matches(tmp_path):
     assert response.total == 1
     assert response.results[0].file_id == filename_id
     assert response.results[0].location == "파일명"
+    assert "**onlyname**" in response.results[0].snippet
 
 
 def test_search_api_content_scope_excludes_filename_only_matches(tmp_path):
@@ -463,6 +464,46 @@ def test_search_api_content_scope_supports_excel_filter(tmp_path):
     assert response.total == 1
     assert response.results[0].file_id == excel_id
     assert response.results[0].file_type == "Excel"
+
+
+def test_word_search_locations_use_page_labels(tmp_path):
+    from docx import Document
+
+    doc_path = tmp_path / "paged.docx"
+    document = Document()
+    document.add_paragraph("첫 페이지")
+    document.add_page_break()
+    document.add_paragraph("두 번째 페이지 검색키워드")
+    document.save(doc_path)
+
+    file_id = register_file(str(doc_path), "paged.docx", "Word", "", 0)
+    index_file(file_id, str(doc_path))
+
+    results = search("검색키워드")
+
+    assert len(results) == 1
+    assert results[0]["location"] == "쪽 2"
+
+
+def test_ppt_search_locations_hide_shape_details(tmp_path):
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    ppt_path = tmp_path / "slides.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    textbox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+    textbox.text = "프로젝트 검색키워드"
+    presentation.save(ppt_path)
+
+    file_id = register_file(str(ppt_path), "slides.pptx", "PowerPoint", "", 0)
+    index_file(file_id, str(ppt_path))
+
+    results = search("검색키워드")
+
+    assert len(results) >= 1
+    assert {result["location"] for result in results} == {"슬라이드 1"}
+    assert all("shape" not in result["location"] for result in results)
 
 
 def test_search_api_filters_by_file_modified_date(tmp_path):

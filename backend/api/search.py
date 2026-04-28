@@ -11,6 +11,7 @@ from ..models.schemas import (
     ReindexResponse,
 )
 from ..core.indexer import search, reindex_all
+from ..core.hangul_search import make_search_snippet
 from ..database import get_setting, search_file_names, set_setting
 
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -129,7 +130,7 @@ def _filename_matches(
                 "path": file_info["path"],
                 "file_type": file_info["file_type"],
                 "location": "파일명",
-                "snippet": file_info["name"],
+                "snippet": make_search_snippet(file_info["name"], normalized_query, context=80),
             }
         )
     return matches

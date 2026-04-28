@@ -124,9 +124,9 @@ const GROUP_FILTER_OPTIONS: { value: GroupFilter; label: string }[] = [
 
 const GROUP_FILE_TYPE_OPTIONS: { value: GroupFileTypeFilter; label: string }[] = [
   { value: 'all', label: '모든 형식' },
-  { value: 'Excel', label: 'Excel 문서' },
-  { value: 'Word', label: 'Word 문서' },
-  { value: 'PowerPoint', label: 'PowerPoint 문서' },
+  { value: 'Excel', label: '.xlsx' },
+  { value: 'Word', label: '.docx' },
+  { value: 'PowerPoint', label: '.pptx' },
 ]
 
 const GROUP_SORT_OPTIONS: { value: GroupSort; label: string }[] = [
@@ -317,6 +317,7 @@ export default function ConsistencyCheck({
   const [groupQueryDraft, setGroupQueryDraft] = useState('')
   const [groupFileType, setGroupFileType] = useState<GroupFileTypeFilter>('all')
   const [groupSort, setGroupSort] = useState<GroupSort>('recent')
+  const [showDuplicateGroups, setShowDuplicateGroups] = useState(false)
   const [groupFilterOpen, setGroupFilterOpen] = useState(false)
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
@@ -358,6 +359,7 @@ export default function ConsistencyCheck({
     nextQuery = groupQuery,
     nextFileType = groupFileType,
     nextSort = groupSort,
+    nextShowDuplicates = showDuplicateGroups,
   ) => {
     setGroupsLoading(true)
     try {
@@ -368,6 +370,7 @@ export default function ConsistencyCheck({
         query: nextQuery,
         fileType: nextFileType === 'all' ? undefined : nextFileType,
         sort: nextSort,
+        includeDuplicates: nextShowDuplicates,
       })
       setGroups(response.data.groups)
       setGroupTotal(response.data.total)
@@ -376,6 +379,7 @@ export default function ConsistencyCheck({
       setGroupQuery(nextQuery)
       setGroupFileType(nextFileType)
       setGroupSort(nextSort)
+      setShowDuplicateGroups(nextShowDuplicates)
     } catch {
       /* silent */
     } finally {
@@ -396,7 +400,7 @@ export default function ConsistencyCheck({
     setGroupQueryDraft(query)
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, 'version_family', query, fileType, 'recent')
+    void fetchGroups(0, 'version_family', query, fileType, 'recent', false)
   }, [tutorialStep])
 
   useEffect(() => {
@@ -406,7 +410,7 @@ export default function ConsistencyCheck({
     setGroupQueryDraft('')
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, 'all', '', 'all', 'recent')
+    void fetchGroups(0, 'all', '', 'all', 'recent', false)
   }, [tutorialStep])
 
   useEffect(() => {
@@ -819,40 +823,46 @@ export default function ConsistencyCheck({
   const changeGroupFilter = (nextFilter: GroupFilter) => {
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, nextFilter, groupQuery, groupFileType, groupSort)
+    void fetchGroups(0, nextFilter, groupQuery, groupFileType, groupSort, showDuplicateGroups)
   }
 
   const changeGroupFileType = (nextFileType: GroupFileTypeFilter) => {
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, groupFilter, groupQuery, nextFileType, groupSort)
+    void fetchGroups(0, groupFilter, groupQuery, nextFileType, groupSort, showDuplicateGroups)
   }
 
   const changeGroupSort = (nextSort: GroupSort) => {
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, groupFilter, groupQuery, groupFileType, nextSort)
+    void fetchGroups(0, groupFilter, groupQuery, groupFileType, nextSort, showDuplicateGroups)
+  }
+
+  const changeDuplicateGroups = (nextShowDuplicates: boolean) => {
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchGroups(0, groupFilter, groupQuery, groupFileType, groupSort, nextShowDuplicates)
   }
 
   const handleGroupSearch = () => {
     const nextQuery = groupQueryDraft.trim()
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, groupFilter, nextQuery, groupFileType, groupSort)
+    void fetchGroups(0, groupFilter, nextQuery, groupFileType, groupSort, showDuplicateGroups)
   }
 
   const clearGroupSearch = () => {
     setGroupQueryDraft('')
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, groupFilter, '', groupFileType, groupSort)
+    void fetchGroups(0, groupFilter, '', groupFileType, groupSort, showDuplicateGroups)
   }
 
   const resetGroupFilters = () => {
     setGroupQueryDraft('')
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, 'all', '', 'all', 'recent')
+    void fetchGroups(0, 'all', '', 'all', 'recent', false)
   }
 
   const scrollToManualPicker = () => {
@@ -868,7 +878,7 @@ export default function ConsistencyCheck({
     const boundedOffset = Math.max(0, nextOffset)
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(boundedOffset, groupFilter, groupQuery, groupFileType, groupSort)
+    void fetchGroups(boundedOffset, groupFilter, groupQuery, groupFileType, groupSort, showDuplicateGroups)
   }
 
   const visibleFileStart = fileTotal === 0 ? 0 : fileOffset + 1
@@ -888,9 +898,14 @@ export default function ConsistencyCheck({
   const activeFilterCount =
     (groupFilter === 'all' ? 0 : 1) +
     (groupFileType === 'all' ? 0 : 1) +
-    (groupSort === 'recent' ? 0 : 1)
+    (groupSort === 'recent' ? 0 : 1) +
+    (showDuplicateGroups ? 1 : 0)
   const hasActiveGroupFilters =
-    Boolean(groupQuery) || groupFilter !== 'all' || groupFileType !== 'all' || groupSort !== 'recent'
+    Boolean(groupQuery) ||
+    groupFilter !== 'all' ||
+    groupFileType !== 'all' ||
+    groupSort !== 'recent' ||
+    showDuplicateGroups
   const tutorialOpenTargetType =
     tutorialStep === 'version-ppt'
       ? 'PowerPoint'
@@ -973,7 +988,7 @@ export default function ConsistencyCheck({
 	            </div>
             {groupFilterOpen && (
               <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 p-3 shadow-elev-1">
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                   <div>
                     <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">문서 구분</p>
                     <div className="mt-2 flex gap-2 flex-wrap">
@@ -1019,6 +1034,22 @@ export default function ConsistencyCheck({
                       ))}
                     </div>
                   </div>
+                  <div>
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">중복 파일</p>
+                    <div className="mt-2 space-y-2">
+                      <Button
+                        size="sm"
+                        variant={showDuplicateGroups ? 'tonal' : 'outlined'}
+                        leadingIcon={showDuplicateGroups ? 'visibility' : 'visibility_off'}
+                        onClick={() => changeDuplicateGroups(!showDuplicateGroups)}
+                      >
+                        내용 같은 중복도 보기
+                      </Button>
+                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                        기본값은 이름은 같아도 내용까지 같은 파일을 숨깁니다.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1027,6 +1058,7 @@ export default function ConsistencyCheck({
                 <Chip label={`구분 · ${groupFilterLabel}`} tone="neutral" as="span" />
                 <Chip label={`형식 · ${groupFileTypeLabel}`} tone="neutral" as="span" />
                 <Chip label={`정렬 · ${groupSortLabel}`} tone="neutral" as="span" />
+                {showDuplicateGroups && <Chip label="내용 같은 중복 포함" tone="neutral" as="span" />}
               </div>
               <Button
                 variant="outlined"
@@ -1042,6 +1074,7 @@ export default function ConsistencyCheck({
                 {groupFilter !== 'all' && <Chip label={`구분 · ${groupFilterLabel}`} tone="primary" as="span" />}
                 {groupFileType !== 'all' && <Chip label={`형식 · ${groupFileTypeLabel}`} tone="neutral" as="span" />}
                 {groupSort !== 'recent' && <Chip label={`정렬 · ${groupSortLabel}`} tone="neutral" as="span" />}
+                {showDuplicateGroups && <Chip label="내용 같은 중복 포함" tone="neutral" as="span" />}
               </div>
             )}
           </div>

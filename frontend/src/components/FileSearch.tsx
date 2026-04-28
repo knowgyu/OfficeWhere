@@ -20,9 +20,9 @@ import { EXAMPLE_SEARCH_QUERY, TutorialStep } from '../tutorial'
 
 
 const FILE_TYPE_FILTERS = [
-  { label: 'Excel / XLSX·XLS', value: 'xlsx', icon: 'table_chart' },
-  { label: 'Word / DOCX', value: 'docx', icon: 'article' },
-  { label: 'PPT / PPTX', value: 'pptx', icon: 'slideshow' },
+  { label: '.xlsx', value: 'xlsx', icon: 'table_chart' },
+  { label: '.docx', value: 'docx', icon: 'article' },
+  { label: '.pptx', value: 'pptx', icon: 'slideshow' },
 ]
 
 const SEARCH_SCOPE_STATUS: Record<SearchScope, string> = {
@@ -96,10 +96,16 @@ function dateDaysAgo(days: number) {
   return formatDateInput(date)
 }
 
-function SnippetText({ snippet }: { snippet: string }) {
+function HighlightedSnippet({
+  snippet,
+  className = 'type-body-md text-[var(--md-sys-color-on-surface)] leading-relaxed',
+}: {
+  snippet: string
+  className?: string
+}) {
   const parts = snippet.split('**')
   return (
-    <span className="type-body-md text-[var(--md-sys-color-on-surface)] leading-relaxed">
+    <span className={className}>
       {parts.map((part, i) =>
         i % 2 === 1 ? (
           <mark
@@ -114,6 +120,10 @@ function SnippetText({ snippet }: { snippet: string }) {
       )}
     </span>
   )
+}
+
+function SnippetText({ snippet }: { snippet: string }) {
+  return <HighlightedSnippet snippet={snippet} />
 }
 
 function SearchResultListItem({
@@ -865,13 +875,17 @@ export default function FileSearch({
               const filenameItems = items.filter((item) => item.location === '파일명')
               const contentItems = items.filter((item) => item.location !== '파일명')
               const contentExpanded = expandedContentFiles.has(fileKey)
+              const titleSnippet = filenameItems[0]?.snippet ?? fileName
 
               return (
                 <Card key={fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none">
                   <header className="px-5 py-3.5 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/62">
                     <FileTypeBadge fileType={items[0].file_type} />
                     <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
-                      {fileName}
+                      <HighlightedSnippet
+                        snippet={titleSnippet}
+                        className="type-title-sm text-[var(--md-sys-color-on-surface)]"
+                      />
                     </span>
                     <Badge tone="neutral">{items.length}건</Badge>
                     <Button
@@ -884,13 +898,6 @@ export default function FileSearch({
                     </Button>
                   </header>
                   <ul>
-                    {filenameItems.map((item, index) => (
-                      <SearchResultListItem
-                        key={`filename-${item.file_id}-${index}`}
-                        item={item}
-                        onOpen={handleOpenFile}
-                      />
-                    ))}
                     {contentItems.length > 0 && (
                       <li className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0">
                         <Button

@@ -21,6 +21,10 @@ Cons:
 - Reordered or partially changed content still requires the existing compare action to inspect details.
 - It is a confidence/evidence layer, not a full version-control system.
 
+## Current UX use
+
+Version management uses file-level fingerprints to suppress noisy same-name/same-content duplicate groups by default. The user can reveal those duplicate-file groups with a secondary toggle. Same-name groups with different, partial, pending, or insufficient content evidence stay visible because those still may require review.
+
 ## Deferred enhancement: paragraph/cell/slide-level fingerprints
 
 A future version may add chunk-level fingerprints such as:

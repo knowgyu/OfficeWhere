@@ -11,6 +11,8 @@ from typing import Any, Callable, Dict, TypeVar
 _LOG_LOCK = threading.Lock()
 _LOG_PATH: Path | None = None
 _ENABLED: bool | None = None
+_PARSE_LOG_PATH: Path | None = None
+_PARSE_ENABLED: bool | None = None
 T = TypeVar("T")
 
 
@@ -34,11 +36,27 @@ def _resolve_log_path() -> Path:
     return Path.home() / ".officewhere" / "logs" / "index-performance.log"
 
 
+def _resolve_parse_log_path() -> Path:
+    configured = os.environ.get("OW_PARSE_PERF_LOG_PATH", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+
+    index_path = index_perf_log_path()
+    return index_path.with_name("parsing-performance.log")
+
+
 def index_perf_log_path() -> Path:
     global _LOG_PATH
     if _LOG_PATH is None:
         _LOG_PATH = _resolve_log_path()
     return _LOG_PATH
+
+
+def parse_perf_log_path() -> Path:
+    global _PARSE_LOG_PATH
+    if _PARSE_LOG_PATH is None:
+        _PARSE_LOG_PATH = _resolve_parse_log_path()
+    return _PARSE_LOG_PATH
 
 
 def index_perf_enabled() -> bool:
@@ -52,17 +70,20 @@ def index_perf_enabled() -> bool:
     return _ENABLED
 
 
-def log_index_perf(event: str, **fields: Any) -> None:
-    """Append one NDJSON performance event for indexing diagnostics.
+def parse_perf_enabled() -> bool:
+    global _PARSE_ENABLED
+    if _PARSE_ENABLED is None:
+        value = os.environ.get("OW_PARSE_PERF_LOG", "").strip().lower()
+        if value in {"0", "false", "no", "off"}:
+            _PARSE_ENABLED = False
+        elif value in {"1", "true", "yes", "on"} or os.environ.get("OW_PARSE_PERF_LOG_PATH", "").strip():
+            _PARSE_ENABLED = True
+        else:
+            _PARSE_ENABLED = index_perf_enabled()
+    return _PARSE_ENABLED
 
-    This log intentionally lives outside the normal backend log so expensive
-    corporate-PC indexing runs can be inspected without mixing timing data with
-    exceptions or uvicorn output.  It records file paths and timing only; never
-    document text.
-    """
-    if not index_perf_enabled():
-        return
 
+def _write_perf_event(path: Path, event: str, fields: Dict[str, Any]) -> None:
     payload: Dict[str, Any] = {
         "ts": datetime.now().isoformat(timespec="milliseconds"),
         "event": event,
@@ -71,7 +92,6 @@ def log_index_perf(event: str, **fields: Any) -> None:
         **fields,
     }
 
-    path = index_perf_log_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(payload, ensure_ascii=False, default=str)
@@ -82,6 +102,26 @@ def log_index_perf(event: str, **fields: Any) -> None:
     except Exception:
         # Performance logging must never break indexing.
         return
+
+
+def log_index_perf(event: str, **fields: Any) -> None:
+    """Append one NDJSON performance event for indexing diagnostics.
+
+    This log intentionally lives outside the normal backend log so expensive
+    corporate-PC indexing runs can be inspected without mixing timing data with
+    exceptions or uvicorn output.  It records file paths and timing only; never
+    document text.
+    """
+    if not index_perf_enabled():
+        return
+    _write_perf_event(index_perf_log_path(), event, fields)
+
+
+def log_parse_perf(event: str, **fields: Any) -> None:
+    """Append one NDJSON parser timing event to a parser-specific log."""
+    if not parse_perf_enabled():
+        return
+    _write_perf_event(parse_perf_log_path(), event, fields)
 
 
 def elapsed_ms(started: float) -> int:

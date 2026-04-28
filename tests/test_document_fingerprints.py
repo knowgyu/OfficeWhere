@@ -117,7 +117,10 @@ def test_group_fingerprints_backfill_from_existing_chunks(tmp_path, monkeypatch)
     conn.commit()
     conn.close()
 
-    response = list_file_groups(kind="exact_name_conflict", limit=10)
+    hidden_response = list_file_groups(kind="exact_name_conflict", limit=10)
+    assert hidden_response.total == 0
+
+    response = list_file_groups(kind="exact_name_conflict", limit=10, include_duplicate_content=True)
     group = response.groups[0]
 
     assert group.content_status == "same_content"
@@ -127,7 +130,7 @@ def test_group_fingerprints_backfill_from_existing_chunks(tmp_path, monkeypatch)
     assert set(get_file_fingerprints([first_id, second_id])) == {first_id, second_id}
 
 
-def test_group_list_backfills_fingerprints_for_visible_page_only(tmp_path, monkeypatch):
+def test_group_list_backfills_exact_name_fingerprints_before_duplicate_filtering(tmp_path, monkeypatch):
     from backend.api.library import get_library_groups
 
     _setup_db(tmp_path, monkeypatch)
@@ -148,7 +151,7 @@ def test_group_list_backfills_fingerprints_for_visible_page_only(tmp_path, monke
 
     assert response.total == 3
     assert len(response.groups) == 1
-    assert len(get_file_fingerprints(file_ids)) == 2
+    assert len(get_file_fingerprints(file_ids)) == 6
 
 
 def test_large_group_detail_is_fingerprint_partial_when_detail_is_capped(tmp_path, monkeypatch):

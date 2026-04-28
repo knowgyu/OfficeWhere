@@ -599,6 +599,7 @@ export interface LibraryGroupsParams {
   sort?: 'recent' | 'name' | 'count' | 'content'
   limit?: number
   offset?: number
+  includeDuplicates?: boolean
 }
 
 const electronApi = () => getOfficeWhereBridge()
@@ -658,6 +659,7 @@ async function getLibraryGroups(params: LibraryGroupsParams = {}) {
   if (params.sort) searchParams.set('sort', params.sort)
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
+  if (params.includeDuplicates) searchParams.set('include_duplicates', 'true')
 
   const url = await apiPath('/api/library/groups')
   const suffix = searchParams.toString()

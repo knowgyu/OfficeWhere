@@ -65,8 +65,17 @@ def get_library_groups(
     sort: str = "recent",
     limit: int = 50,
     offset: int = 0,
+    include_duplicates: bool = False,
 ):
-    return list_file_groups(kind=kind, file_type=type, query=q, sort=sort, limit=limit, offset=offset)
+    return list_file_groups(
+        kind=kind,
+        file_type=type,
+        query=q,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+        include_duplicate_content=include_duplicates,
+    )
 
 
 @router.get("/groups/{group_id}", response_model=LibraryGroupDetail)

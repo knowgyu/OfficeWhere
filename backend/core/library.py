@@ -1560,8 +1560,10 @@ def _reason_with_content_evidence(reason: str, content: Dict[str, Any]) -> str:
 def _with_content_evidence(
     group: LibraryGroupDetail,
     evidence_files: List[FileInfo],
+    fingerprint_by_id: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> LibraryGroupDetail:
-    fingerprint_by_id = ensure_file_fingerprints([file.id for file in evidence_files])
+    if fingerprint_by_id is None:
+        fingerprint_by_id = ensure_file_fingerprints([file.id for file in evidence_files])
     content = _content_evidence(
         evidence_files,
         fingerprint_by_id,
@@ -1582,6 +1584,22 @@ def _with_content_evidence(
             **content,
         }
     )
+
+
+def _enrich_exact_name_group_content(groups: List[LibraryGroupDetail]) -> List[LibraryGroupDetail]:
+    exact_groups = [group for group in groups if group.group_kind == "exact_name_conflict"]
+    if not exact_groups:
+        return groups
+
+    file_ids = sorted({file.id for group in exact_groups for file in group.files})
+    fingerprint_by_id = ensure_file_fingerprints(file_ids)
+    exact_group_ids = {group.id for group in exact_groups}
+    return [
+        _with_content_evidence(group, group.files, fingerprint_by_id)
+        if group.id in exact_group_ids
+        else group
+        for group in groups
+    ]
 
 
 def _version_file_sort_key(file_info: FileInfo) -> Tuple[Any, ...]:
@@ -1766,6 +1784,7 @@ def list_file_groups(
     sort: str = "recent",
     limit: int = DEFAULT_GROUP_LIMIT,
     offset: int = 0,
+    include_duplicate_content: bool = False,
 ) -> LibraryGroupsResponse:
     safe_limit = _bounded_limit(limit)
     safe_offset = max(0, offset)
@@ -1790,6 +1809,14 @@ def list_file_groups(
                     *(file.path for file in group.files),
                 ]
             ).lower()
+        ]
+
+    if not include_duplicate_content:
+        groups = _enrich_exact_name_group_content(groups)
+        groups = [
+            group
+            for group in groups
+            if group.group_kind != "exact_name_conflict" or group.content_status != "same_content"
         ]
 
     if sort == "name":

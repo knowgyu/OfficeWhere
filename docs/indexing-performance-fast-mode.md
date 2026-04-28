@@ -3,6 +3,8 @@
 ## Why this exists
 Large OfficeWhere libraries can contain 1,000+ Office files. On high-spec PCs, users may prefer a faster, more resource-intensive indexing pass over the conservative default refresh.
 
+This file is the durable decision record for indexing/DB/search-performance tradeoffs discussed during the 0.4.x-0.5.0 performance work. Local `.omx/plans/*` files hold planning scratchpads, but this document is the version-controlled reference.
+
 ## Decisions
 - Keep **문서 새로고침** as the safe normal path.
 - Run user-triggered folder additions and manual refreshes through fast mode; keep automatic/scheduler refreshes conservative.
@@ -27,6 +29,12 @@ Large OfficeWhere libraries can contain 1,000+ Office files. On high-spec PCs, u
 - Fast mode uses `OW_FAST_MAX_WORKERS` and a higher, user-visible cap for explicit high-speed runs.
 - GPU is not used: Office ZIP/XML parsing, filesystem I/O, and SQLite/FTS writes are CPU/I/O-bound.
 
+## Scheduling notes
+- Current implementation uses bounded parser worker threads plus serialized DB writes.
+- Future scheduling work should stay simple: prioritize Excel files early, sort Excel candidates by size descending, and reserve roughly half of worker slots for Excel while allowing idle slots to drain Word/PPT work.
+- Do not implement complex per-file cost prediction until logs show a repeatable gain. File size is a weak signal for PPT but a useful first signal for slow Excel files.
+- Python threads are already used. More threads do not guarantee more CPU parallelism because ZIP/XML/string parsing can hit the GIL and shared I/O/security-scanner limits; process-based parsing is a separate, higher-risk design.
+
 ## Performance log interpretation
 - `scan_folder_done` reports per-folder `visited_dir_count`, `skipped_dir_count`, skipped folder names, `inaccessible_dir_count`, inaccessible folder names, unsupported suffix counts, and scan duration.
 - `db_flush_done` reports `reason` (`file_limit`, `chunk_limit`, `single_large_file`, `interval`, `final`, or `cancel`), batch file/chunk counts, and write duration.
@@ -34,6 +42,7 @@ Large OfficeWhere libraries can contain 1,000+ Office files. On high-spec PCs, u
 - `initial_index_staging_*` events show whether first-run staging was selected and how long deferred FTS rebuild, trigger creation, quick check, and copy-back took.
 - `rescan_skipped` with `reason=already_running` means a scheduler/direct refresh was suppressed because another rescan already holds the execution token.
 - `rescan_end` summarizes scan counts, unsupported-file counts, flush count/avg/max durations, registered chunk count, and legacy unsupported rows pruned.
+- Detailed parser timing is written to a separate `parsing-performance.log` so large Excel/PPT/Word parse tails can be shared without mixing them into DB/index flush events. Override with `OW_PARSE_PERF_LOG_PATH`; disable with `OW_PARSE_PERF_LOG=0`.
 - The UI emits a `saving` progress stage while DB writes are being committed so a long flush is visible instead of appearing hung.
 
 ## Guardrails

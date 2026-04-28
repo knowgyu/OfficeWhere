@@ -19,7 +19,7 @@ from ..database import (
 )
 from .excel_analysis import extract_excel_used_range, inspect_excel_file_with_recovery
 from .file_scope import SUPPORTED_EXTENSIONS
-from .index_perf import elapsed_ms, log_index_perf, timed_ms
+from .index_perf import elapsed_ms, log_index_perf, log_parse_perf, timed_ms
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_slides
 from ..runtime import get_worker_count
@@ -32,53 +32,164 @@ _MAX_WORKERS = get_worker_count()
 
 
 def _excel_used_range_chunks(path: str) -> List[Dict[str, str]]:
-    df, config = extract_excel_used_range(path)
-    chunks: List[Dict[str, str]] = []
+    started = time.perf_counter()
+    metrics: Dict[str, Any] = {
+        "path": path,
+        "name": Path(path).name,
+        "ext": Path(path).suffix.lower(),
+        "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
+    }
+    try:
+        df, config = extract_excel_used_range(path)
+        chunks: List[Dict[str, str]] = []
 
-    sheet_name = config["sheet_name"]
-    for dataframe_index, row in df.iterrows():
-        excel_row = int(dataframe_index) + 1
-        for column, value in row.items():
-            text = str(value).strip()
-            if text:
-                chunks.append(
-                    {
-                        "location": f"{sheet_name} 시트 | {excel_row}행 {column}열",
-                        "content": text,
-                    }
-                )
+        sheet_name = config["sheet_name"]
+        for dataframe_index, row in df.iterrows():
+            excel_row = int(dataframe_index) + 1
+            for column, value in row.items():
+                text = str(value).strip()
+                if text:
+                    chunks.append(
+                        {
+                            "location": f"{sheet_name} 시트 | {excel_row}행 {column}열",
+                            "content": text,
+                        }
+                    )
 
-    return chunks
+        metrics.update(
+            success=True,
+            sheet_name=sheet_name,
+            row_count=len(df.index),
+            column_count=len(df.columns),
+            chunk_count=len(chunks),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("excel_used_range_chunks_done", **metrics)
+        return chunks
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("excel_used_range_chunks_done", **metrics)
+        raise
 
 
 def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
-    inspection = inspect_excel_file_with_recovery(path, parser_config=parser_config)
-    chunks = _excel_used_range_chunks(path)
-    return inspection, chunks
+    started = time.perf_counter()
+    metrics: Dict[str, Any] = {
+        "path": path,
+        "name": Path(path).name,
+        "ext": Path(path).suffix.lower(),
+        "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
+    }
+    try:
+        inspection = timed_ms(
+            metrics,
+            "metadata_ms",
+            lambda: inspect_excel_file_with_recovery(path, parser_config=parser_config),
+        )
+        chunks = timed_ms(metrics, "used_range_chunk_ms", lambda: _excel_used_range_chunks(path))
+        metrics.update(
+            success=True,
+            file_type="Excel",
+            chunk_count=len(chunks),
+            column_count=len(inspection["columns"]),
+            total_ms=elapsed_ms(started),
+        )
+        log_parse_perf("excel_inspect_and_chunk_done", **metrics)
+        return inspection, chunks
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(started),
+        )
+        log_parse_perf("excel_inspect_and_chunk_done", **metrics)
+        raise
 
 
 def _inspect_and_chunk_word(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
-    blocks = extract_word_blocks(path)
-    inspection = inspect_word_blocks(blocks)
-    chunks = [{"location": block["location"], "content": block["text"]} for block in blocks]
-    return inspection, chunks
+    started = time.perf_counter()
+    metrics: Dict[str, Any] = {
+        "path": path,
+        "name": Path(path).name,
+        "ext": Path(path).suffix.lower(),
+        "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
+    }
+    try:
+        blocks = extract_word_blocks(path)
+        inspection = inspect_word_blocks(blocks)
+        chunks = [
+            {"location": f"쪽 {int(block.get('page_number') or 1)}", "content": block["text"]}
+            for block in blocks
+        ]
+        metrics.update(
+            success=True,
+            file_type="Word",
+            block_count=len(blocks),
+            chunk_count=len(chunks),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("word_parse_done", **metrics)
+        return inspection, chunks
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            file_type="Word",
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("word_parse_done", **metrics)
+        raise
 
 
 def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
-    slides = extract_ppt_slides(path)
-    inspection = inspect_ppt_slides(slides)
-    chunks: List[Dict[str, str]] = []
-    for slide in slides:
-        if slide["title"]:
-            chunks.append({"location": f"슬라이드 {slide['slide_number']} 제목", "content": slide["title"]})
-        for item in slide["items"]:
-            chunks.append(
-                {
-                    "location": f"슬라이드 {slide['slide_number']} | {item['location']}",
-                    "content": item["text"],
-                }
-            )
-    return inspection, chunks
+    started = time.perf_counter()
+    metrics: Dict[str, Any] = {
+        "path": path,
+        "name": Path(path).name,
+        "ext": Path(path).suffix.lower(),
+        "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
+    }
+    try:
+        slides = extract_ppt_slides(path)
+        inspection = inspect_ppt_slides(slides)
+        chunks: List[Dict[str, str]] = []
+        for slide in slides:
+            slide_location = f"슬라이드 {slide['slide_number']}"
+            if slide["title"]:
+                chunks.append({"location": slide_location, "content": slide["title"]})
+            for item in slide["items"]:
+                chunks.append(
+                    {
+                        "location": slide_location,
+                        "content": item["text"],
+                    }
+                )
+        metrics.update(
+            success=True,
+            file_type="PowerPoint",
+            slide_count=len(slides),
+            chunk_count=len(chunks),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("ppt_parse_done", **metrics)
+        return inspection, chunks
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            file_type="PowerPoint",
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("ppt_parse_done", **metrics)
+        raise
 
 
 def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
