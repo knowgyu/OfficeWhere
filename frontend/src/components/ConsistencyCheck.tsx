@@ -38,13 +38,18 @@ import { EXAMPLE_EXCEL_QUERY, EXAMPLE_PPT_QUERY, TutorialStep } from '../tutoria
 
 const CHECK_FILE_PAGE_SIZE = 60
 const GROUP_PAGE_SIZE = 50
-const GROUP_DETAIL_FILE_LIMIT = 200
-const HISTORY_DIFF_CONCURRENCY = 3
+const VERSION_LIST_PREVIEW_LIMIT = 5
 type GroupFilter = 'all' | LibraryGroupKind
 type GroupFileTypeFilter = 'all' | 'Excel' | 'Word' | 'PowerPoint'
 type GroupSort = 'recent' | 'count' | 'name'
-type ContentStatus = LibraryGroupSummary['content_status']
 type HistoryTransitionStatus = 'pending' | 'loading' | 'done' | 'error'
+type CompareSlot = 'from' | 'to'
+
+interface CompareSelection {
+  fromId: number | null
+  toId: number | null
+}
+
 interface HistoryTransition {
   id: string
   fromFile: FileInfo
@@ -95,17 +100,6 @@ const PPT_TYPE_KO: Record<string, string> = {
   inserted_slide: '슬라이드 추가',
   removed_slide: '슬라이드 제거',
   matched_slide_change: '슬라이드 변경',
-}
-
-const CONTENT_STATUS_META: Record<
-  ContentStatus,
-  { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' }
-> = {
-  pending: { label: '내용 확인 전', tone: 'neutral' },
-  partial: { label: '일부만 확인', tone: 'warning' },
-  not_enough_content: { label: '본문 부족', tone: 'neutral' },
-  same_content: { label: '내용 같아 보임', tone: 'success' },
-  content_differs: { label: '내용 다름 가능', tone: 'danger' },
 }
 
 const isCheckableFile = (file: FileInfo) =>
@@ -326,6 +320,7 @@ export default function ConsistencyCheck({
   const [settingLatestFileId, setSettingLatestFileId] = useState<number | null>(null)
   const [clearingLatestGroupId, setClearingLatestGroupId] = useState<string | null>(null)
   const [historyState, setHistoryState] = useState<HistoryDiffState | null>(null)
+  const [compareSelections, setCompareSelections] = useState<Record<string, CompareSelection>>({})
   const [result, setResult] = useState<CheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [pendingScrollGroupId, setPendingScrollGroupId] = useState<string | null>(null)
@@ -561,26 +556,62 @@ export default function ConsistencyCheck({
     }
   }
 
-  const buildHistoryTransitions = (detail: LibraryGroupDetail): HistoryTransition[] =>
-    detail.files.slice(0, GROUP_DETAIL_FILE_LIMIT).flatMap((toFile, index, filesForHistory) => {
-      const fromFile = filesForHistory[index + 1]
-      if (!fromFile) return []
-      return [
-        {
-          id: `${fromFile.id}->${toFile.id}`,
-          fromFile,
-          toFile,
-          status: 'pending' as const,
-          result: null,
-        },
-      ]
-    })
+  const defaultCompareSelection = (detail: LibraryGroupDetail): CompareSelection => ({
+    fromId: detail.previous_file?.id ?? detail.files[1]?.id ?? null,
+    toId: detail.latest_file?.id ?? detail.files[0]?.id ?? null,
+  })
 
-  const runHistoryDiffs = async (detail: LibraryGroupDetail) => {
+  const normalizeCompareSelection = (
+    detail: LibraryGroupDetail,
+    selection?: CompareSelection | null,
+  ): CompareSelection => {
+    const fileIds = new Set(detail.files.map((file) => file.id))
+    const defaults = defaultCompareSelection(detail)
+    let fromId = selection?.fromId && fileIds.has(selection.fromId) ? selection.fromId : defaults.fromId
+    let toId = selection?.toId && fileIds.has(selection.toId) ? selection.toId : defaults.toId
+
+    if (fromId === toId) {
+      const alternate = detail.files.find((file) => file.id !== toId)?.id ?? null
+      fromId = alternate
+    }
+
+    return { fromId, toId }
+  }
+
+  const buildHistoryTransitions = (
+    detail: LibraryGroupDetail,
+    selection: CompareSelection,
+  ): HistoryTransition[] => {
+    const fromFile = selection.fromId
+      ? detail.files.find((file) => file.id === selection.fromId)
+      : undefined
+    const toFile = selection.toId
+      ? detail.files.find((file) => file.id === selection.toId)
+      : undefined
+
+    if (!fromFile || !toFile || fromFile.id === toFile.id) return []
+
+    return [
+      {
+        id: `${fromFile.id}->${toFile.id}`,
+        fromFile,
+        toFile,
+        status: 'pending' as const,
+        result: null,
+      },
+    ]
+  }
+
+  const runHistoryDiffs = async (
+    detail: LibraryGroupDetail,
+    requestedSelection?: CompareSelection | null,
+  ) => {
     const runId = historyRunRef.current + 1
     historyRunRef.current = runId
     const isCurrentRun = () => historyRunRef.current === runId
-    const transitions = buildHistoryTransitions(detail)
+    const selection = normalizeCompareSelection(detail, requestedSelection ?? compareSelections[detail.id])
+    setCompareSelections((current) => ({ ...current, [detail.id]: selection }))
+    const transitions = buildHistoryTransitions(detail, selection)
     const total = transitions.length
     const truncated = detail.file_count > detail.files.length
     setHistoryState({
@@ -648,19 +679,31 @@ export default function ConsistencyCheck({
       }
     }
 
-    const workerCount = Math.min(HISTORY_DIFF_CONCURRENCY, transitions.length)
-    await Promise.all(
-      Array.from({ length: workerCount }, async (_, workerIndex) => {
-        for (let index = workerIndex; index < transitions.length; index += workerCount) {
-          if (!isCurrentRun()) return
-          await runTransition(transitions[index])
-        }
-      }),
-    )
+    await runTransition(transitions[0])
 
     setHistoryState((current) =>
       current?.groupId === detail.id && isCurrentRun() ? { ...current, loading: false } : current,
     )
+  }
+
+  const changeCompareSelection = (
+    detail: LibraryGroupDetail,
+    file: FileInfo,
+    slot: CompareSlot,
+  ) => {
+    const currentSelection = normalizeCompareSelection(detail, compareSelections[detail.id])
+    const nextSelection =
+      slot === 'from'
+        ? { ...currentSelection, fromId: file.id }
+        : { ...currentSelection, toId: file.id }
+
+    if (nextSelection.fromId === nextSelection.toId) {
+      snackbar.warn('서로 다른 두 파일을 1번과 2번으로 선택해 주세요.')
+      return
+    }
+
+    setCompareSelections((current) => ({ ...current, [detail.id]: nextSelection }))
+    void runHistoryDiffs(detail, nextSelection)
   }
 
   const selectGroup = async (group: LibraryGroupSummary) => {
@@ -674,8 +717,7 @@ export default function ConsistencyCheck({
     const detail = await loadGroupDetail(group)
     if (!detail) return false
     setPendingScrollGroupId(detail.id)
-    if (historyState?.groupId === detail.id && historyState.transitions.length > 0) return true
-    await runHistoryDiffs(detail)
+    await runHistoryDiffs(detail, compareSelections[detail.id])
     return true
   }
 
@@ -707,7 +749,9 @@ export default function ConsistencyCheck({
         current.map((group) => (group.id === updated.id ? groupSummaryFromDetail(updated) : group)),
       )
       setHistoryState(null)
-      await runHistoryDiffs(updated)
+      const nextSelection = defaultCompareSelection(updated)
+      setCompareSelections((current) => ({ ...current, [updated.id]: nextSelection }))
+      await runHistoryDiffs(updated, nextSelection)
       snackbar.success('최신 파일로 지정했습니다.')
     } catch (error) {
       const detailMessage =
@@ -737,7 +781,9 @@ export default function ConsistencyCheck({
         current.map((group) => (group.id === updated.id ? groupSummaryFromDetail(updated) : group)),
       )
       setHistoryState(null)
-      await runHistoryDiffs(updated)
+      const nextSelection = defaultCompareSelection(updated)
+      setCompareSelections((current) => ({ ...current, [updated.id]: nextSelection }))
+      await runHistoryDiffs(updated, nextSelection)
       snackbar.success('자동 최신 정렬로 되돌렸습니다.')
     } catch (error) {
       const detailMessage =
@@ -1106,10 +1152,16 @@ export default function ConsistencyCheck({
                     group={group}
                     activeDetail={activeGroupDetail?.id === group.id ? activeGroupDetail : null}
                     historyState={historyState?.groupId === group.id ? historyState : null}
+                    compareSelection={
+                      activeGroupDetail?.id === group.id
+                        ? normalizeCompareSelection(activeGroupDetail, compareSelections[group.id])
+                        : null
+                    }
                     loading={groupLoadingId === group.id}
                     onOpen={() => void openGuidedGroup(group)}
                     onOpenFile={(file) => void openFile(file)}
                     onOpenExcelGrid={(detail, state) => void openGuidedExcelGrid(detail, state)}
+                    onSelectCompareSlot={(detail, file, slot) => changeCompareSelection(detail, file, slot)}
                     onSetLatestFile={(detail, file) => void setGroupLatestFile(detail, file)}
                     onClearLatestFile={(detail) => void clearGroupLatestFile(detail)}
                     settingLatestFileId={settingLatestFileId}
@@ -1330,10 +1382,12 @@ function GroupCard({
   group,
   activeDetail,
   historyState,
+  compareSelection,
   loading,
   onOpen,
   onOpenFile,
   onOpenExcelGrid,
+  onSelectCompareSlot,
   onSetLatestFile,
   onClearLatestFile,
   settingLatestFileId,
@@ -1348,10 +1402,12 @@ function GroupCard({
   group: LibraryGroupSummary
   activeDetail: LibraryGroupDetail | null
   historyState: HistoryDiffState | null
+  compareSelection: CompareSelection | null
   loading: boolean
   onOpen: () => void
   onOpenFile: (file: FileInfo) => void
   onOpenExcelGrid: (detail: LibraryGroupDetail, historyState: HistoryDiffState | null) => void
+  onSelectCompareSlot: (detail: LibraryGroupDetail, file: FileInfo, slot: CompareSlot) => void
   onSetLatestFile: (detail: LibraryGroupDetail, file: FileInfo) => void
   onClearLatestFile: (detail: LibraryGroupDetail) => void
   settingLatestFileId: number | null
@@ -1363,7 +1419,6 @@ function GroupCard({
   highlightReview?: boolean
   reviewTourTarget?: TutorialStep
 }) {
-  const contentMeta = CONTENT_STATUS_META[group.content_status] ?? CONTENT_STATUS_META.pending
   const historyLoading = loading || (!activeDetail && Boolean(historyState?.loading))
 
   return (
@@ -1393,7 +1448,6 @@ function GroupCard({
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             <Badge tone="neutral">{group.file_count}개 파일</Badge>
-            <Badge tone={contentMeta.tone}>{contentMeta.label}</Badge>
           </div>
         </div>
       </div>
@@ -1403,18 +1457,32 @@ function GroupCard({
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             {group.latest_file && (
               <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2">
-                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">현재 기준 파일</p>
-                <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.latest_file.name}>
-                  {group.latest_file.name}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">현재 기준 파일</p>
+                    <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.latest_file.name}>
+                      {group.latest_file.name}
+                    </p>
+                  </div>
+                  <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(group.latest_file!)}>
+                    열기
+                  </Button>
+                </div>
               </div>
             )}
             {group.previous_file && (
               <div className="rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
-                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">직전 비교 대상</p>
-                <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.previous_file.name}>
-                  {group.previous_file.name}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">직전 비교 대상</p>
+                    <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.previous_file.name}>
+                      {group.previous_file.name}
+                    </p>
+                  </div>
+                  <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(group.previous_file!)}>
+                    열기
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -1438,8 +1506,10 @@ function GroupCard({
         <GroupTimeline
           detail={activeDetail}
           historyState={historyState}
+          compareSelection={compareSelection}
           onOpenFile={onOpenFile}
           onOpenExcelGrid={() => onOpenExcelGrid(activeDetail, historyState)}
+          onSelectCompareSlot={(file, slot) => onSelectCompareSlot(activeDetail, file, slot)}
           onSetLatestFile={(file) => onSetLatestFile(activeDetail, file)}
           onClearLatestFile={() => onClearLatestFile(activeDetail)}
           settingLatestFileId={settingLatestFileId}
@@ -1457,8 +1527,10 @@ function GroupCard({
 function GroupTimeline({
   detail,
   historyState,
+  compareSelection,
   onOpenFile,
   onOpenExcelGrid,
+  onSelectCompareSlot,
   onSetLatestFile,
   onClearLatestFile,
   settingLatestFileId,
@@ -1470,8 +1542,10 @@ function GroupTimeline({
 }: {
   detail: LibraryGroupDetail
   historyState: HistoryDiffState | null
+  compareSelection: CompareSelection | null
   onOpenFile: (file: FileInfo) => void
   onOpenExcelGrid: () => void
+  onSelectCompareSlot: (file: FileInfo, slot: CompareSlot) => void
   onSetLatestFile: (file: FileInfo) => void
   onClearLatestFile: () => void
   settingLatestFileId: number | null
@@ -1481,12 +1555,27 @@ function GroupTimeline({
   highlightReview?: boolean
   reviewTourTarget?: TutorialStep
 }) {
+  const [showAllVersions, setShowAllVersions] = useState(false)
+  useEffect(() => {
+    setShowAllVersions(false)
+  }, [detail.id])
+
+  const selectedFromFile = compareSelection?.fromId
+    ? detail.files.find((file) => file.id === compareSelection.fromId) ?? null
+    : null
+  const selectedToFile = compareSelection?.toId
+    ? detail.files.find((file) => file.id === compareSelection.toId) ?? null
+    : null
+  const visibleFiles = showAllVersions
+    ? detail.files
+    : detail.files.slice(0, VERSION_LIST_PREVIEW_LIMIT)
+  const hiddenFileCount = Math.max(0, detail.files.length - visibleFiles.length)
   const progressLabel = historyState
     ? historyState.total === 0
       ? '비교할 이전 버전 없음'
       : historyState.loading
-        ? `변경점 계산 중… ${historyState.completed}/${historyState.total}`
-        : `변경점 계산 완료 ${historyState.completed}/${historyState.total}`
+        ? '선택한 두 파일 계산 중…'
+        : '선택한 두 파일 계산 완료'
     : '변경점 계산 준비 중'
 
   return (
@@ -1538,7 +1627,7 @@ function GroupTimeline({
           <div className="min-w-0">
             <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 진단</p>
             <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              바로 이전 버전과 다음 버전만 순서대로 비교해 변경 증거를 분리합니다.
+              1번 파일에서 2번 파일로 바뀐 내용만 보여줍니다.
             </p>
             {highlightReview && (
               <span className="tour-evidence-note tour-version-note mt-2">
@@ -1556,17 +1645,30 @@ function GroupTimeline({
             최신 {detail.files.length}개만 표시되어 이 범위 안의 변경점만 계산했습니다.
           </p>
         )}
-        <HistoryTransitions transitions={historyState?.transitions ?? []} highlightReview={highlightReview} />
+        <SelectedCompareBar
+          fromFile={selectedFromFile}
+          toFile={selectedToFile}
+          onOpenFile={onOpenFile}
+        />
+        <HistoryTransitions
+          transitions={historyState?.transitions ?? []}
+          highlightReview={highlightReview}
+          onOpenFile={onOpenFile}
+        />
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">파일 버전 순서</p>
-        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">1번이 현재 최신 기준입니다.</p>
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">처음에는 1=이전, 2=최신으로 비교합니다.</p>
       </div>
-      <ol className="space-y-2">
-        {detail.files.map((file, index) => {
+      <ol className="overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]">
+        {visibleFiles.map((file, index) => {
           const isLatest = index === 0
           const isManualLatest = detail.manual_latest_file_id === file.id
+          const isSelectedFrom = selectedFromFile?.id === file.id
+          const isSelectedTo = selectedToFile?.id === file.id
+          const canSelectFrom = selectedToFile?.id !== file.id && !historyState?.loading
+          const canSelectTo = selectedFromFile?.id !== file.id && !historyState?.loading
           const latestActionDisabled =
             Boolean(settingLatestFileId) ||
             Boolean(clearingLatestGroupId) ||
@@ -1574,10 +1676,12 @@ function GroupTimeline({
           return (
             <li
               key={file.id}
-              className={`flex items-start gap-3 rounded-lg border p-3 ${
-                isLatest
-                  ? 'border-[var(--md-sys-color-primary)]/40 bg-[var(--md-sys-color-primary-container)]/20'
-                  : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]'
+              className={`grid grid-cols-1 gap-3 border-t border-[var(--md-sys-color-outline-variant)] p-3 first:border-t-0 lg:grid-cols-[4rem_minmax(0,1fr)_auto_auto] lg:items-center ${
+                isSelectedFrom || isSelectedTo
+                  ? 'bg-[var(--md-sys-color-primary-container)]/18'
+                  : isLatest
+                    ? 'bg-[var(--md-sys-color-surface-container-low)]'
+                    : ''
               }`}
             >
               <div
@@ -1591,7 +1695,7 @@ function GroupTimeline({
               </div>
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate">
+                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate" title={file.name}>
                     {file.name}
                   </p>
                   <FileTypeBadge fileType={file.file_type} />
@@ -1600,6 +1704,8 @@ function GroupTimeline({
                       {isManualLatest ? '지정 최신' : '최신'}
                     </Badge>
                   )}
+                  {isSelectedFrom && <Badge tone="warning">비교 1</Badge>}
+                  {isSelectedTo && <Badge tone="success">비교 2</Badge>}
                 </div>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                   수정/등록 · {formatDate(file.file_mtime ?? file.created_at)}
@@ -1607,6 +1713,27 @@ function GroupTimeline({
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate" title={file.path}>
                   위치 · {pathTail(file.path)}
                 </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5 lg:justify-end">
+                <span className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">비교</span>
+                <Button
+                  variant={isSelectedFrom ? 'filled' : 'outlined'}
+                  size="sm"
+                  disabled={Boolean(historyState?.loading) || (!canSelectFrom && !isSelectedFrom)}
+                  onClick={() => onSelectCompareSlot(file, 'from')}
+                  className="h-8 px-3"
+                >
+                  1
+                </Button>
+                <Button
+                  variant={isSelectedTo ? 'filled' : 'outlined'}
+                  size="sm"
+                  disabled={Boolean(historyState?.loading) || (!canSelectTo && !isSelectedTo)}
+                  onClick={() => onSelectCompareSlot(file, 'to')}
+                  className="h-8 px-3"
+                >
+                  2
+                </Button>
               </div>
               <div className="flex shrink-0 items-center gap-2 flex-wrap justify-end">
                 {!isLatest && (
@@ -1629,6 +1756,75 @@ function GroupTimeline({
           )
         })}
       </ol>
+      {detail.files.length > VERSION_LIST_PREVIEW_LIMIT && (
+        <div className="flex justify-center">
+          <Button
+            variant="text"
+            size="sm"
+            leadingIcon={showAllVersions ? 'expand_less' : 'expand_more'}
+            onClick={() => setShowAllVersions((value) => !value)}
+          >
+            {showAllVersions ? '최근 5개만 보기' : `모두 보기 (${hiddenFileCount}개 더)`}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SelectedCompareBar({
+  fromFile,
+  toFile,
+  onOpenFile,
+}: {
+  fromFile: FileInfo | null
+  toFile: FileInfo | null
+  onOpenFile: (file: FileInfo) => void
+}) {
+  return (
+    <div className="sticky top-2 z-10 rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/95 px-3 py-2 shadow-elev-1 backdrop-blur">
+      <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
+        <ComparedFilePill marker="1" label="이전 기준" file={fromFile} tone="warning" onOpenFile={onOpenFile} />
+        <Icon
+          name="arrow_forward"
+          size={18}
+          className="hidden text-[var(--md-sys-color-on-surface-variant)] lg:block"
+        />
+        <ComparedFilePill marker="2" label="변경 후" file={toFile} tone="success" onOpenFile={onOpenFile} />
+      </div>
+    </div>
+  )
+}
+
+function ComparedFilePill({
+  marker,
+  label,
+  file,
+  tone,
+  onOpenFile,
+}: {
+  marker: string
+  label: string
+  file: FileInfo | null
+  tone: 'warning' | 'success'
+  onOpenFile: (file: FileInfo) => void
+}) {
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-[var(--md-sys-color-surface-container-low)] px-2.5 py-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <Badge tone={tone}>{marker}</Badge>
+        <div className="min-w-0">
+          <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">{label}</p>
+          <p className="truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={file?.name ?? ''}>
+            {file?.name ?? '선택 필요'}
+          </p>
+        </div>
+      </div>
+      {file && (
+        <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(file)}>
+          열기
+        </Button>
+      )}
     </div>
   )
 }
@@ -1636,9 +1832,11 @@ function GroupTimeline({
 function HistoryTransitions({
   transitions,
   highlightReview = false,
+  onOpenFile,
 }: {
   transitions: HistoryTransition[]
   highlightReview?: boolean
+  onOpenFile: (file: FileInfo) => void
 }) {
   if (transitions.length === 0) {
     return (
@@ -1655,6 +1853,7 @@ function HistoryTransitions({
           key={transition.id}
           transition={transition}
           highlightReview={highlightReview && index === 0}
+          onOpenFile={onOpenFile}
         />
       ))}
     </div>
@@ -1671,9 +1870,11 @@ function changeCount(result: CheckResponse | null) {
 function HistoryTransitionCard({
   transition,
   highlightReview = false,
+  onOpenFile,
 }: {
   transition: HistoryTransition
   highlightReview?: boolean
+  onOpenFile: (file: FileInfo) => void
 }) {
   const count = changeCount(transition.result)
   const statusTone =
@@ -1705,10 +1906,17 @@ function HistoryTransitionCard({
         <div className="min-w-0 flex-1 space-y-2">
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
             <div className="min-w-0 rounded-md border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
-              <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">이전 버전</p>
-              <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.fromFile.name}>
-                {transition.fromFile.name}
-              </p>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">이전 버전</p>
+                  <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.fromFile.name}>
+                    {transition.fromFile.name}
+                  </p>
+                </div>
+                <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(transition.fromFile)}>
+                  열기
+                </Button>
+              </div>
             </div>
             <Icon
               name="arrow_forward"
@@ -1716,10 +1924,17 @@ function HistoryTransitionCard({
               className="hidden text-[var(--md-sys-color-on-surface-variant)] lg:block"
             />
             <div className="min-w-0 rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
-              <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">다음 버전</p>
-              <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.toFile.name}>
-                {transition.toFile.name}
-              </p>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">다음 버전</p>
+                  <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.toFile.name}>
+                    {transition.toFile.name}
+                  </p>
+                </div>
+                <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(transition.toFile)}>
+                  열기
+                </Button>
+              </div>
             </div>
           </div>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
@@ -1747,8 +1962,18 @@ function HistoryTransitionCard({
 
 function HistoryTransitionResult({ result }: { result: CheckResponse }) {
   if (result.mode === 'excel') return <ExcelCheckResult result={result} compact />
-  if (result.mode === 'word') return <WordCheckResult diffs={result.diffs} compact />
-  return <PptCheckResult slides={result.slides} compact />
+  return (
+    <div className="space-y-3">
+      <p className="xl:hidden rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+        화면을 넓히면 이전/변경 후 내용을 나란히 볼 수 있습니다.
+      </p>
+      {result.mode === 'word' ? (
+        <WordCheckResult diffs={result.diffs} compact />
+      ) : (
+        <PptCheckResult slides={result.slides} compact />
+      )}
+    </div>
+  )
 }
 
 function formatExcelLocation(conflict: ExcelCheckIssue['conflicts'][number]) {
@@ -2493,6 +2718,37 @@ function WordCheckResult({
   )
 }
 
+interface PptSlideGroup {
+  id: string
+  slideNumber: number
+  matchedSlideNumber?: number
+  title: string
+  changes: PptSlideCard[]
+}
+
+function groupPptSlides(slides: PptSlideCard[]): PptSlideGroup[] {
+  const groups = new Map<string, PptSlideGroup>()
+
+  slides.forEach((slide) => {
+    const key = `${slide.slideNumber}->${slide.matchedSlideNumber ?? slide.slideNumber}`
+    const existing = groups.get(key)
+    if (existing) {
+      existing.changes.push(slide)
+      return
+    }
+
+    groups.set(key, {
+      id: key,
+      slideNumber: slide.slideNumber,
+      matchedSlideNumber: slide.matchedSlideNumber,
+      title: slide.title,
+      changes: [slide],
+    })
+  })
+
+  return Array.from(groups.values())
+}
+
 function PptCheckResult({
   slides,
   compact = false,
@@ -2503,6 +2759,26 @@ function PptCheckResult({
   const inserted = slides.filter((slide) => slide.type === 'inserted_slide').length
   const removed = slides.filter((slide) => slide.type === 'removed_slide').length
   const changed = slides.filter((slide) => slide.type === 'matched_slide_change').length
+  const slideGroups = useMemo(() => groupPptSlides(slides), [slides])
+  const [expandedSlideIds, setExpandedSlideIds] = useState<Set<string>>(() =>
+    compact ? new Set() : new Set(slideGroups.map((group) => group.id)),
+  )
+
+  useEffect(() => {
+    setExpandedSlideIds(compact ? new Set() : new Set(slideGroups.map((group) => group.id)))
+  }, [compact, slideGroups])
+
+  const toggleSlideGroup = (groupId: string) => {
+    setExpandedSlideIds((current) => {
+      const next = new Set(current)
+      if (next.has(groupId)) {
+        next.delete(groupId)
+      } else {
+        next.add(groupId)
+      }
+      return next
+    })
+  }
 
   return (
     <div className="space-y-5">
@@ -2522,7 +2798,15 @@ function PptCheckResult({
 
       <Card variant="outlined" className="overflow-hidden">
         <header className="px-6 py-3 bg-[var(--md-sys-color-surface-container-low)] border-b border-[var(--md-sys-color-outline-variant)]">
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">PPT 변경 내용</p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">PPT 변경 내용</p>
+              <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                슬라이드별로 접어두었습니다. 필요한 슬라이드만 자세히 열어보세요.
+              </p>
+            </div>
+            <Badge tone="neutral">{slideGroups.length}개 슬라이드</Badge>
+          </div>
         </header>
         {slides.length === 0 ? (
           <p className="px-6 py-8 type-body-sm text-[var(--md-sys-color-on-surface-variant)] text-center">
@@ -2530,42 +2814,83 @@ function PptCheckResult({
           </p>
         ) : (
           <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
-            {slides.map((slide) => (
-              <li key={slide.id} className="px-6 py-4 space-y-3">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge
-                    tone={
-                      slide.type === 'inserted_slide'
-                        ? 'success'
-                        : slide.type === 'removed_slide'
-                          ? 'danger'
-                          : 'warning'
-                    }
+            {slideGroups.map((group) => {
+              const expanded = expandedSlideIds.has(group.id)
+              const representative = group.changes[0]
+              const tone =
+                representative.type === 'inserted_slide'
+                  ? 'success'
+                  : representative.type === 'removed_slide'
+                    ? 'danger'
+                    : 'warning'
+              return (
+                <li key={group.id} className="px-4 py-3 sm:px-6">
+                  <button
+                    type="button"
+                    className="flex w-full items-start justify-between gap-3 text-left"
+                    onClick={() => toggleSlideGroup(group.id)}
+                    aria-expanded={expanded}
                   >
-                    {PPT_TYPE_KO[slide.type]}
-                  </Badge>
-                    <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                      슬라이드 {slide.slideNumber}
-                      {slide.matchedSlideNumber && slide.matchedSlideNumber !== slide.slideNumber
-                        ? ` → ${slide.matchedSlideNumber}`
-                        : ''}
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge tone={tone}>{PPT_TYPE_KO[representative.type]}</Badge>
+                        <span className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                          슬라이드 {group.slideNumber}
+                          {group.matchedSlideNumber && group.matchedSlideNumber !== group.slideNumber
+                            ? ` → ${group.matchedSlideNumber}`
+                            : ''}
+                        </span>
+                        <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate">
+                          {group.title}
+                        </span>
+                      </div>
+                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                        {group.changes.length}개 항목 변경 · {expanded ? '자세히 보는 중' : '접힌 상태'}
+                      </p>
+                    </div>
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 type-label-md text-[var(--md-sys-color-primary)]">
+                      {expanded ? '접기' : '자세히 보기'}
+                      <Icon name={expanded ? 'expand_less' : 'expand_more'} size={18} />
                     </span>
-                  <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                    {slide.title}
-                  </span>
-                </div>
-                <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-                  {slide.description}
-                </p>
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                  <DiffPanel title="이전 내용" content={slide.beforeText} tone="danger" />
-                  <DiffPanel title="변경 후 내용" content={slide.afterText} tone="success" />
-                </div>
-                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
-                  항목 유형 · {blockTypeLabel(slide.itemType || 'slide')}
-                </p>
-              </li>
-            ))}
+                  </button>
+
+                  {expanded && (
+                    <div className="mt-3 space-y-3">
+                      {group.changes.map((slide, index) => (
+                        <div
+                          key={slide.id}
+                          className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3"
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {group.changes.length > 1 && <Badge tone="neutral">항목 {index + 1}</Badge>}
+                            <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+                              {slide.description}
+                            </p>
+                            <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                              {blockTypeLabel(slide.itemType || 'slide')}
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                            <DiffPanel
+                              title="이전 내용"
+                              content={slide.beforeText}
+                              tone="danger"
+                              previewMaxChars={compact ? 260 : 420}
+                            />
+                            <DiffPanel
+                              title="변경 후 내용"
+                              content={slide.afterText}
+                              tone="success"
+                              previewMaxChars={compact ? 260 : 420}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </Card>
@@ -2577,19 +2902,44 @@ function DiffPanel({
   title,
   content,
   tone,
+  previewMaxChars = 0,
 }: {
   title: string
   content: string
   tone: 'danger' | 'success'
+  previewMaxChars?: number
 }) {
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    setExpanded(false)
+  }, [content])
+
+  const normalizedContent = content || '(내용 없음)'
+  const shouldPreview = previewMaxChars > 0 && normalizedContent.length > previewMaxChars
+  const visibleContent = shouldPreview && !expanded
+    ? `${normalizedContent.slice(0, previewMaxChars).trimEnd()}…`
+    : normalizedContent
+
   return (
     <div className={`diff-panel diff-panel-${tone}`}>
       <p className="diff-panel-label type-label-md">
         {title}
       </p>
       <p className="type-body-md text-[var(--md-sys-color-on-surface)] mt-2 whitespace-pre-wrap break-words">
-        {content || '(내용 없음)'}
+        {visibleContent}
       </p>
+      {shouldPreview && (
+        <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
+          {!expanded && (
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              내용이 길어 일부만 표시합니다. 파일에서 직접 확인해 주세요.
+            </p>
+          )}
+          <Button variant="text" size="sm" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? '접기' : '전체 보기'}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
