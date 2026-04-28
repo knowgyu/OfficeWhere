@@ -156,7 +156,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'version-ppt': {
     eyebrow: 'Step 4 · PPT 버전',
     title: 'PPT 변경 증거를 엽니다',
-    description: '버전 진단 열기로 바뀐 슬라이드를 확인합니다.',
+    description: '변경점 보기로 바뀐 슬라이드를 확인합니다.',
     icon: 'timeline',
   },
   'version-ppt-review': {
@@ -180,7 +180,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'version-excel': {
     eyebrow: 'Step 5 · Excel 버전',
     title: 'Excel 값 변경을 엽니다',
-    description: '버전 진단 열기로 바뀐 값을 확인합니다.',
+    description: '변경점 보기로 바뀐 값을 확인합니다.',
     icon: 'difference',
   },
   'version-excel-review': {

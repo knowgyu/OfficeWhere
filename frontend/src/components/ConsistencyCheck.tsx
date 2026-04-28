@@ -1506,7 +1506,7 @@ function GroupCard({
             className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
             data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
           >
-            {activeDetail ? '진단 접기' : '버전 진단 열기'}
+            {activeDetail ? '접기' : '변경점 보기'}
           </Button>
         </div>
       </div>
@@ -1602,7 +1602,7 @@ function GroupTimeline({
           <p className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
             변경 증거
           </p>
-          <p className="mt-1 type-title-sm text-[var(--md-sys-color-on-surface)]">버전 진단 상세</p>
+          <p className="mt-1 type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 상세</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
@@ -1642,7 +1642,7 @@ function GroupTimeline({
       >
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="min-w-0">
-            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 진단</p>
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경 내용</p>
             <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               1번 파일에서 2번 파일로 바뀐 내용만 보여줍니다.
             </p>
@@ -1678,7 +1678,9 @@ function GroupTimeline({
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">파일 버전 순서</p>
-        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">처음에는 1=이전, 2=최신으로 비교합니다.</p>
+        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          별표로 최신 기준을 바꾸고, 1/2로 비교할 두 파일을 고릅니다.
+        </p>
       </div>
       <ol className="overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]">
         {visibleFiles.map((file, index) => {
@@ -1695,22 +1697,58 @@ function GroupTimeline({
           return (
             <li
               key={file.id}
-              className={`grid grid-cols-1 gap-3 border-t border-[var(--md-sys-color-outline-variant)] p-3 first:border-t-0 lg:grid-cols-[4rem_minmax(0,1fr)_auto_auto] lg:items-center ${
+              className={`grid grid-cols-1 gap-3 border-t border-[var(--md-sys-color-outline-variant)] p-3 first:border-t-0 lg:grid-cols-[5.75rem_minmax(0,1fr)_auto_auto] lg:items-center ${
                 isSelectedFrom || isSelectedTo
                   ? 'bg-[var(--md-sys-color-primary-container)]/18'
                   : isLatest
                     ? 'bg-[var(--md-sys-color-surface-container-low)]'
                     : ''
-              }`}
-            >
-              <div
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full type-label-md ${
-                  isLatest
-                    ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)]'
-                    : 'bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)]'
                 }`}
-              >
-                {index + 1}
+            >
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={isLatest}
+                  aria-label={
+                    isLatest
+                      ? isManualLatest
+                        ? '직접 지정한 최신 기준 파일'
+                        : '현재 최신 기준 파일'
+                      : '최신 기준으로 지정'
+                  }
+                  title={
+                    isLatest
+                      ? isManualLatest
+                        ? '직접 지정한 최신 기준 파일'
+                        : '현재 최신 기준 파일'
+                      : '최신 기준으로 지정'
+                  }
+                  disabled={!isLatest && latestActionDisabled}
+                  onClick={() => {
+                    if (!isLatest) onSetLatestFile(file)
+                  }}
+                  className={`state-host relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                    isLatest
+                      ? 'cursor-default border-amber-300 bg-amber-100 text-amber-800 shadow-[0_1px_0_rgba(255,255,255,0.85)_inset]'
+                      : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] text-[var(--md-sys-color-on-surface-variant)] hover:border-[var(--md-sys-color-primary)] hover:text-[var(--md-sys-color-primary)] disabled:cursor-not-allowed disabled:opacity-40'
+                  }`}
+                >
+                  <span className="state-layer" />
+                  {settingLatestFileId === file.id ? (
+                    <Spinner size={16} />
+                  ) : (
+                    <Icon name="star" size={18} filled={isLatest} />
+                  )}
+                </button>
+                <div
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full type-label-md ${
+                    isLatest
+                      ? 'bg-[var(--md-sys-color-primary)] text-[var(--md-sys-color-on-primary)]'
+                      : 'bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)]'
+                  }`}
+                >
+                  {index + 1}
+                </div>
               </div>
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -1718,11 +1756,7 @@ function GroupTimeline({
                     {file.name}
                   </p>
                   <FileTypeBadge fileType={file.file_type} />
-                  {isLatest && (
-                    <Badge tone={isManualLatest ? 'success' : 'neutral'}>
-                      {isManualLatest ? '지정 최신' : '최신'}
-                    </Badge>
-                  )}
+                  {isManualLatest && <Badge tone="success">직접 지정</Badge>}
                   {isSelectedFrom && <Badge tone="warning">비교 1</Badge>}
                   {isSelectedTo && <Badge tone="success">비교 2</Badge>}
                 </div>
@@ -1755,18 +1789,6 @@ function GroupTimeline({
                 </Button>
               </div>
               <div className="flex shrink-0 items-center gap-2 flex-wrap justify-end">
-                {!isLatest && (
-                  <Button
-                    variant="outlined"
-                    size="sm"
-                    leadingIcon="star"
-                    loading={settingLatestFileId === file.id}
-                    disabled={latestActionDisabled}
-                    onClick={() => onSetLatestFile(file)}
-                  >
-                    최신으로 지정
-                  </Button>
-                )}
                 <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(file)}>
                   열기
                 </Button>
@@ -2008,9 +2030,12 @@ function HistoryTransitionResult({
   if (result.mode === 'excel') return <ExcelCheckResult result={result} compact />
   return (
     <div className="space-y-3">
-      <p className="xl:hidden rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-        화면을 넓히면 이전/변경 후 내용을 나란히 볼 수 있습니다.
-      </p>
+      <div className="xl:hidden">
+        <p className="tour-evidence-note attention-pulse max-w-full whitespace-normal">
+          <Icon name="open_in_full" size={14} />
+          창을 조금 넓히면 이전/변경 후 내용을 나란히 볼 수 있어요.
+        </p>
+      </div>
       {result.mode === 'word' ? (
         <WordCheckResult diffs={result.diffs} compact />
       ) : (

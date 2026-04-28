@@ -55,7 +55,7 @@ const slides: Slide[] = [
     previewTitle: '프로젝트상태 버전 묶음',
     previewSubtitle: '5개 파일 · 최신 v4.0',
     metric: '변경점 중심',
-    chips: ['버전 진단', 'PPT 변경', '최신 지정'],
+    chips: ['변경점 보기', 'PPT 변경', '최신 지정'],
     rows: [
       { icon: 'task_alt', title: 'v4.0 → v3.0', meta: '주요 변경점 슬라이드 추가', state: '+3' },
       { icon: 'sync_alt', title: 'v3.0 → v2.0', meta: '위험 요소 문구 수정', state: '수정' },
