@@ -13,6 +13,7 @@ from ..core.parser import SUPPORTED_EXTENSIONS, get_file_schema
 from ..database import (
     count_files,
     count_files_by_type,
+    delete_all_files,
     delete_file,
     get_all_files,
     get_file_by_id,
@@ -31,6 +32,7 @@ from ..models.schemas import (
     FilePickResponse,
     FileRegisterRequest,
     FileRegisterResponse,
+    FilesDeleteAllResponse,
     FolderPickResponse,
     FolderScanRequest,
     FolderScanResponse,
@@ -227,6 +229,16 @@ def remove_file(file_id: int):
         raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
     delete_file(file_id)
     return {"message": "파일 등록이 해제되었습니다."}
+
+
+@router.delete("", response_model=FilesDeleteAllResponse)
+@router.delete("/", response_model=FilesDeleteAllResponse)
+def remove_all_files():
+    deleted = delete_all_files()
+    return {
+        "deleted": deleted,
+        "message": "전체 파일 등록이 해제되었습니다.",
+    }
 
 
 @router.post("/{file_id}/open")

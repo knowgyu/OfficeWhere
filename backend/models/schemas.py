@@ -39,6 +39,11 @@ class FileRegisterResponse(BaseModel):
     parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
+class FilesDeleteAllResponse(BaseModel):
+    deleted: int
+    message: str
+
+
 class SchemaResponse(BaseModel):
     columns: List[str]
     sample: List[List[Any]]

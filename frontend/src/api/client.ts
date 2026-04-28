@@ -18,6 +18,11 @@ export interface ClearAppDataResult {
   exitScheduled?: boolean
 }
 
+export interface ClearRegisteredFilesResult {
+  deleted: number
+  message: string
+}
+
 export type CloseBehavior = 'ask' | 'hide' | 'quit'
 export type AppResetReason = 'safe' | 'full' | 'custom'
 
@@ -1347,6 +1352,7 @@ export const api = {
     register: (data: FileRegisterRequest) =>
       apiPath('/api/files').then((url) => axios.post<FileRegisterResponse>(url, data)),
     delete: async (id: number) => axios.delete(await apiPath(`/api/files/${id}`)),
+    deleteAll: async () => axios.delete<ClearRegisteredFilesResult>(await apiPath('/api/files')),
     schema: async (id: number) => axios.get<SchemaResponse>(await apiPath(`/api/files/${id}/schema`)),
     suggestKey: (id: number) =>
       apiPath(`/api/files/${id}/suggest-key`).then((url) =>

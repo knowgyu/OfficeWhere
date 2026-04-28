@@ -697,6 +697,19 @@ def delete_file(file_id: int) -> bool:
         return affected > 0
 
 
+def delete_all_files() -> int:
+    """Remove all app-owned registrations and indexes without touching source files."""
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM registered_files")
+        count = int(cursor.fetchone()[0])
+        cursor.execute("DELETE FROM file_chunks")
+        cursor.execute("DELETE FROM document_fingerprints")
+        cursor.execute("DELETE FROM registered_files")
+        conn.commit()
+        return count
+
+
 def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
     chunk_values = _chunk_insert_values(chunks)
 

@@ -1,4 +1,4 @@
-from backend.api.files import list_files_bounded
+from backend.api.files import list_files_bounded, remove_all_files
 from backend.database import init_db, register_file
 
 
@@ -62,3 +62,15 @@ def test_files_page_filters_by_query_and_file_type(tmp_path, monkeypatch):
     assert response.total == 1
     assert response.items[0].name == "finance-special.xlsx"
     assert response.counts_by_type == {"Excel": 1}
+
+
+def test_remove_all_files_returns_deleted_count(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+    _register_rows(3)
+
+    response = remove_all_files()
+
+    assert response["deleted"] == 3
+    assert list_files_bounded(limit=10).total == 0

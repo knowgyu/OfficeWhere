@@ -176,6 +176,8 @@ export default function FileManager({
   const [schemaLoading, setSchemaLoading] = useState(false)
 
   const [confirmDeleteFiles, setConfirmDeleteFiles] = useState<FileInfo[]>([])
+  const [confirmClearAllFilesOpen, setConfirmClearAllFilesOpen] = useState(false)
+  const [deletingFiles, setDeletingFiles] = useState(false)
   const [selectedFileIds, setSelectedFileIds] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [focusedFileId, setFocusedFileId] = useState<number | null>(null)
@@ -500,6 +502,14 @@ export default function FileManager({
     setConfirmDeleteFiles(targets)
   }
 
+  const openClearAllFilesConfirm = () => {
+    if (fileTotal === 0) {
+      snackbar.warn('등록 해제할 파일이 없습니다.')
+      return
+    }
+    setConfirmClearAllFilesOpen(true)
+  }
+
   const toggleRegisteredFileSelection = (file: FileInfo, selected?: boolean) => {
     setSelectedFileIds((current) => {
       const next = new Set(current)
@@ -738,6 +748,7 @@ export default function FileManager({
     if (targets.length === 0) return
     const deleted: FileInfo[] = []
     const failed: FileInfo[] = []
+    setDeletingFiles(true)
     try {
       for (const file of targets) {
         try {
@@ -768,7 +779,27 @@ export default function FileManager({
           : fileOffset
       await fetchFiles(nextOffset, fileQuery)
     } finally {
+      setDeletingFiles(false)
       setConfirmDeleteFiles([])
+    }
+  }
+
+  const handleClearAllFiles = async () => {
+    setDeletingFiles(true)
+    try {
+      const response = await api.files.deleteAll()
+      setSelectedFileIds(new Set())
+      setSelectionMode(false)
+      setFileOffset(0)
+      setFileQuery('')
+      setFileQueryDraft('')
+      snackbar.success(`${response.data.deleted}개 파일 등록을 모두 해제했습니다.`)
+      await fetchFiles(0, '')
+    } catch {
+      snackbar.error('전체 등록 해제에 실패했습니다.')
+    } finally {
+      setDeletingFiles(false)
+      setConfirmClearAllFilesOpen(false)
     }
   }
 
@@ -1174,39 +1205,49 @@ export default function FileManager({
         >
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-            <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
-              등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({fileTotal})</span>
-            </h3>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 목록에서만 제거하며 원본 파일은 삭제하지 않습니다.
-            </p>
+              <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
+                등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({fileTotal})</span>
+              </h3>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 앱 목록과 검색 인덱스에서만 제거하며 원본 파일은 삭제하지 않습니다.
+              </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 variant={selectionMode ? 'tonal' : 'outlined'}
                 leadingIcon={selectionMode ? 'checklist' : 'delete_sweep'}
+                disabled={deletingFiles}
                 onClick={() => {
                   setSelectionMode((value) => !value)
                   if (selectionMode) setSelectedFileIds(new Set())
                 }}
               >
-                {selectionMode ? '선택 종료' : '목록에서 제거하기'}
+                {selectionMode ? '선택 종료' : '선택해서 등록 해제'}
               </Button>
               {selectedCount > 0 && (
                 <Button
                   variant="danger"
                   leadingIcon="delete"
                   onClick={() => openDeleteConfirm(selectedFiles)}
+                  disabled={deletingFiles}
                 >
-                  선택 해제 {selectedCount}개
+                  선택 등록 해제 {selectedCount}개
                 </Button>
               )}
+              <Button
+                variant="danger"
+                leadingIcon="delete_forever"
+                onClick={openClearAllFilesConfirm}
+                disabled={fileTotal === 0 || loading || deletingFiles}
+              >
+                전체 등록 해제
+              </Button>
               <IconButton
                 icon="refresh"
                 label="새로고침"
                 variant="tonal"
                 onClick={() => void fetchFiles(fileOffset, fileQuery)}
-                disabled={loading}
+                disabled={loading || deletingFiles}
               />
             </div>
           </div>
@@ -1244,7 +1285,7 @@ export default function FileManager({
             />
             {fileQuery && <Chip label={`검색어 · ${fileQuery}`} tone="secondary" icon="search" as="span" />}
             {selectedCount > 0 && (
-              <Chip label={`선택 ${selectedCount}개 · Delete로 해제`} tone="warning" icon="keyboard" as="span" />
+              <Chip label={`선택 ${selectedCount}개 · Delete로 등록 해제`} tone="warning" icon="keyboard" as="span" />
             )}
             {fileTypeCounts.map(([fileType, count]) => (
               <span
@@ -1323,6 +1364,7 @@ export default function FileManager({
                     variant="standard"
                     size="sm"
                     onClick={() => openDeleteConfirm([file])}
+                    disabled={deletingFiles}
                     className="text-[var(--md-sys-color-error)]"
                   />
                 </div>
@@ -1712,15 +1754,53 @@ export default function FileManager({
       </Dialog>
 
       <Dialog
+        open={confirmClearAllFilesOpen}
+        onClose={() => setConfirmClearAllFilesOpen(false)}
+        size="sm"
+        icon="delete_forever"
+        title="전체 등록 해제"
+        description={`${fileTotal}개 파일의 등록 정보와 검색 인덱스를 모두 제거합니다.`}
+        actions={
+          <>
+            <Button variant="text" onClick={() => setConfirmClearAllFilesOpen(false)} disabled={deletingFiles}>
+              취소
+            </Button>
+            <Button
+              variant="filled"
+              leadingIcon="delete_forever"
+              className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
+              onClick={() => void handleClearAllFiles()}
+              loading={deletingFiles}
+              autoFocus
+            >
+              전체 등록 해제
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+            앱의 등록 목록과 검색 인덱스만 비웁니다. 원본 문서와 대상 폴더는 삭제하거나 이동하지 않습니다.
+          </p>
+          <div className="rounded-md border border-[var(--md-sys-color-error)]/40 bg-[var(--md-sys-color-error-container)]/20 p-3">
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">다시 검색하려면 문서 새로고침이 필요합니다.</p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              대상 폴더 설정은 유지됩니다.
+            </p>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={confirmDeleteFiles.length > 0}
         onClose={() => setConfirmDeleteFiles([])}
         size="sm"
         icon="delete"
         title={confirmDeleteFiles.length > 1 ? `${confirmDeleteFiles.length}개 파일 등록 해제` : '등록 해제'}
-        description={confirmDeleteFiles.length === 1 ? confirmDeleteFiles[0]?.name : '선택한 파일의 등록 정보와 인덱스를 삭제합니다.'}
+        description={confirmDeleteFiles.length === 1 ? confirmDeleteFiles[0]?.name : '선택한 파일의 등록 정보와 검색 인덱스를 제거합니다.'}
         actions={
           <>
-            <Button variant="text" onClick={() => setConfirmDeleteFiles([])}>
+            <Button variant="text" onClick={() => setConfirmDeleteFiles([])} disabled={deletingFiles}>
               취소
             </Button>
             <Button
@@ -1728,15 +1808,16 @@ export default function FileManager({
               leadingIcon="delete"
               className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
               onClick={() => void handleDeleteFiles(confirmDeleteFiles)}
+              loading={deletingFiles}
               autoFocus
             >
-              해제
+              등록 해제
             </Button>
           </>
         }
       >
         <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-          등록 정보와 인덱스만 삭제합니다. 원본 파일은 삭제하거나 이동하지 않습니다.
+          앱 목록과 검색 인덱스에서만 제거합니다. 원본 파일은 삭제하거나 이동하지 않습니다.
         </p>
         {confirmDeleteFiles.length > 1 && (
           <div className="mt-3 max-h-48 space-y-2 overflow-auto rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-2">
