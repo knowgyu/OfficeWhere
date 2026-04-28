@@ -98,23 +98,47 @@ def _scan_supported_paths(
     )
     found: List[Path] = []
     if not recursive:
-        return sorted(
-            path
-            for path in folder.iterdir()
-            if path.is_file()
-            and not path.name.startswith("~$")
-            and path.suffix.lower() in SUPPORTED_EXTENSIONS
-        )
+        try:
+            iterator = list(folder.iterdir())
+        except OSError:
+            return []
+        output: List[Path] = []
+        for path in iterator:
+            try:
+                is_file = path.is_file()
+            except OSError:
+                continue
+            if is_file and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                output.append(path)
+        return sorted(output)
 
     stack = [folder]
     while stack:
         current = stack.pop()
-        for path in current.iterdir():
-            if path.is_dir():
-                if not should_exclude_dir(path, excluded):
+        try:
+            iterator = list(current.iterdir())
+        except OSError:
+            continue
+        for path in iterator:
+            if should_exclude_dir(path, excluded):
+                continue
+            try:
+                is_dir = path.is_dir()
+            except OSError:
+                continue
+            if is_dir:
+                try:
+                    is_symlink = path.is_symlink()
+                except OSError:
+                    continue
+                if not is_symlink:
                     stack.append(path)
                 continue
-            if path.is_file() and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            try:
+                is_file = path.is_file()
+            except OSError:
+                continue
+            if is_file and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 found.append(path)
     return sorted(found)
 
@@ -128,10 +152,13 @@ def scan_folder(
     from concurrent.futures import ThreadPoolExecutor
 
     folder = Path(os.path.normpath(folder_path.strip()))
-    if not folder.exists():
-        raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
-    if not folder.is_dir():
-        raise ValueError(f"폴더가 아닙니다: {folder_path}")
+    try:
+        if not folder.exists():
+            raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
+        if not folder.is_dir():
+            raise ValueError(f"폴더가 아닙니다: {folder_path}")
+    except PermissionError:
+        return []
 
     found = _scan_supported_paths(folder, recursive=recursive, excluded_folder_names=excluded_folder_names)
 

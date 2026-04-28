@@ -192,6 +192,32 @@ def test_collect_supported_paths_filters_supported_files_once(tmp_path):
     assert {tmp_path / "report.xlsx"} == {Path(path) for path in flat}
 
 
+def test_collect_supported_paths_skips_inaccessible_start_menu_junction(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    report = tmp_path / "report.docx"
+    report.write_text("x")
+    start_menu = tmp_path / "시작 메뉴"
+    start_menu.mkdir()
+
+    original_is_dir = Path.is_dir
+
+    def guarded_is_dir(path):
+        if path == start_menu:
+            raise PermissionError("[WinError 5] 액세스가 거부되었습니다")
+        return original_is_dir(path)
+
+    monkeypatch.setattr(Path, "is_dir", guarded_is_dir)
+
+    result = _collect_supported_paths_with_stats(str(tmp_path), recursive=True)
+
+    assert result.paths == [str(report)]
+    assert result.inaccessible_dir_count == 1
+    assert result.inaccessible_dirs_by_name == {"시작 메뉴": 1}
+
+
 def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch, caplog):
     from backend.core import library
 

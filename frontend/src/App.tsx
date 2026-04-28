@@ -126,9 +126,9 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     icon: 'sync',
   },
   search: {
-    eyebrow: 'Step 3 · 초성 검색',
-    title: 'ㅍㄹㅈㅌ로 검색해 보세요',
-    description: '프로젝트를 다 쓰지 않아도 문서를 찾습니다.',
+    eyebrow: 'Step 3 · 문서 검색',
+    title: '프로젝트로 검색해 보세요',
+    description: '예제 문서의 파일명과 본문을 함께 찾습니다.',
     icon: 'search',
   },
   'search-results': {

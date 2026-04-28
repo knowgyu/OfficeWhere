@@ -12,6 +12,6 @@ export type TutorialStep =
   | 'excel-table-review'
   | 'done'
 
-export const EXAMPLE_SEARCH_QUERY = 'ㅍㄹㅈㅌ'
+export const EXAMPLE_SEARCH_QUERY = '프로젝트'
 export const EXAMPLE_PPT_QUERY = '프로젝트상태'
 export const EXAMPLE_EXCEL_QUERY = '사업예산'

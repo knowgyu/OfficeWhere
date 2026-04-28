@@ -93,6 +93,8 @@ class _ScanCollection:
     visited_dir_count: int = 0
     skipped_dir_count: int = 0
     skipped_dirs_by_name: Dict[str, int] | None = None
+    inaccessible_dir_count: int = 0
+    inaccessible_dirs_by_name: Dict[str, int] | None = None
     unsupported_file_count: int = 0
     unsupported_extensions_by_suffix: Dict[str, int] | None = None
 
@@ -373,10 +375,17 @@ def _collect_supported_paths_with_stats(
     excluded_folder_names: Optional[List[str]] = None,
 ) -> _ScanCollection:
     folder = Path(os.path.normpath(folder_path.strip()))
-    if not folder.exists():
-        raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
-    if not folder.is_dir():
-        raise ValueError(f"폴더가 아닙니다: {folder_path}")
+    try:
+        if not folder.exists():
+            raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
+        if not folder.is_dir():
+            raise ValueError(f"폴더가 아닙니다: {folder_path}")
+    except PermissionError:
+        return _ScanCollection(
+            paths=[],
+            inaccessible_dir_count=1,
+            inaccessible_dirs_by_name={folder.name or str(folder): 1},
+        )
 
     supported = {extension.lower() for extension in SUPPORTED_EXTENSIONS}
     excluded_keys = excluded_folder_key_set(
@@ -384,8 +393,12 @@ def _collect_supported_paths_with_stats(
     )
     paths: List[str] = []
     skipped_dirs: Counter[str] = Counter()
+    inaccessible_dirs: Counter[str] = Counter()
     unsupported_extensions: Counter[str] = Counter()
     visited_dir_count = 0
+
+    def mark_inaccessible(path: Path) -> None:
+        inaccessible_dirs[path.name or str(path)] += 1
 
     def visit_file(path: Path) -> None:
         if path.name.startswith("~$"):
@@ -400,14 +413,26 @@ def _collect_supported_paths_with_stats(
 
     if not recursive:
         visited_dir_count = 1
-        for path in folder.iterdir():
-            if path.is_file():
+        try:
+            iterator = list(folder.iterdir())
+        except OSError:
+            mark_inaccessible(folder)
+            iterator = []
+        for path in iterator:
+            try:
+                is_file = path.is_file()
+            except OSError:
+                mark_inaccessible(path)
+                continue
+            if is_file:
                 visit_file(path)
         return _ScanCollection(
             paths=sorted(paths),
             visited_dir_count=visited_dir_count,
             skipped_dir_count=0,
             skipped_dirs_by_name={},
+            inaccessible_dir_count=sum(inaccessible_dirs.values()),
+            inaccessible_dirs_by_name=sorted_counter_map(inaccessible_dirs),
             unsupported_file_count=sum(unsupported_extensions.values()),
             unsupported_extensions_by_suffix=sorted_counter_map(unsupported_extensions),
         )
@@ -416,14 +441,35 @@ def _collect_supported_paths_with_stats(
     while stack:
         current = stack.pop()
         visited_dir_count += 1
-        for path in current.iterdir():
-            if path.is_dir():
-                if should_exclude_dir(path, excluded_keys):
-                    skipped_dirs[path.name] += 1
-                elif not path.is_symlink():
+        try:
+            iterator = list(current.iterdir())
+        except OSError:
+            mark_inaccessible(current)
+            continue
+        for path in iterator:
+            if should_exclude_dir(path, excluded_keys):
+                skipped_dirs[path.name] += 1
+                continue
+            try:
+                is_dir = path.is_dir()
+            except OSError:
+                mark_inaccessible(path)
+                continue
+            if is_dir:
+                try:
+                    is_symlink = path.is_symlink()
+                except OSError:
+                    mark_inaccessible(path)
+                    continue
+                if not is_symlink:
                     stack.append(path)
                 continue
-            if path.is_file():
+            try:
+                is_file = path.is_file()
+            except OSError:
+                mark_inaccessible(path)
+                continue
+            if is_file:
                 visit_file(path)
 
     return _ScanCollection(
@@ -431,6 +477,8 @@ def _collect_supported_paths_with_stats(
         visited_dir_count=visited_dir_count,
         skipped_dir_count=sum(skipped_dirs.values()),
         skipped_dirs_by_name=sorted_counter_map(skipped_dirs),
+        inaccessible_dir_count=sum(inaccessible_dirs.values()),
+        inaccessible_dirs_by_name=sorted_counter_map(inaccessible_dirs),
         unsupported_file_count=sum(unsupported_extensions.values()),
         unsupported_extensions_by_suffix=sorted_counter_map(unsupported_extensions),
     )
@@ -626,8 +674,10 @@ def rescan_library(
     folders_total = len(settings.watched_folders)
     scan_visited_dir_count = 0
     scan_skipped_dir_count = 0
+    scan_inaccessible_dir_count = 0
     scan_unsupported_file_count = 0
     scan_skipped_dirs_by_name: Counter[str] = Counter()
+    scan_inaccessible_dirs_by_name: Counter[str] = Counter()
     scan_unsupported_extensions_by_suffix: Counter[str] = Counter()
     registered_chunk_count = 0
     flush_count = 0
@@ -677,8 +727,10 @@ def rescan_library(
             )
             scan_visited_dir_count += scan_result.visited_dir_count
             scan_skipped_dir_count += scan_result.skipped_dir_count
+            scan_inaccessible_dir_count += scan_result.inaccessible_dir_count
             scan_unsupported_file_count += scan_result.unsupported_file_count
             scan_skipped_dirs_by_name.update(scan_result.skipped_dirs_by_name or {})
+            scan_inaccessible_dirs_by_name.update(scan_result.inaccessible_dirs_by_name or {})
             scan_unsupported_extensions_by_suffix.update(scan_result.unsupported_extensions_by_suffix or {})
             for path in scan_result.paths:
                 if _cancel_event.is_set():
@@ -712,6 +764,8 @@ def rescan_library(
                 visited_dir_count=scan_result.visited_dir_count,
                 skipped_dir_count=scan_result.skipped_dir_count,
                 skipped_dirs_by_name=scan_result.skipped_dirs_by_name or {},
+                inaccessible_dir_count=scan_result.inaccessible_dir_count,
+                inaccessible_dirs_by_name=scan_result.inaccessible_dirs_by_name or {},
                 unsupported_file_count=scan_result.unsupported_file_count,
                 unsupported_extensions_by_suffix=scan_result.unsupported_extensions_by_suffix or {},
                 duration_ms=elapsed_ms(folder_started),
@@ -1222,6 +1276,8 @@ def rescan_library(
         visited_dir_count=scan_visited_dir_count,
         skipped_dir_count=scan_skipped_dir_count,
         skipped_dirs_by_name=sorted_counter_map(scan_skipped_dirs_by_name),
+        inaccessible_dir_count=scan_inaccessible_dir_count,
+        inaccessible_dirs_by_name=sorted_counter_map(scan_inaccessible_dirs_by_name),
         unsupported_file_count=scan_unsupported_file_count,
         unsupported_extensions_by_suffix=sorted_counter_map(scan_unsupported_extensions_by_suffix),
         flush_count=flush_count,

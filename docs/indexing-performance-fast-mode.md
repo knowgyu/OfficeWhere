@@ -22,7 +22,7 @@ Large OfficeWhere libraries can contain 1,000+ Office files. On high-spec PCs, u
 - GPU is not used: Office ZIP/XML parsing, filesystem I/O, and SQLite/FTS writes are CPU/I/O-bound.
 
 ## Performance log interpretation
-- `scan_folder_done` reports per-folder `visited_dir_count`, `skipped_dir_count`, skipped folder names, unsupported suffix counts, and scan duration.
+- `scan_folder_done` reports per-folder `visited_dir_count`, `skipped_dir_count`, skipped folder names, `inaccessible_dir_count`, inaccessible folder names, unsupported suffix counts, and scan duration.
 - `db_flush_done` reports `reason` (`file_limit`, `chunk_limit`, `single_large_file`, `interval`, `final`, or `cancel`), batch file/chunk counts, and write duration.
 - `rescan_end` summarizes scan counts, unsupported-file counts, flush count/avg/max durations, registered chunk count, and legacy unsupported rows pruned.
 - The UI emits a `saving` progress stage while DB writes are being committed so a long flush is visible instead of appearing hung.

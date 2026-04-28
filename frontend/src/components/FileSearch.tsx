@@ -623,7 +623,7 @@ export default function FileSearch({
           {tutorialStep === 'search' && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-primary)]/20 bg-[var(--md-sys-color-primary-container)]/55 px-3 py-1 text-[var(--md-sys-color-on-primary-container)]">
               <Icon name="auto_awesome" size={16} />
-              ㅍㄹㅈㅌ만 입력해도 프로젝트 문서를 찾아요
+              프로젝트를 입력하면 파일명과 본문을 함께 찾아요
             </span>
           )}
           {lastReindex && (
