@@ -344,6 +344,7 @@ class LibrarySettings(BaseModel):
     auto_rescan_mode: str = "interval"
     auto_rescan_interval_hours: float = 24.0
     auto_rescan_daily_time: str = "03:00"
+    fast_worker_count: int = 24
     last_rescan_at: Optional[str] = None
 
 

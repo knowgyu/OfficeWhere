@@ -21,6 +21,21 @@ def test_library_settings_interval_is_floored_and_minimum(tmp_path, monkeypatch)
     assert saved.auto_rescan_interval_hours == 1
 
 
+def test_library_settings_fast_worker_count_is_bounded_to_ui_steps(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    saved = save_library_settings(LibrarySettings(fast_worker_count=3))
+    assert saved.fast_worker_count == 4
+
+    saved = save_library_settings(LibrarySettings(fast_worker_count=26))
+    assert saved.fast_worker_count == 28
+
+    saved = save_library_settings(LibrarySettings(fast_worker_count=99))
+    assert saved.fast_worker_count == 48
+
+
 def test_cancel_library_rescan_marks_running_job(tmp_path, monkeypatch):
     import time
 
@@ -62,7 +77,7 @@ def test_start_library_rescan_fast_status_and_running_job_mode_are_stable(tmp_pa
 
     monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
-    monkeypatch.setattr("backend.core.library.get_fast_worker_count", lambda: 12)
+    monkeypatch.setattr("backend.core.library.get_fast_worker_count", lambda _configured=None: 12)
     init_db()
     save_library_settings(
         LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])

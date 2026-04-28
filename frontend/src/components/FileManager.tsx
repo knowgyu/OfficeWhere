@@ -92,6 +92,10 @@ function formatBytes(bytes?: number) {
 }
 
 const REGISTERED_FILE_PAGE_SIZE = 50
+const INDEX_WORKER_MIN = 4
+const INDEX_WORKER_MAX = 48
+const INDEX_WORKER_STEP = 4
+const INDEX_WORKER_RECOMMENDED = 24
 const SAFE_APP_DATA_IDS = new Set([
   'backend-data',
   'chromium-cache',
@@ -120,6 +124,22 @@ function appDataSize(candidates: AppDataCandidate[], ids: string[]) {
     (total, candidate) => total + (selected.has(candidate.id) ? candidate.sizeBytes ?? 0 : 0),
     0,
   )
+}
+
+function normalizeIndexWorkerCount(value: number) {
+  const bounded = Math.min(Math.max(value, INDEX_WORKER_MIN), INDEX_WORKER_MAX)
+  return Math.min(
+    Math.max(Math.round(bounded / INDEX_WORKER_STEP) * INDEX_WORKER_STEP, INDEX_WORKER_MIN),
+    INDEX_WORKER_MAX,
+  )
+}
+
+function workerCountLabel(value: number) {
+  if (value <= 8) return '안정 우선'
+  if (value < INDEX_WORKER_RECOMMENDED) return '일반 PC'
+  if (value === INDEX_WORKER_RECOMMENDED) return '추천'
+  if (value <= 32) return '고성능 PC'
+  return '매우 높음'
 }
 
 export default function FileManager({
@@ -166,6 +186,7 @@ export default function FileManager({
     auto_rescan_mode: 'interval',
     auto_rescan_interval_hours: 24,
     auto_rescan_daily_time: '03:00',
+    fast_worker_count: INDEX_WORKER_RECOMMENDED,
     last_rescan_at: null,
   })
   const [folderPathDraft, setFolderPathDraft] = useState('')
@@ -185,6 +206,8 @@ export default function FileManager({
   const [appDataAdvancedOpen, setAppDataAdvancedOpen] = useState(false)
   const [clearAppDataOpen, setClearAppDataOpen] = useState(false)
   const [clearAppDataResult, setClearAppDataResult] = useState<ClearAppDataResult | null>(null)
+  const [indexSettingsOpen, setIndexSettingsOpen] = useState(false)
+  const [indexWorkerDraft, setIndexWorkerDraft] = useState(INDEX_WORKER_RECOMMENDED)
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
   const [closeBehaviorLoading, setCloseBehaviorLoading] = useState(false)
   const officeWhereBridge = getOfficeWhereBridge()
@@ -292,6 +315,11 @@ export default function FileManager({
   }, [])
 
   useEffect(() => {
+    if (!indexSettingsOpen) return
+    setIndexWorkerDraft(normalizeIndexWorkerCount(librarySettings.fast_worker_count ?? INDEX_WORKER_RECOMMENDED))
+  }, [indexSettingsOpen, librarySettings.fast_worker_count])
+
+  useEffect(() => {
     if (confirmDeleteFiles.length === 0) return
     const handler = (event: KeyboardEvent) => {
       if (event.key !== 'Enter') return
@@ -314,12 +342,15 @@ export default function FileManager({
     }
   }
 
-  const saveLibrarySettings = async (next: LibrarySettings) => {
+  const saveLibrarySettings = async (
+    next: LibrarySettings,
+    successMessage = '대상 폴더 설정이 저장되었습니다.',
+  ) => {
     setSettingsLoading(true)
     try {
       const response = await api.library.updateSettings(next)
       setLibrarySettings(response.data)
-      snackbar.success('대상 폴더 설정이 저장되었습니다.')
+      if (successMessage) snackbar.success(successMessage)
       return response.data
     } catch {
       snackbar.error('대상 폴더 설정 저장에 실패했습니다.')
@@ -370,7 +401,7 @@ export default function FileManager({
       snackbar.success('예제 폴더를 추가했습니다. 이제 문서 새로고침을 눌러주세요.')
       return
     }
-    await startRescan('added')
+    await startRescan('added', 'fast')
   }
 
   const handleRemoveWatchedFolder = async (path: string) => {
@@ -414,11 +445,16 @@ export default function FileManager({
 
   const handleRescanLibrary = async () => {
     if (tutorialStep === 'document-refresh') setTourRefreshStartKey(rescanCompletionKey)
-    await startRescan('manual')
+    await startRescan('manual', 'fast')
   }
 
-  const handleFastRescanLibrary = async () => {
-    await startRescan('fast', 'fast')
+  const handleSaveIndexWorkerCount = async () => {
+    const value = normalizeIndexWorkerCount(indexWorkerDraft)
+    const saved = await saveLibrarySettings(
+      { ...librarySettings, fast_worker_count: value },
+      '색인 성능 설정을 저장했습니다.',
+    )
+    if (saved) setIndexSettingsOpen(false)
   }
 
   const openClearAppDataPreset = (candidateIds: string[]) => {
@@ -845,22 +881,21 @@ export default function FileManager({
             <div className="flex items-center justify-end gap-2 flex-wrap">
               <Button
                 variant="outlined"
-                leadingIcon="bolt"
-                onClick={handleFastRescanLibrary}
-                loading={rescanning && rescanStatus?.mode === 'fast'}
-                disabled={settingsLoading || rescanning || librarySettings.watched_folders.length === 0}
-                title="CPU/RAM을 더 사용해 큰 폴더를 빠르게 색인합니다."
+                leadingIcon="tune"
+                onClick={() => setIndexSettingsOpen(true)}
+                disabled={settingsLoading}
               >
-                고속 색인
+                색인 성능 설정
               </Button>
               <Button
                 variant="filled"
                 leadingIcon="sync"
                 onClick={handleRescanLibrary}
-                loading={rescanning && rescanStatus?.mode !== 'fast'}
+                loading={rescanning}
                 disabled={settingsLoading || rescanning || librarySettings.watched_folders.length === 0}
                 className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
                 data-tour-target={tutorialStep === 'document-refresh' ? 'document-refresh' : undefined}
+                title="CPU/RAM을 더 사용해 빠르게 색인합니다."
               >
                 문서 새로고침
               </Button>
@@ -1498,6 +1533,92 @@ export default function FileManager({
       </Card>
 
 
+
+      <Dialog
+        open={indexSettingsOpen}
+        onClose={() => setIndexSettingsOpen(false)}
+        size="md"
+        icon="tune"
+        title="색인 성능 설정"
+        description="동시에 처리할 문서 수를 정합니다. 기본값 24를 권장합니다."
+        actions={
+          <>
+            <Button variant="text" onClick={() => setIndexSettingsOpen(false)}>
+              취소
+            </Button>
+            <Button
+              variant="filled"
+              leadingIcon="save"
+              onClick={handleSaveIndexWorkerCount}
+              loading={settingsLoading}
+            >
+              저장
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">작업 수</p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  높을수록 빨라질 수 있지만 CPU/RAM/디스크 사용량이 늘어납니다.
+                </p>
+              </div>
+              <Badge tone={indexWorkerDraft === INDEX_WORKER_RECOMMENDED ? 'success' : 'neutral'}>
+                {workerCountLabel(indexWorkerDraft)}
+              </Badge>
+            </div>
+
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-4xl font-semibold tracking-tight text-[var(--md-sys-color-on-surface)]">
+                  {indexWorkerDraft}
+                </p>
+                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                  worker
+                </p>
+              </div>
+              <div className="text-right type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                4 단위 · 최대 48
+              </div>
+            </div>
+
+            <input
+              type="range"
+              min={INDEX_WORKER_MIN}
+              max={INDEX_WORKER_MAX}
+              step={INDEX_WORKER_STEP}
+              value={indexWorkerDraft}
+              onChange={(event) => setIndexWorkerDraft(normalizeIndexWorkerCount(Number(event.target.value)))}
+              className="w-full accent-[var(--md-sys-color-primary)]"
+              aria-label="색인 worker 수"
+            />
+            <div className="grid grid-cols-5 gap-2 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {[4, 16, 24, 32, 48].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setIndexWorkerDraft(value)}
+                  className={`rounded-full border px-2 py-1 transition-colors ${
+                    indexWorkerDraft === value
+                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                      : 'border-[var(--md-sys-color-outline-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                  }`}
+                >
+                  {value}
+                  {value === INDEX_WORKER_RECOMMENDED ? ' 추천' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            네트워크 폴더나 외장 저장장치에서는 값을 너무 높이면 오히려 느려질 수 있습니다.
+          </p>
+        </div>
+      </Dialog>
 
       <Dialog
         open={clearAppDataOpen}

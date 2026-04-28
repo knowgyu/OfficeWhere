@@ -37,7 +37,7 @@ from .indexer import inspect_and_chunk
 from .parser import SUPPORTED_EXTENSIONS
 from .normalizer import suggest_key_column
 from .excel_analysis import normalize_excel_parser_config
-from ..runtime import get_fast_worker_count, get_worker_count
+from ..runtime import get_fast_worker_count, get_worker_count, normalize_fast_worker_count
 
 SETTINGS_KEY = "library_settings"
 LAST_RESCAN_KEY = "library_last_rescan_at"
@@ -59,8 +59,9 @@ def _normalize_rescan_mode(mode: str = "normal") -> str:
     return "fast" if mode == "fast" else "normal"
 
 
-def _rescan_worker_count(mode: str) -> int:
-    return get_fast_worker_count() if mode == "fast" else get_worker_count()
+def _rescan_worker_count(mode: str, settings: Optional[LibrarySettings] = None) -> int:
+    configured = settings.fast_worker_count if settings else None
+    return get_fast_worker_count(configured) if mode == "fast" else get_worker_count()
 
 
 def _now_iso() -> str:
@@ -146,6 +147,7 @@ def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
         auto_rescan_mode=settings.auto_rescan_mode,
         auto_rescan_interval_hours=_normalize_interval_hours(settings.auto_rescan_interval_hours),
         auto_rescan_daily_time=settings.auto_rescan_daily_time,
+        fast_worker_count=normalize_fast_worker_count(settings.fast_worker_count),
         last_rescan_at=settings.last_rescan_at,
     )
     set_setting(SETTINGS_KEY, normalized.model_dump_json())
@@ -465,8 +467,8 @@ def rescan_library(
     mode: str = "normal",
 ) -> LibraryRescanResponse:
     mode = _normalize_rescan_mode(mode)
-    worker_count = _rescan_worker_count(mode)
     settings = load_library_settings()
+    worker_count = _rescan_worker_count(mode, settings)
     if not settings.watched_folders:
         if progress_callback:
             progress_callback(
@@ -791,7 +793,8 @@ def _run_rescan_job(mode: str) -> None:
 
 def start_library_rescan(mode: str = "normal") -> LibraryRescanStatus:
     mode = _normalize_rescan_mode(mode)
-    worker_count = _rescan_worker_count(mode)
+    settings = load_library_settings()
+    worker_count = _rescan_worker_count(mode, settings)
     with _rescan_status_lock:
         if _rescan_status.get("running"):
             return LibraryRescanStatus(**_rescan_status)

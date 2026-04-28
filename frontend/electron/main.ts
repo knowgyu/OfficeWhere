@@ -810,6 +810,11 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
   }
 
   appDataCleanupInProgress = true
+  if (shouldExitAfterClear) {
+    isQuitting = true
+    tray?.destroy()
+    tray = null
+  }
   try {
     result.backendStopped = await stopBackendAndWait()
     await closeRendererForAppDataCleanup(selected)
@@ -825,16 +830,20 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
         result.failed.push({ id: candidate.id, path: candidate.path, error: errorToMessage(error) })
       }
     }
+  } catch (error) {
+    result.success = false
+    result.failed.push({
+      id: 'app-data-cleanup',
+      path: app.getPath('userData'),
+      error: errorToMessage(error),
+    })
+  }
 
-    if (result.success) {
-      writeResetMarker(selected)
-    }
+  try {
+    if (result.success) writeResetMarker(selected)
 
-    if (result.success && shouldExitAfterClear) {
+    if (shouldExitAfterClear) {
       result.exitScheduled = true
-      isQuitting = true
-      tray?.destroy()
-      tray = null
       setTimeout(() => {
         app.quit()
         setTimeout(() => app.exit(0), 1_000)

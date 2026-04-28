@@ -494,6 +494,7 @@ export interface LibrarySettings {
   auto_rescan_mode: 'manual' | 'interval' | 'daily'
   auto_rescan_interval_hours: number
   auto_rescan_daily_time: string
+  fast_worker_count: number
   last_rescan_at?: string | null
 }
 
