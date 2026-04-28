@@ -26,7 +26,7 @@ def _default_db_dir() -> Path:
 DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
-SEARCH_INDEX_VERSION = "4"
+SEARCH_INDEX_VERSION = "5"
 COMPARISON_CACHE_VERSION = 1
 _DB_WRITE_LOCK = threading.RLock()
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
@@ -244,6 +244,16 @@ def _drop_legacy_file_search(cursor: sqlite3.Cursor):
     cursor.execute("DROP TRIGGER IF EXISTS chunks_ai")
     cursor.execute("DROP TRIGGER IF EXISTS chunks_ad")
     cursor.execute("DROP TABLE IF EXISTS file_search")
+
+
+def _drop_current_search_indexes(cursor: sqlite3.Cursor):
+    """Drop current search FTS tables so schema options can be migrated."""
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ai_ko")
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ad_ko")
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ai_trigram")
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ad_trigram")
+    cursor.execute("DROP TABLE IF EXISTS file_search_ko")
+    cursor.execute("DROP TABLE IF EXISTS file_search_trigram")
 
 
 def _get_setting_with_cursor(cursor: sqlite3.Cursor, key: str, default: str = "") -> str:
@@ -498,7 +508,8 @@ def _create_fts_tables(cursor: sqlite3.Cursor) -> None:
             search_text,
             content='file_chunks',
             content_rowid='id',
-            tokenize='unicode61'
+            tokenize='unicode61',
+            columnsize=0
         )
         """
     )
@@ -509,7 +520,8 @@ def _create_fts_tables(cursor: sqlite3.Cursor) -> None:
                 trigram_text,
                 content='file_chunks',
                 content_rowid='id',
-                tokenize='trigram'
+                tokenize='trigram',
+                columnsize=0
             )
             """
         )
@@ -682,6 +694,9 @@ def init_db():
 
         if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
             _refresh_search_text(cursor)
+            _drop_current_search_indexes(cursor)
+            _create_fts_tables(cursor)
+            _create_fts_triggers(cursor)
             _rebuild_search_indexes(cursor, optimize=True)
 
         conn.commit()
@@ -1354,7 +1369,11 @@ def search_chunks(
                 JOIN file_chunks fc ON fc.id = {search_table}.rowid
                 JOIN registered_files rf ON rf.id = fc.file_id
                 WHERE {search_table} MATCH ?{filter_clause}
-                ORDER BY rank
+                ORDER BY rf.file_mtime IS NULL,
+                         rf.file_mtime DESC,
+                         rf.created_at DESC,
+                         rf.id DESC,
+                         fc.id ASC
                 LIMIT ?
                 """,
                 params,
@@ -1379,19 +1398,27 @@ def search_chunks(
         cursor.execute(
             f"""
             WITH matched_files AS (
-                SELECT fc.file_id AS file_id, MIN(rank) AS best_rank
+                SELECT fc.file_id AS file_id,
+                       rf.file_mtime AS file_mtime,
+                       rf.created_at AS created_at,
+                       rf.id AS sort_id
                 FROM {search_table}
                 JOIN file_chunks fc ON fc.id = {search_table}.rowid
                 JOIN registered_files rf ON rf.id = fc.file_id
                 WHERE {search_table} MATCH ?{filter_clause}
-                GROUP BY fc.file_id
-                ORDER BY best_rank
+                GROUP BY fc.file_id, rf.file_mtime, rf.created_at, rf.id
+                ORDER BY rf.file_mtime IS NULL,
+                         rf.file_mtime DESC,
+                         rf.created_at DESC,
+                         rf.id DESC
                 LIMIT ?
             ),
             ranked_chunks AS (
                 SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content,
-                       matched_files.best_rank, rank AS chunk_rank,
-                       ROW_NUMBER() OVER (PARTITION BY fc.file_id ORDER BY rank) AS chunk_number
+                       matched_files.file_mtime AS matched_file_mtime,
+                       matched_files.created_at AS matched_created_at,
+                       matched_files.sort_id AS matched_sort_id,
+                       ROW_NUMBER() OVER (PARTITION BY fc.file_id ORDER BY fc.id ASC) AS chunk_number
                 FROM matched_files
                 JOIN file_chunks fc ON fc.file_id = matched_files.file_id
                 JOIN {search_table} ON {search_table}.rowid = fc.id
@@ -1401,7 +1428,11 @@ def search_chunks(
             SELECT file_id, name, path, file_type, location, content
             FROM ranked_chunks
             WHERE chunk_number <= ?
-            ORDER BY best_rank, file_id, chunk_number
+            ORDER BY matched_file_mtime IS NULL,
+                     matched_file_mtime DESC,
+                     matched_created_at DESC,
+                     matched_sort_id DESC,
+                     chunk_number ASC
             """,
             [*params, safe_file_limit, fts_query, safe_per_file_limit],
         )

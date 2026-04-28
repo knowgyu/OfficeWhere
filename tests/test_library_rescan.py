@@ -101,7 +101,11 @@ def test_start_library_rescan_fast_status_and_running_job_mode_are_stable(tmp_pa
         LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
     )
 
+    collect_calls = 0
+
     def slow_collect(_path, _recursive, _excluded_folder_names=None):
+        nonlocal collect_calls
+        collect_calls += 1
         time.sleep(0.2)
         return library._ScanCollection(paths=[])
 
@@ -114,6 +118,89 @@ def test_start_library_rescan_fast_status_and_running_job_mode_are_stable(tmp_pa
     assert first.worker_count == 12
     assert second.mode == "fast"
     assert second.worker_count == 12
+
+    deadline = time.time() + 2
+    status = library.get_library_rescan_status()
+    while status.running and time.time() < deadline:
+        time.sleep(0.05)
+        status = library.get_library_rescan_status()
+
+    assert status.running is False
+    assert collect_calls == 1
+
+
+def test_direct_rescan_skips_when_another_rescan_is_running(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_collect(_path, _recursive, _excluded_folder_names=None):
+        entered.set()
+        release.wait(2)
+        return library._ScanCollection(paths=[])
+
+    events = []
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", slow_collect)
+    monkeypatch.setattr(library, "log_index_perf", lambda event, **fields: events.append((event, fields)))
+
+    thread = threading.Thread(target=library.rescan_library, daemon=True)
+    thread.start()
+    assert entered.wait(1)
+
+    skipped = library.rescan_library()
+
+    release.set()
+    thread.join(2)
+
+    assert skipped.registered == 0
+    assert any(event == "rescan_skipped" and fields["reason"] == "already_running" for event, fields in events)
+
+
+def test_async_rescan_holds_execution_token_for_scheduler_calls(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_collect(_path, _recursive, _excluded_folder_names=None):
+        entered.set()
+        release.wait(2)
+        return library._ScanCollection(paths=[])
+
+    events = []
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", slow_collect)
+    monkeypatch.setattr(library, "log_index_perf", lambda event, **fields: events.append((event, fields)))
+
+    started = library.start_library_rescan(mode="fast")
+    skipped = library.rescan_library(mode="normal")
+
+    assert started.running is True
+    assert skipped.registered == 0
+    assert any(event == "rescan_skipped" and fields["mode"] == "normal" for event, fields in events)
+
+    assert entered.wait(1)
+    release.set()
 
     deadline = time.time() + 2
     status = library.get_library_rescan_status()

@@ -8,7 +8,15 @@ import pandas as pd
 import pytest
 
 from backend.core.indexer import index_file, inspect_and_chunk, reindex_all, search, _sanitize_fts_query
-from backend.database import init_db, register_file, delete_file, get_all_files, search_chunks, save_file_chunks
+from backend.database import (
+    init_db,
+    register_file,
+    delete_file,
+    get_all_files,
+    search_chunks,
+    save_file_chunks,
+    update_file_mtime,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -179,6 +187,13 @@ def test_init_db_removes_unused_base_file_search():
     assert cursor.fetchall() == []
     cursor.execute("SELECT name FROM sqlite_master WHERE name = 'file_search_ko'")
     assert cursor.fetchone() == ("file_search_ko",)
+    cursor.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE name IN ('file_search_ko_docsize', 'file_search_trigram_docsize')
+        """
+    )
+    assert cursor.fetchall() == []
     conn.close()
 
 
@@ -230,6 +245,51 @@ def test_init_db_migrates_legacy_base_file_search(tmp_path, monkeypatch):
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.execute("SELECT rowid FROM file_search_ko WHERE file_search_ko MATCH ?", ('"회의"',))
+    assert cursor.fetchone() is not None
+    conn.close()
+
+
+def test_init_db_recreates_search_indexes_with_columnsize_zero(tmp_path):
+    from backend.database import DB_PATH, set_setting
+
+    file_id = register_file(str(tmp_path / "meeting.docx"), "meeting.docx", "Word", "", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "주간 회의록"}])
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ai_ko")
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ad_ko")
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ai_trigram")
+    cursor.execute("DROP TRIGGER IF EXISTS chunks_ad_trigram")
+    cursor.execute("DROP TABLE IF EXISTS file_search_ko")
+    cursor.execute("DROP TABLE IF EXISTS file_search_trigram")
+    cursor.execute(
+        """
+        CREATE VIRTUAL TABLE file_search_ko USING fts5(
+            search_text,
+            content='file_chunks',
+            content_rowid='id',
+            tokenize='unicode61'
+        )
+        """
+    )
+    cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('rebuild')")
+    conn.commit()
+    conn.close()
+    set_setting("search_index_version", "4")
+
+    init_db()
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE name IN ('file_search_ko_docsize', 'file_search_trigram_docsize')
+        """
+    )
+    assert cursor.fetchall() == []
     cursor.execute("SELECT rowid FROM file_search_ko WHERE file_search_ko MATCH ?", ('"회의"',))
     assert cursor.fetchone() is not None
     conn.close()
@@ -446,18 +506,51 @@ def test_search_api_caps_results_by_file_first(tmp_path):
     assert response.has_more is True
 
 
+def test_content_search_orders_files_by_recent_mtime_and_chunks_by_document_order(tmp_path):
+    first_id = register_file(str(tmp_path / "old.docx"), "old.docx", "Word", "", 0)
+    second_id = register_file(str(tmp_path / "new.docx"), "new.docx", "Word", "", 0)
+    third_id = register_file(str(tmp_path / "middle.docx"), "middle.docx", "Word", "", 0)
+    save_file_chunks(first_id, [{"location": "문단 1", "content": "프로젝트 공통키워드"}])
+    save_file_chunks(
+        second_id,
+        [
+            {"location": "슬라이드 1", "content": "프로젝트 공통키워드"},
+            {"location": "슬라이드 2", "content": "프로젝트 공통키워드 프로젝트 공통키워드"},
+            {"location": "슬라이드 5", "content": "프로젝트 공통키워드"},
+        ],
+    )
+    save_file_chunks(third_id, [{"location": "문단 1", "content": "프로젝트 공통키워드"}])
+    update_file_mtime(first_id, 1_000)
+    update_file_mtime(second_id, 3_000)
+    update_file_mtime(third_id, 2_000)
+
+    results = search("공통키워드", file_limit=3, per_file_limit=3)
+
+    ordered_file_ids = []
+    for item in results:
+        if item["file_id"] not in ordered_file_ids:
+            ordered_file_ids.append(item["file_id"])
+    assert ordered_file_ids == [second_id, third_id, first_id]
+    assert [item["location"] for item in results if item["file_id"] == second_id] == [
+        "슬라이드 1",
+        "슬라이드 2",
+        "슬라이드 5",
+    ]
+
+
 def test_search_api_allows_more_files_up_to_max(tmp_path):
     from backend.api.search import search_files
     from backend.database import save_file_chunks
     from backend.models.schemas import SearchRequest
 
-    for index in range(55):
+    for index in range(105):
         file_id = register_file(str(tmp_path / f"bulk-{index}.docx"), f"bulk-{index}.docx", "Word", "", 0)
         save_file_chunks(file_id, [{"location": "문단", "content": f"프로젝트 대량검색 {index}"}])
+        update_file_mtime(file_id, float(index))
 
-    response = search_files(SearchRequest(query="대량검색", search_scope="content", file_limit=80))
+    response = search_files(SearchRequest(query="대량검색", search_scope="content", file_limit=120))
 
-    assert response.file_limit == 50
-    assert response.file_count == 50
-    assert len({item.file_id for item in response.results}) == 50
+    assert response.file_limit == 100
+    assert response.file_count == 100
+    assert len({item.file_id for item in response.results}) == 100
     assert response.has_more is False

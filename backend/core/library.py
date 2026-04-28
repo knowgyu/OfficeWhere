@@ -73,6 +73,7 @@ INITIAL_STAGING_FILE_THRESHOLD = 50
 
 _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
+_rescan_execution_lock = threading.Lock()
 _cancel_event = threading.Event()
 _group_cache_lock = threading.Lock()
 _group_cache_signature: Optional[str] = None
@@ -620,6 +621,31 @@ def _failed_result(
 
 
 def rescan_library(
+    progress_callback: Optional[ProgressCallback] = None,
+    mode: str = "normal",
+) -> LibraryRescanResponse:
+    mode = _normalize_rescan_mode(mode)
+    settings = load_library_settings()
+    worker_count = _rescan_worker_count(mode, settings)
+    skip_started = time.perf_counter()
+    if not _rescan_execution_lock.acquire(blocking=False):
+        log_index_perf(
+            "rescan_skipped",
+            operation="library_rescan",
+            mode=mode,
+            worker_count=worker_count,
+            reason="already_running",
+            duration_ms=elapsed_ms(skip_started),
+        )
+        return LibraryRescanResponse(registered=0, updated=0, skipped=0, failed=0, results=[])
+
+    try:
+        return _rescan_library_impl(progress_callback=progress_callback, mode=mode)
+    finally:
+        _rescan_execution_lock.release()
+
+
+def _rescan_library_impl(
     progress_callback: Optional[ProgressCallback] = None,
     mode: str = "normal",
 ) -> LibraryRescanResponse:
@@ -1366,10 +1392,10 @@ def rescan_library(
     return response
 
 
-def _run_rescan_job(mode: str) -> None:
+def _run_rescan_job(mode: str, owns_execution_lock: bool = False) -> None:
     mode = _normalize_rescan_mode(mode)
     try:
-        summary = rescan_library(progress_callback=_update_rescan_status, mode=mode)
+        summary = _rescan_library_impl(progress_callback=_update_rescan_status, mode=mode)
         cancelled = _cancel_event.is_set()
         _update_rescan_status(
             {
@@ -1398,6 +1424,8 @@ def _run_rescan_job(mode: str) -> None:
             }
         )
     finally:
+        if owns_execution_lock:
+            _rescan_execution_lock.release()
         _cancel_event.clear()
 
 
@@ -1408,6 +1436,16 @@ def start_library_rescan(mode: str = "normal") -> LibraryRescanStatus:
     with _rescan_status_lock:
         if _rescan_status.get("running"):
             return LibraryRescanStatus(**_rescan_status)
+        if not _rescan_execution_lock.acquire(blocking=False):
+            return LibraryRescanStatus(
+                running=True,
+                stage="queued",
+                message="이미 문서 새로고침이 실행 중입니다.",
+                mode=mode,
+                worker_count=worker_count,
+                started_at=_now_iso(),
+                updated_at=_now_iso(),
+            )
 
         _cancel_event.clear()
         _rescan_status.clear()
@@ -1423,7 +1461,7 @@ def start_library_rescan(mode: str = "normal") -> LibraryRescanStatus:
             ).model_dump()
         )
 
-    thread = threading.Thread(target=_run_rescan_job, args=(mode,), daemon=True, name="library-rescan")
+    thread = threading.Thread(target=_run_rescan_job, args=(mode, True), daemon=True, name="library-rescan")
     thread.start()
     return _status_snapshot()
 

@@ -61,7 +61,7 @@ const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: stri
 const SEARCH_DEBOUNCE_MS = 600
 const INITIAL_SEARCH_FILE_LIMIT = 20
 const SEARCH_FILE_LIMIT_STEP = 20
-const MAX_SEARCH_FILE_LIMIT = 50
+const MAX_SEARCH_FILE_LIMIT = 100
 
 type ModifiedDateFilter = 'all' | '7d' | '30d' | '90d' | 'custom'
 
@@ -471,13 +471,14 @@ export default function FileSearch({
   }
 
   const grouped = useMemo(() => {
-    const map = new Map<string, SearchResult[]>()
+    const map = new Map<string, { fileName: string; items: SearchResult[] }>()
     for (const result of results) {
-      const list = map.get(result.name) ?? []
-      list.push(result)
-      map.set(result.name, list)
+      const fileKey = `${result.file_id}:${result.path}`
+      const entry = map.get(fileKey) ?? { fileName: result.name, items: [] }
+      entry.items.push(result)
+      map.set(fileKey, entry)
     }
-    return Array.from(map.entries())
+    return Array.from(map.values()).map(({ fileName, items }) => [fileName, items] as [string, SearchResult[]])
   }, [results])
 
   const contentFileKeys = useMemo(

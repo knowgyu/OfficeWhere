@@ -13,6 +13,9 @@ Large OfficeWhere libraries can contain 1,000+ Office files. On high-spec PCs, u
 - Skip exact folder-name matches for common developer/cache/build directories such as `node_modules`, `.git`, `venv`, `.venv`, `__pycache__`, `dist`, `build`, `target`, `.gradle`, `.cargo`, `.vscode`, `.idea`, `.omx`, and `.omc`.
 - Flush prepared DB writes by chunk count as well as file count. A single chunk-heavy Office file flushes separately so it does not sit in a normal batch and make the UI look stuck.
 - For first-run broad indexing, use a temporary staging DB when the app-owned file index is empty and the scan finds at least 50 Office files. Staging defers FTS trigger maintenance while chunks are loaded, then rebuilds FTS once and copies the verified DB into the main app DB. This keeps user source documents read-only and preserves settings.
+- Search is treated as a local Office file finder, not a BM25 relevance engine. Filename matches are shown first; content matches are ordered by deterministic file metadata and in-document chunk order. FTS tables use `columnsize=0` because the hot search path no longer depends on SQLite BM25/rank docsize metadata.
+- The search UI may lazy-load up to 100 matching files. It still fetches bounded pages instead of rendering an unbounded result set.
+- Library rescans use a process-local execution token so automatic scheduler refreshes do not overlap manual/fast rescans.
 - Do not defer WAL checkpoints as a separate runtime policy for now. User traces point first to FTS/write amplification; large WAL files can also hurt reads while the UI is active.
 - Do not store extra Word/PPT comparison summaries for version management yet. Keep the DB lean; prefer lazy-loading detailed diff results in the UI if version comparison feels slow.
 - Ignore embedded media/binary parts for Word/PPT/Excel text indexing. OfficeWhere indexes text/table content; video/audio/image payloads are intentionally not parsed.
@@ -29,13 +32,14 @@ Large OfficeWhere libraries can contain 1,000+ Office files. On high-spec PCs, u
 - `db_flush_done` reports `reason` (`file_limit`, `chunk_limit`, `single_large_file`, `interval`, `final`, or `cancel`), batch file/chunk counts, and write duration.
 - `db_batch_save_done` reports lower-level SQLite timings such as metadata insert/update, chunk delete/insert, fingerprint upsert, commit time, target DB (`main` or `initial_staging`), and whether FTS triggers were active or deferred.
 - `initial_index_staging_*` events show whether first-run staging was selected and how long deferred FTS rebuild, trigger creation, quick check, and copy-back took.
+- `rescan_skipped` with `reason=already_running` means a scheduler/direct refresh was suppressed because another rescan already holds the execution token.
 - `rescan_end` summarizes scan counts, unsupported-file counts, flush count/avg/max durations, registered chunk count, and legacy unsupported rows pruned.
 - The UI emits a `saving` progress stage while DB writes are being committed so a long flush is visible instead of appearing hung.
 
 ## Guardrails
 - Source documents remain read-only.
 - Existing automatic/scheduler refreshes stay in normal mode.
-- Already-running rescan requests return the existing job status and do not change that job's mode/worker count.
+- Already-running async rescan requests return the existing job status and do not change that job's mode/worker count; scheduler/direct rescans skip while the execution token is held.
 - Invalid API modes are rejected by schema validation.
 
 ## Verification focus
