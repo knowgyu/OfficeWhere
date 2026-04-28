@@ -636,10 +636,12 @@ async function startBackend(port: number) {
   const logDir = app.getPath('logs')
   fs.mkdirSync(logDir, { recursive: true })
   backendLogPath = path.join(logDir, `backend-${new Date().toISOString().replace(/[:.]/g, '-')}.log`)
+  const indexPerfLogPath = path.join(logDir, 'index-performance.log')
 
   const command = getBackendCommand(port, dataDir)
   const logStream = fs.createWriteStream(backendLogPath, { flags: 'a' })
   logStream.write(`[officewhere] command: ${command.file} ${command.args.join(' ')}\n`)
+  logStream.write(`[officewhere] index performance log: ${indexPerfLogPath}\n`)
 
   let spawnError: Error | null = null
   let exited = false
@@ -651,6 +653,7 @@ async function startBackend(port: number) {
       OW_DATA_DIR: dataDir,
       OW_HOST: HOST,
       OW_PORT: String(port),
+      OW_INDEX_PERF_LOG_PATH: indexPerfLogPath,
       PYTHONUTF8: '1',
       PYTHONPYCACHEPREFIX: pythonCacheDir,
     },

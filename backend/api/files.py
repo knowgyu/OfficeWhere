@@ -1,12 +1,14 @@
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from ..core.file_access import inspect_file_path, pick_local_file, pick_local_folder, scan_folder
+from ..core.index_perf import elapsed_ms, log_index_perf, timed_ms
 from ..core.indexer import inspect_and_chunk
 from ..core.normalizer import suggest_key_column
 from ..core.parser import SUPPORTED_EXTENSIONS, get_file_schema
@@ -127,36 +129,109 @@ def pick_file():
 
 @router.post("", response_model=FileRegisterResponse)
 def register(req: FileRegisterRequest):
+    started = time.perf_counter()
     path = os.path.normpath(req.path)
+    metrics = {
+        "operation": "file_register",
+        "path": path,
+        "name": Path(path).name,
+        "ext": Path(path).suffix.lower(),
+    }
     if not os.path.exists(path):
+        log_index_perf(
+            "file_done",
+            **metrics,
+            action="failed",
+            success=False,
+            error_type="FileNotFoundError",
+            error=f"파일을 찾을 수 없습니다: {path}",
+            total_ms=elapsed_ms(started),
+        )
         raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {path}")
 
     ext = Path(path).suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
+        log_index_perf(
+            "file_done",
+            **metrics,
+            action="failed",
+            success=False,
+            error_type="UnsupportedFileType",
+            error=f"지원하지 않는 파일 형식입니다: {ext}",
+            total_ms=elapsed_ms(started),
+        )
         raise HTTPException(
             status_code=400,
             detail=f"지원하지 않는 파일 형식입니다: {ext}. 지원 형식: .xlsx, .xls, .docx, .pptx",
         )
 
     try:
-        info, chunks = inspect_and_chunk(path, parser_config=req.parser_config)
+        stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
+        metrics["size_bytes"] = stat_result.st_size
+        info, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: inspect_and_chunk(path, parser_config=req.parser_config))
     except FileNotFoundError as exc:
+        log_index_perf(
+            "file_done",
+            **metrics,
+            action="failed",
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(started),
+        )
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
+        log_index_perf(
+            "file_done",
+            **metrics,
+            action="failed",
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(started),
+        )
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        log_index_perf(
+            "file_done",
+            **metrics,
+            action="failed",
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(started),
+        )
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {exc}")
 
-    key_column = _validate_registration_payload(path, info["file_type"], info["columns"], req.key_column)
-    file_id = save_indexed_file(
-        path=path,
-        name=info["name"],
+    key_column = timed_ms(
+        metrics,
+        "validate_ms",
+        lambda: _validate_registration_payload(path, info["file_type"], info["columns"], req.key_column),
+    )
+    file_id = timed_ms(
+        metrics,
+        "save_ms",
+        lambda: save_indexed_file(
+            path=path,
+            name=info["name"],
+            file_type=info["file_type"],
+            key_column=key_column,
+            column_count=len(info["columns"]),
+            chunks=chunks,
+            file_mtime=stat_result.st_mtime,
+            parser_config=info["parser_config"],
+        ),
+    )
+    log_index_perf(
+        "file_done",
+        **metrics,
+        action="registered",
+        success=True,
+        file_id=file_id,
         file_type=info["file_type"],
-        key_column=key_column,
+        chunk_count=len(chunks),
         column_count=len(info["columns"]),
-        chunks=chunks,
-        file_mtime=os.path.getmtime(path),
-        parser_config=info["parser_config"],
+        total_ms=elapsed_ms(started),
     )
 
     return FileRegisterResponse(
@@ -313,22 +388,59 @@ def bulk_register(req: BulkRegisterRequest):
     from concurrent.futures import ThreadPoolExecutor
 
     def _register_one(item: BulkRegisterItem) -> BulkRegisterResult:
+        started = time.perf_counter()
         path = os.path.normpath(item.path)
+        metrics = {
+            "operation": "bulk_register",
+            "path": path,
+            "name": Path(path).name,
+            "ext": Path(path).suffix.lower(),
+        }
         try:
-            info, chunks = inspect_and_chunk(path, parser_config=item.parser_config)
-            key_column = _validate_registration_payload(path, info["file_type"], info["columns"], item.key_column)
-            file_id = save_indexed_file(
-                path=path,
-                name=info["name"],
+            stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
+            metrics["size_bytes"] = stat_result.st_size
+            info, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: inspect_and_chunk(path, parser_config=item.parser_config))
+            key_column = timed_ms(
+                metrics,
+                "validate_ms",
+                lambda: _validate_registration_payload(path, info["file_type"], info["columns"], item.key_column),
+            )
+            file_id = timed_ms(
+                metrics,
+                "save_ms",
+                lambda: save_indexed_file(
+                    path=path,
+                    name=info["name"],
+                    file_type=info["file_type"],
+                    key_column=key_column,
+                    column_count=len(info["columns"]),
+                    chunks=chunks,
+                    file_mtime=stat_result.st_mtime,
+                    parser_config=info["parser_config"],
+                ),
+            )
+            log_index_perf(
+                "file_done",
+                **metrics,
+                action="registered",
+                success=True,
+                file_id=file_id,
                 file_type=info["file_type"],
-                key_column=key_column,
+                chunk_count=len(chunks),
                 column_count=len(info["columns"]),
-                chunks=chunks,
-                file_mtime=os.path.getmtime(path),
-                parser_config=info["parser_config"],
+                total_ms=elapsed_ms(started),
             )
             return BulkRegisterResult(path=path, name=info["name"], success=True, file_id=file_id)
         except Exception as exc:
+            log_index_perf(
+                "file_done",
+                **metrics,
+                action="failed",
+                success=False,
+                error_type=exc.__class__.__name__,
+                error=str(exc),
+                total_ms=elapsed_ms(started),
+            )
             return BulkRegisterResult(path=path, name=Path(path).name, success=False, error=str(exc))
 
     with ThreadPoolExecutor(max_workers=get_worker_count()) as executor:

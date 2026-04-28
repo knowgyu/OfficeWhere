@@ -34,6 +34,7 @@ from ..models.schemas import (
     LibrarySettings,
 )
 from .indexer import inspect_and_chunk
+from .index_perf import elapsed_ms, log_index_perf, timed_ms
 from .parser import SUPPORTED_EXTENSIONS
 from .normalizer import suggest_key_column
 from .excel_analysis import normalize_excel_parser_config
@@ -469,7 +470,19 @@ def rescan_library(
     mode = _normalize_rescan_mode(mode)
     settings = load_library_settings()
     worker_count = _rescan_worker_count(mode, settings)
+    rescan_started = time.perf_counter()
     if not settings.watched_folders:
+        log_index_perf(
+            "rescan_end",
+            operation="library_rescan",
+            mode=mode,
+            worker_count=worker_count,
+            success=True,
+            reason="no_watched_folders",
+            total=0,
+            processed=0,
+            duration_ms=elapsed_ms(rescan_started),
+        )
         if progress_callback:
             progress_callback(
                 {
@@ -488,6 +501,13 @@ def rescan_library(
     found_paths: Dict[str, str] = {}
     scan_errors: List[LibraryRescanResult] = []
     folders_total = len(settings.watched_folders)
+    log_index_perf(
+        "rescan_start",
+        operation="library_rescan",
+        mode=mode,
+        worker_count=worker_count,
+        folders_total=folders_total,
+    )
     if progress_callback:
         progress_callback(
             {
@@ -509,12 +529,20 @@ def rescan_library(
     for folder_index, folder in enumerate(settings.watched_folders, start=1):
         if _cancel_event.is_set():
             break
+        folder_started = time.perf_counter()
+        found_before = len(found_paths)
+        scan_success = True
+        scan_error_type = ""
+        scan_error = ""
         try:
             for path in _collect_supported_paths(folder.path, folder.recursive):
                 if _cancel_event.is_set():
                     break
                 found_paths[path] = Path(path).name
         except Exception as exc:
+            scan_success = False
+            scan_error_type = exc.__class__.__name__
+            scan_error = str(exc)
             scan_path = os.path.normpath(folder.path)
             scan_errors.append(
                 _failed_result(
@@ -524,6 +552,21 @@ def rescan_library(
                     exc,
                     log_message="library folder scan failed",
                 )
+            )
+        finally:
+            log_index_perf(
+                "scan_folder_done",
+                operation="library_rescan",
+                mode=mode,
+                worker_count=worker_count,
+                folder=folder.path,
+                recursive=folder.recursive,
+                success=scan_success,
+                found_delta=len(found_paths) - found_before,
+                found_total=len(found_paths),
+                duration_ms=elapsed_ms(folder_started),
+                error_type=scan_error_type,
+                error=scan_error,
             )
         if progress_callback:
             progress_callback(
@@ -545,18 +588,64 @@ def rescan_library(
             )
 
     existing_by_path = {os.path.normpath(row["path"]): row for row in get_all_files()}
+    log_index_perf(
+        "indexing_start",
+        operation="library_rescan",
+        mode=mode,
+        worker_count=worker_count,
+        total=len(found_paths),
+        existing=len(existing_by_path),
+    )
 
     def _register_or_update(path: str) -> LibraryRescanResult:
+        file_started = time.perf_counter()
         if _cancel_event.is_set():
+            log_index_perf(
+                "file_done",
+                operation="library_rescan",
+                mode=mode,
+                worker_count=worker_count,
+                path=path,
+                name=Path(path).name,
+                action="cancelled",
+                success=False,
+                total_ms=elapsed_ms(file_started),
+            )
             return _cancelled_result(path)
 
         name = Path(path).name
         existing = existing_by_path.get(path)
+        metrics: Dict[str, Any] = {
+            "operation": "library_rescan",
+            "mode": mode,
+            "worker_count": worker_count,
+            "path": path,
+            "name": name,
+            "ext": Path(path).suffix.lower(),
+            "existing": bool(existing),
+            "file_id_before": existing["id"] if existing else None,
+        }
         try:
-            current_mtime = os.path.getmtime(path)
+            stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
+            current_mtime = stat_result.st_mtime
+            metrics["size_bytes"] = stat_result.st_size
             if existing and existing.get("file_mtime") is not None:
                 if abs(float(existing["file_mtime"]) - current_mtime) < 1.0:
-                    if mode == "fast" or not _is_excel_path(path) or _saved_excel_config_is_valid(path, existing.get("parser_config")):
+                    config_valid = True
+                    if mode != "fast" and _is_excel_path(path):
+                        config_valid = timed_ms(
+                            metrics,
+                            "config_check_ms",
+                            lambda: _saved_excel_config_is_valid(path, existing.get("parser_config")),
+                        )
+                    if mode == "fast" or not _is_excel_path(path) or config_valid:
+                        metrics.update(
+                            action="skipped",
+                            success=True,
+                            file_id=existing["id"],
+                            total_ms=elapsed_ms(file_started),
+                        )
+                        log_index_perf("file_done", **metrics)
                         return LibraryRescanResult(
                             path=path,
                             name=name,
@@ -572,21 +661,39 @@ def rescan_library(
                 parser_config = None
             else:
                 parser_config = existing.get("parser_config") if existing else None
-            info, chunks = inspect_and_chunk(path, parser_config=parser_config)
+            info, chunks = timed_ms(
+                metrics,
+                "inspect_chunk_ms",
+                lambda: inspect_and_chunk(path, parser_config=parser_config),
+            )
             key_column = ""
             if info["file_type"] == "Excel":
-                key_column = suggest_key_column(info["columns"]) or ""
+                key_column = timed_ms(metrics, "key_column_ms", lambda: suggest_key_column(info["columns"])) or ""
 
-            file_id = save_indexed_file(
-                path=path,
-                name=info["name"],
-                file_type=info["file_type"],
-                key_column=key_column,
-                column_count=len(info["columns"]),
-                chunks=chunks,
-                file_mtime=current_mtime,
-                parser_config=info["parser_config"],
+            file_id = timed_ms(
+                metrics,
+                "save_ms",
+                lambda: save_indexed_file(
+                    path=path,
+                    name=info["name"],
+                    file_type=info["file_type"],
+                    key_column=key_column,
+                    column_count=len(info["columns"]),
+                    chunks=chunks,
+                    file_mtime=current_mtime,
+                    parser_config=info["parser_config"],
+                ),
             )
+            metrics.update(
+                action="updated" if existing else "registered",
+                success=True,
+                file_id=file_id,
+                file_type=info["file_type"],
+                chunk_count=len(chunks),
+                column_count=len(info["columns"]),
+                total_ms=elapsed_ms(file_started),
+            )
+            log_index_perf("file_done", **metrics)
             return LibraryRescanResult(
                 path=path,
                 name=info["name"],
@@ -595,6 +702,15 @@ def rescan_library(
                 file_id=file_id,
             )
         except Exception as exc:
+            diagnostic = classify_index_error(exc, path)
+            metrics.update(
+                action="failed",
+                success=False,
+                error=str(exc),
+                total_ms=elapsed_ms(file_started),
+                **diagnostic,
+            )
+            log_index_perf("file_done", **metrics)
             return _failed_result(
                 path,
                 name,
@@ -736,6 +852,18 @@ def rescan_library(
     counts = _result_counts(results)
     response = LibraryRescanResponse(results=results, **counts)
     cancelled = _cancel_event.is_set()
+    log_index_perf(
+        "rescan_end",
+        operation="library_rescan",
+        mode=mode,
+        worker_count=worker_count,
+        success=not cancelled,
+        cancel_requested=cancelled,
+        found=total,
+        processed=len(results) - len(scan_errors),
+        duration_ms=elapsed_ms(rescan_started),
+        **counts,
+    )
     if progress_callback:
         progress_callback(
             {

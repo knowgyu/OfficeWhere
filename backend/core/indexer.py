@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from ..database import (
     update_file_mtime,
 )
 from .excel_analysis import extract_excel_used_range, inspect_excel_file_with_recovery
+from .index_perf import elapsed_ms, log_index_perf, timed_ms
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_slides
 from .text_analysis import extract_text_blocks, inspect_text_file
@@ -109,20 +111,57 @@ def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None)
 
 
 def index_file(file_id: int, path: str, parser_config: Optional[Dict[str, Any]] = None) -> int:
+    started = time.perf_counter()
+    metrics: Dict[str, Any] = {
+        "operation": "reindex_file",
+        "file_id": file_id,
+        "path": path,
+        "name": Path(path).name,
+        "ext": Path(path).suffix.lower(),
+    }
     ext = Path(path).suffix.lower()
-    if ext in (".xlsx", ".xls"):
-        chunks = _excel_used_range_chunks(path)
-    elif ext == ".docx":
-        _, chunks = _inspect_and_chunk_word(path)
-    elif ext == ".pptx":
-        _, chunks = _inspect_and_chunk_pptx(path)
-    elif ext in (".txt", ".md"):
-        _, chunks = _inspect_and_chunk_text(path)
-    else:
-        return 0
+    try:
+        stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
+        metrics["size_bytes"] = stat_result.st_size
+        if ext in (".xlsx", ".xls"):
+            chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _excel_used_range_chunks(path))
+        elif ext == ".docx":
+            _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_word(path))
+        elif ext == ".pptx":
+            _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_pptx(path))
+        elif ext in (".txt", ".md"):
+            _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_text(path))
+        else:
+            log_index_perf(
+                "file_done",
+                **metrics,
+                action="skipped",
+                success=True,
+                reason="unsupported_extension",
+                chunk_count=0,
+                total_ms=elapsed_ms(started),
+            )
+            return 0
 
-    save_file_chunks(file_id, chunks)
-    update_file_mtime(file_id, os.path.getmtime(path))
+        timed_ms(metrics, "save_ms", lambda: save_file_chunks(file_id, chunks))
+        timed_ms(metrics, "mtime_update_ms", lambda: update_file_mtime(file_id, stat_result.st_mtime))
+        metrics.update(
+            action="reindexed",
+            success=True,
+            chunk_count=len(chunks),
+            total_ms=elapsed_ms(started),
+        )
+        log_index_perf("file_done", **metrics)
+    except Exception as exc:
+        metrics.update(
+            action="failed",
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(started),
+        )
+        log_index_perf("file_done", **metrics)
+        raise
     return len(chunks)
 
 
