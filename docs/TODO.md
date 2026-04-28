@@ -39,6 +39,11 @@ This file tracks follow-up work that is not part of the formal release checklist
   - If repeated comparisons accumulate too much app-data, add a comparison-cache retention policy by age/count.
   - Choseong-only search such as `ㅎㅇㄹ` is intentionally no longer guaranteed; keep 1-2 character Korean substring search working.
 
+- [ ] Add a search-result file context menu on the filename/header area.
+  - Suggested actions: open file, show in folder/file location, copy full path, and optionally show app-level file details.
+  - Electron does not automatically expose the OS shell context menu inside the React result card; implement an app-owned context menu wired through preload/main APIs such as `shell.showItemInFolder` when this is prioritized.
+  - Keep the menu small and user-facing; avoid parser/debug actions in the first pass.
+
 - [ ] Re-test large-library indexing with both `index-performance.log` and `parsing-performance.log`.
   - Compare 24-worker default against lower values on the same local folder.
   - Mark known heavy Excel/PPT files and check whether parser tails or DB flush tails dominate.
