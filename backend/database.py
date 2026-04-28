@@ -5,6 +5,7 @@ import re
 import sqlite3
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -25,6 +26,22 @@ FINGERPRINT_VERSION = 1
 SEARCH_INDEX_VERSION = "3"
 _DB_WRITE_LOCK = threading.RLock()
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
+
+
+@dataclass(frozen=True)
+class PreparedIndexedFile:
+    """DB-ready index payload prepared outside the SQLite writer lock."""
+
+    path: str
+    name: str
+    file_type: str
+    key_column: str
+    column_count: int
+    file_mtime: float
+    parser_config_json: str
+    chunk_values: List[Tuple[str, str, str, str]]
+    fingerprint: Dict[str, Any]
+    chunk_count: int
 
 
 def configure_database(data_dir: str | os.PathLike[str]):
@@ -187,6 +204,31 @@ def _chunk_insert_values(chunks: Sequence[Dict[str, str]]) -> List[Tuple[str, st
     ]
 
 
+def prepare_indexed_file(
+    path: str,
+    name: str,
+    file_type: str,
+    key_column: str,
+    column_count: int,
+    chunks: Sequence[Dict[str, str]],
+    file_mtime: float,
+    parser_config: Optional[Dict[str, Any]] = None,
+) -> PreparedIndexedFile:
+    """Build CPU/string-heavy index fields before entering the DB writer."""
+    return PreparedIndexedFile(
+        path=path,
+        name=name,
+        file_type=file_type,
+        key_column=key_column,
+        column_count=column_count,
+        file_mtime=file_mtime,
+        parser_config_json=json.dumps(parser_config or {}, ensure_ascii=False),
+        chunk_values=_chunk_insert_values(chunks),
+        fingerprint=_build_document_fingerprint(chunks, source_mtime=file_mtime),
+        chunk_count=len(chunks),
+    )
+
+
 def _upsert_document_fingerprint(
     cursor: sqlite3.Cursor,
     file_id: int,
@@ -222,6 +264,69 @@ def _upsert_document_fingerprint(
             fingerprint["fingerprinted_at"],
         ),
     )
+
+
+def _save_prepared_indexed_file(cursor: sqlite3.Cursor, payload: PreparedIndexedFile, now: str) -> int:
+    try:
+        cursor.execute(
+            """
+            INSERT INTO registered_files (
+                path, name, file_type, key_column, column_count,
+                created_at, file_mtime, parser_config
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payload.path,
+                payload.name,
+                payload.file_type,
+                payload.key_column,
+                payload.column_count,
+                now,
+                payload.file_mtime,
+                payload.parser_config_json,
+            ),
+        )
+        file_id = cursor.lastrowid
+    except sqlite3.IntegrityError:
+        cursor.execute(
+            """
+            UPDATE registered_files
+            SET name=?, file_type=?, key_column=?, column_count=?,
+                created_at=?, file_mtime=?, parser_config=?
+            WHERE path=?
+            """,
+            (
+                payload.name,
+                payload.file_type,
+                payload.key_column,
+                payload.column_count,
+                now,
+                payload.file_mtime,
+                payload.parser_config_json,
+                payload.path,
+            ),
+        )
+        cursor.execute("SELECT id FROM registered_files WHERE path=?", (payload.path,))
+        row = cursor.fetchone()
+        file_id = row[0] if row else -1
+
+    cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
+    cursor.executemany(
+        "INSERT INTO file_chunks (file_id, location, content, search_text, trigram_text) VALUES (?, ?, ?, ?, ?)",
+        [
+            (file_id, location, content, search_text, trigram_text)
+            for location, content, search_text, trigram_text in payload.chunk_values
+        ],
+    )
+    _upsert_document_fingerprint(
+        cursor,
+        file_id,
+        [],
+        source_mtime=payload.file_mtime,
+        fingerprint=payload.fingerprint,
+    )
+    return file_id
 
 
 def _batched_values(values: Sequence[int], size: int = 900):
@@ -454,75 +559,46 @@ def save_indexed_file(
     parser_config: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Upsert file metadata, chunks, fingerprint, and mtime in one write turn."""
-    chunk_values = _chunk_insert_values(chunks)
-    fingerprint = _build_document_fingerprint(chunks, source_mtime=file_mtime)
+    payload = prepare_indexed_file(
+        path=path,
+        name=name,
+        file_type=file_type,
+        key_column=key_column,
+        column_count=column_count,
+        chunks=chunks,
+        file_mtime=file_mtime,
+        parser_config=parser_config,
+    )
+    return save_prepared_indexed_file(payload)
+
+
+def save_prepared_indexed_file(payload: PreparedIndexedFile) -> int:
+    """Save one already-prepared indexed file payload."""
+    with _write_connection() as conn:
+        try:
+            file_id = _save_prepared_indexed_file(conn.cursor(), payload, datetime.now().isoformat())
+            conn.commit()
+            return file_id
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def save_indexed_files_batch(payloads: Sequence[PreparedIndexedFile]) -> List[int]:
+    """Save multiple prepared index payloads in one SQLite transaction."""
+    if not payloads:
+        return []
 
     with _write_connection() as conn:
-        cursor = conn.cursor()
-        now = datetime.now().isoformat()
-        parser_config_json = json.dumps(parser_config or {}, ensure_ascii=False)
-
         try:
-            cursor.execute(
-                """
-                INSERT INTO registered_files (
-                    path, name, file_type, key_column, column_count,
-                    created_at, file_mtime, parser_config
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    path,
-                    name,
-                    file_type,
-                    key_column,
-                    column_count,
-                    now,
-                    file_mtime,
-                    parser_config_json,
-                ),
-            )
-            file_id = cursor.lastrowid
-        except sqlite3.IntegrityError:
-            cursor.execute(
-                """
-                UPDATE registered_files
-                SET name=?, file_type=?, key_column=?, column_count=?,
-                    created_at=?, file_mtime=?, parser_config=?
-                WHERE path=?
-                """,
-                (
-                    name,
-                    file_type,
-                    key_column,
-                    column_count,
-                    now,
-                    file_mtime,
-                    parser_config_json,
-                    path,
-                ),
-            )
-            cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
-            row = cursor.fetchone()
-            file_id = row[0] if row else -1
-
-        cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
-        cursor.executemany(
-            "INSERT INTO file_chunks (file_id, location, content, search_text, trigram_text) VALUES (?, ?, ?, ?, ?)",
-            [
-                (file_id, location, content, search_text, trigram_text)
-                for location, content, search_text, trigram_text in chunk_values
-            ],
-        )
-        _upsert_document_fingerprint(
-            cursor,
-            file_id,
-            chunks,
-            source_mtime=file_mtime,
-            fingerprint=fingerprint,
-        )
-        conn.commit()
-        return file_id
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            file_ids = [_save_prepared_indexed_file(cursor, payload, now) for payload in payloads]
+            conn.commit()
+            return file_ids
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def get_all_files() -> List[Dict[str, Any]]:

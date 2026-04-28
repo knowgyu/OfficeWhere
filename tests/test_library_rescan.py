@@ -346,3 +346,127 @@ def test_parallel_indexed_file_saves_do_not_compete_for_sqlite_writer(tmp_path, 
 
     assert len(set(file_ids)) == 40
     assert len(get_all_files()) == 40
+
+
+def test_save_indexed_files_batch_indexes_multiple_files_in_one_commit(tmp_path, monkeypatch):
+    from backend.core.indexer import search
+    from backend.database import prepare_indexed_file, save_indexed_files_batch
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    payloads = [
+        prepare_indexed_file(
+            path=str(tmp_path / f"note-{index}.txt"),
+            name=f"note-{index}.txt",
+            file_type="Text",
+            key_column="",
+            column_count=0,
+            chunks=[{"location": "본문", "content": f"배치 저장 샘플 {index}"}],
+            file_mtime=float(index),
+            parser_config={},
+        )
+        for index in range(3)
+    ]
+
+    file_ids = save_indexed_files_batch(payloads)
+
+    assert len(set(file_ids)) == 3
+    assert len(get_all_files()) == 3
+    assert search("배치 저장 샘플", file_limit=3)
+
+
+def test_save_indexed_files_batch_replaces_chunks_and_fingerprint(tmp_path, monkeypatch):
+    from backend.core.indexer import search
+    from backend.database import get_file_fingerprints, prepare_indexed_file, save_indexed_files_batch
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    target = tmp_path / "note.txt"
+    first_payload = prepare_indexed_file(
+        path=str(target),
+        name=target.name,
+        file_type="Text",
+        key_column="",
+        column_count=0,
+        chunks=[{"location": "본문", "content": "처음전용 배치 내용"}],
+        file_mtime=1.0,
+        parser_config={},
+    )
+    [file_id] = save_indexed_files_batch([first_payload])
+    first_fingerprint = get_file_fingerprints()[file_id]["content_hash"]
+
+    updated_payload = prepare_indexed_file(
+        path=str(target),
+        name=target.name,
+        file_type="Text",
+        key_column="",
+        column_count=0,
+        chunks=[{"location": "본문", "content": "교체전용 배치 내용"}],
+        file_mtime=2.0,
+        parser_config={},
+    )
+    [updated_file_id] = save_indexed_files_batch([updated_payload])
+    updated_fingerprint = get_file_fingerprints()[updated_file_id]
+
+    assert updated_file_id == file_id
+    assert search("처음전용") == []
+    assert search("교체전용")
+    assert updated_fingerprint["chunk_count"] == 1
+    assert updated_fingerprint["content_hash"] != first_fingerprint
+
+
+def test_library_rescan_flushes_prepared_files_in_batches(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_FILE_LIMIT", 2)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_CHUNK_LIMIT", 999)
+    monkeypatch.setattr("backend.core.library.BATCH_FLUSH_INTERVAL_SECONDS", 999.0)
+    init_db()
+
+    targets = []
+    for index in range(3):
+        target = tmp_path / f"note-{index}.txt"
+        target.write_text(f"샘플 {index}", encoding="utf-8")
+        targets.append(target)
+
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+    monkeypatch.setattr(library, "_collect_supported_paths", lambda _path, _recursive: [str(path) for path in targets])
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda path, parser_config=None: (
+            {
+                "name": Path(path).name,
+                "file_type": "Text",
+                "columns": [],
+                "parser_config": {},
+            },
+            [{"location": "본문", "content": f"{path} 배치 색인"}],
+        ),
+    )
+
+    batch_sizes = []
+    original_batch_save = library.save_indexed_files_batch
+
+    def recording_batch_save(payloads):
+        batch_sizes.append(len(payloads))
+        return original_batch_save(payloads)
+
+    monkeypatch.setattr(library, "save_indexed_files_batch", recording_batch_save)
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert response.registered == 3
+    assert sorted(batch_sizes) == [1, 2]
+    assert len(get_all_files()) == 3

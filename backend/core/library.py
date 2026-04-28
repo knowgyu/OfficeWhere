@@ -11,15 +11,19 @@ import time
 import uuid
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..database import (
+    PreparedIndexedFile,
     ensure_file_fingerprints,
     get_all_files,
     get_setting,
-    save_indexed_file,
+    prepare_indexed_file,
+    save_indexed_files_batch,
+    save_prepared_indexed_file,
     set_setting,
 )
 from ..models.schemas import (
@@ -50,10 +54,24 @@ DEFAULT_GROUP_LIMIT = 50
 MAX_GROUP_LIMIT = 100
 MAX_GROUP_DETAIL_LIMIT = 200
 MAX_GROUP_SUMMARY_FINGERPRINT_FILES = 5
+BATCH_FLUSH_FILE_LIMIT = 24
+BATCH_FLUSH_CHUNK_LIMIT = 5000
+BATCH_FLUSH_INTERVAL_SECONDS = 1.0
 
 _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
 _cancel_event = threading.Event()
+
+
+@dataclass
+class _PreparedLibraryWrite:
+    path: str
+    name: str
+    action: str
+    payload: PreparedIndexedFile
+    metrics: Dict[str, Any]
+    file_started: float
+    ready_at: float
 
 
 def _normalize_rescan_mode(mode: str = "normal") -> str:
@@ -597,7 +615,7 @@ def rescan_library(
         existing=len(existing_by_path),
     )
 
-    def _register_or_update(path: str) -> LibraryRescanResult:
+    def _register_or_update(path: str) -> LibraryRescanResult | _PreparedLibraryWrite:
         file_started = time.perf_counter()
         if _cancel_event.is_set():
             log_index_perf(
@@ -670,10 +688,10 @@ def rescan_library(
             if info["file_type"] == "Excel":
                 key_column = timed_ms(metrics, "key_column_ms", lambda: suggest_key_column(info["columns"])) or ""
 
-            file_id = timed_ms(
+            payload = timed_ms(
                 metrics,
-                "save_ms",
-                lambda: save_indexed_file(
+                "prepare_index_ms",
+                lambda: prepare_indexed_file(
                     path=path,
                     name=info["name"],
                     file_type=info["file_type"],
@@ -686,20 +704,18 @@ def rescan_library(
             )
             metrics.update(
                 action="updated" if existing else "registered",
-                success=True,
-                file_id=file_id,
                 file_type=info["file_type"],
                 chunk_count=len(chunks),
                 column_count=len(info["columns"]),
-                total_ms=elapsed_ms(file_started),
             )
-            log_index_perf("file_done", **metrics)
-            return LibraryRescanResult(
+            return _PreparedLibraryWrite(
                 path=path,
                 name=info["name"],
-                success=True,
                 action="updated" if existing else "registered",
-                file_id=file_id,
+                payload=payload,
+                metrics=metrics,
+                file_started=file_started,
+                ready_at=time.perf_counter(),
             )
         except Exception as exc:
             diagnostic = classify_index_error(exc, path)
@@ -723,6 +739,169 @@ def rescan_library(
     sorted_paths = sorted(found_paths)
     total = len(sorted_paths)
     results: List[LibraryRescanResult] = []
+    write_buffer: List[_PreparedLibraryWrite] = []
+    processed = 0
+    last_flush_at = time.perf_counter()
+
+    def _record_result(result: LibraryRescanResult) -> None:
+        nonlocal processed
+        results.append(result)
+        processed += 1
+
+    def _emit_indexing_progress(current_file: Optional[str]) -> None:
+        if not progress_callback:
+            return
+        counts = _result_counts([*results, *scan_errors])
+        progress_callback(
+            {
+                "stage": "cancelling" if _cancel_event.is_set() else "indexing",
+                "message": (
+                    "정지 요청을 처리하는 중입니다."
+                    if _cancel_event.is_set()
+                    else f"{'고속 ' if mode == 'fast' else ''}변경 확인 및 색인 중 · {processed}/{total}"
+                ),
+                "mode": mode,
+                "worker_count": worker_count,
+                "found": total,
+                "total": total,
+                "processed": processed,
+                "percent": round((processed / total) * 100, 1) if total else 100.0,
+                "eta_seconds": _estimate_eta_seconds(started_monotonic, processed, total),
+                "current_file": current_file,
+                "cancel_requested": _cancel_event.is_set(),
+                **counts,
+            }
+        )
+
+    def _should_flush_write_buffer() -> bool:
+        if not write_buffer:
+            return False
+        chunk_count = sum(item.payload.chunk_count for item in write_buffer)
+        return (
+            len(write_buffer) >= BATCH_FLUSH_FILE_LIMIT
+            or chunk_count >= BATCH_FLUSH_CHUNK_LIMIT
+            or (time.perf_counter() - last_flush_at) >= BATCH_FLUSH_INTERVAL_SECONDS
+        )
+
+    def _success_result_from_prepared(
+        item: _PreparedLibraryWrite,
+        file_id: int,
+        *,
+        save_ms: float,
+        batch_save_ms: float,
+        batch_file_count: int,
+        batch_chunk_count: int,
+    ) -> LibraryRescanResult:
+        metrics = dict(item.metrics)
+        metrics.update(
+            success=True,
+            file_id=file_id,
+            save_ms=save_ms,
+            batch_save_ms=batch_save_ms,
+            batch_file_count=batch_file_count,
+            batch_chunk_count=batch_chunk_count,
+            db_queue_wait_ms=elapsed_ms(item.ready_at),
+            total_ms=elapsed_ms(item.file_started),
+        )
+        log_index_perf("file_done", **metrics)
+        return LibraryRescanResult(
+            path=item.path,
+            name=item.name,
+            success=True,
+            action=item.action,
+            file_id=file_id,
+        )
+
+    def _flush_write_buffer(reason: str) -> None:
+        nonlocal last_flush_at
+        if not write_buffer:
+            return
+
+        batch = list(write_buffer)
+        write_buffer.clear()
+        batch_chunk_count = sum(item.payload.chunk_count for item in batch)
+        flush_started = time.perf_counter()
+
+        try:
+            file_ids = save_indexed_files_batch([item.payload for item in batch])
+            batch_save_ms = elapsed_ms(flush_started)
+            log_index_perf(
+                "db_flush_done",
+                operation="library_rescan",
+                mode=mode,
+                worker_count=worker_count,
+                reason=reason,
+                success=True,
+                batch_file_count=len(batch),
+                batch_chunk_count=batch_chunk_count,
+                duration_ms=batch_save_ms,
+            )
+            per_file_save_ms = round(batch_save_ms / max(len(batch), 1), 3)
+            for item, file_id in zip(batch, file_ids):
+                _record_result(
+                    _success_result_from_prepared(
+                        item,
+                        file_id,
+                        save_ms=per_file_save_ms,
+                        batch_save_ms=batch_save_ms,
+                        batch_file_count=len(batch),
+                        batch_chunk_count=batch_chunk_count,
+                    )
+                )
+        except Exception as exc:
+            batch_save_ms = elapsed_ms(flush_started)
+            log_index_perf(
+                "db_flush_done",
+                operation="library_rescan",
+                mode=mode,
+                worker_count=worker_count,
+                reason=reason,
+                success=False,
+                batch_file_count=len(batch),
+                batch_chunk_count=batch_chunk_count,
+                duration_ms=batch_save_ms,
+                error_type=exc.__class__.__name__,
+                error=str(exc),
+            )
+            for item in batch:
+                single_started = time.perf_counter()
+                try:
+                    file_id = save_prepared_indexed_file(item.payload)
+                    save_ms = elapsed_ms(single_started)
+                    _record_result(
+                        _success_result_from_prepared(
+                            item,
+                            file_id,
+                            save_ms=save_ms,
+                            batch_save_ms=batch_save_ms,
+                            batch_file_count=1,
+                            batch_chunk_count=item.payload.chunk_count,
+                        )
+                    )
+                except Exception as single_exc:
+                    diagnostic = classify_index_error(single_exc, item.path)
+                    metrics = dict(item.metrics)
+                    metrics.update(
+                        action="failed",
+                        success=False,
+                        error=str(single_exc),
+                        save_ms=elapsed_ms(single_started),
+                        total_ms=elapsed_ms(item.file_started),
+                        **diagnostic,
+                    )
+                    log_index_perf("file_done", **metrics)
+                    _record_result(
+                        _failed_result(
+                            item.path,
+                            item.name,
+                            "failed",
+                            single_exc,
+                            log_message="library batch write failed",
+                        )
+                    )
+        finally:
+            last_flush_at = time.perf_counter()
+            _emit_indexing_progress(batch[-1].name if batch else None)
 
     if progress_callback:
         progress_callback(
@@ -777,7 +956,6 @@ def rescan_library(
                     break
                 futures[executor.submit(_register_or_update, path)] = path
 
-            processed = 0
             while futures:
                 for future in as_completed(list(futures)):
                     path = futures.pop(future)
@@ -791,61 +969,50 @@ def rescan_library(
                             exc,
                             log_message="library worker future failed",
                         )
-                    results.append(result)
-                    processed += 1
+                    if isinstance(result, _PreparedLibraryWrite):
+                        write_buffer.append(result)
+                    else:
+                        _record_result(result)
 
                     if not _cancel_event.is_set():
                         next_path = next(pending_paths, None)
                         if next_path is not None:
                             futures[executor.submit(_register_or_update, next_path)] = next_path
 
-                    if progress_callback:
-                        counts = _result_counts([*results, *scan_errors])
-                        progress_callback(
-                            {
-                                "stage": "cancelling" if _cancel_event.is_set() else "indexing",
-                                "message": (
-                                    "정지 요청을 처리하는 중입니다."
-                                    if _cancel_event.is_set()
-                                    else f"{'고속 ' if mode == 'fast' else ''}변경 확인 및 색인 중 · {processed}/{total}"
-                                ),
-                                "mode": mode,
-                                "worker_count": worker_count,
-                                "found": total,
-                                "total": total,
-                                "processed": processed,
-                                "percent": round((processed / total) * 100, 1),
-                                "eta_seconds": _estimate_eta_seconds(started_monotonic, processed, total),
-                                "current_file": result.name,
-                                "cancel_requested": _cancel_event.is_set(),
-                                **counts,
-                            }
-                        )
+                    if _should_flush_write_buffer():
+                        _flush_write_buffer("batch_limit")
+                    elif not isinstance(result, _PreparedLibraryWrite):
+                        _emit_indexing_progress(result.name)
                     break
 
                 if _cancel_event.is_set():
+                    _flush_write_buffer("cancel")
                     for future in futures:
                         future.cancel()
                     for future, path in list(futures.items()):
                         if future.cancelled():
-                            results.append(_cancelled_result(path))
-                            processed += 1
+                            _record_result(_cancelled_result(path))
                             continue
                         try:
-                            results.append(future.result())
+                            result = future.result()
                         except Exception as exc:
-                            results.append(
-                                _failed_result(
-                                    path,
-                                    Path(path).name,
-                                    "failed",
-                                    exc,
-                                    log_message="library worker future failed during cancel",
-                                )
+                            result = _failed_result(
+                                path,
+                                Path(path).name,
+                                "failed",
+                                exc,
+                                log_message="library worker future failed during cancel",
                             )
-                        processed += 1
+                        if isinstance(result, _PreparedLibraryWrite):
+                            write_buffer.append(result)
+                        else:
+                            _record_result(result)
                     futures.clear()
+                    _flush_write_buffer("cancel")
+                    _emit_indexing_progress(None)
                     break
+
+        _flush_write_buffer("final")
 
     results.extend(scan_errors)
     set_setting(LAST_RESCAN_KEY, datetime.now().isoformat())
