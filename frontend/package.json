@@ -1,7 +1,7 @@
 {
   "name": "officewhere",
   "productName": "OfficeWhere",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -47,8 +47,25 @@
         "to": "renderer"
       },
       {
-        "from": "../dist/officewhere-backend",
-        "to": "backend"
+        "from": "../python-runtime/win-x64",
+        "to": "python-runtime"
+      },
+      {
+        "from": "../backend",
+        "to": "backend-source/backend",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "../backend_server.py",
+        "to": "backend-source/backend_server.py"
+      },
+      {
+        "from": "../examples/officewhere_test_library",
+        "to": "examples/officewhere_test_library"
       }
     ],
     "win": {
@@ -82,13 +99,7 @@
       ],
       "artifactName": "officewhere-${version}-mac-${arch}.${ext}",
       "identity": null
-    },
-    "extraFiles": [
-      {
-        "from": "../examples/officewhere_test_library",
-        "to": "examples/officewhere_test_library"
-      }
-    ]
+    }
   },
   "license": "GPL-3.0-only"
 }

@@ -96,6 +96,30 @@ def build_search_text(value: object, *, max_extra_tokens: int = 600) -> str:
     return " ".join([original, *extra_tokens])
 
 
+def build_trigram_search_text(value: object) -> str:
+    """Build compact text for the FTS5 trigram fast path.
+
+    The existing unicode61 index stores explicit Korean/choseong n-grams so
+    short queries such as "회의" and "ㅎㅇ" keep working.  The trigram index is
+    only used for 3+ character terms, so it can stay compact: original text
+    plus full choseong strings for Korean tokens.
+    """
+
+    original = WHITESPACE_PATTERN.sub(" ", str(value or "").strip()).lower()
+    if not original:
+        return ""
+
+    helper_tokens: list[str] = []
+    seen: set[str] = set()
+    for match in TOKEN_PATTERN.finditer(original):
+        choseong = get_choseong(match.group(0))
+        if choseong and choseong not in seen:
+            seen.add(choseong)
+            helper_tokens.append(choseong)
+
+    return " ".join([original, *helper_tokens])
+
+
 def _query_terms(raw_query: str) -> list[str]:
     cleaned = raw_query.replace('"', " ").replace("*", " ")
     return [term.strip().lower() for term in cleaned.split() if term.strip()]

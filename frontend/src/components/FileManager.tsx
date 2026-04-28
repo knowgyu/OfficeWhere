@@ -60,6 +60,7 @@ function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
 function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescanResponse | null, rescanning: boolean) {
   if (rescanning && status) {
     const foundText = `발견 ${status.found}개`
+    const modeText = status.mode === 'fast' ? `고속 · 작업 ${status.worker_count}개` : ''
     const progressText =
       status.total > 0
         ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}%`
@@ -67,7 +68,7 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
           ? `폴더 ${status.folders_processed}/${status.folders_total}`
           : '진행률 계산 중'
     const current = status.current_file ? ` · 현재 ${status.current_file}` : ''
-    return `${foundText} · ${progressText}${current}`
+    return [foundText, modeText, progressText].filter(Boolean).join(' · ') + current
   }
 
   const source = summary ?? status?.summary
@@ -91,6 +92,10 @@ function formatBytes(bytes?: number) {
 }
 
 const REGISTERED_FILE_PAGE_SIZE = 50
+const INDEX_WORKER_MIN = 4
+const INDEX_WORKER_MAX = 48
+const INDEX_WORKER_STEP = 4
+const INDEX_WORKER_RECOMMENDED = 24
 const SAFE_APP_DATA_IDS = new Set([
   'backend-data',
   'chromium-cache',
@@ -119,6 +124,22 @@ function appDataSize(candidates: AppDataCandidate[], ids: string[]) {
     (total, candidate) => total + (selected.has(candidate.id) ? candidate.sizeBytes ?? 0 : 0),
     0,
   )
+}
+
+function normalizeIndexWorkerCount(value: number) {
+  const bounded = Math.min(Math.max(value, INDEX_WORKER_MIN), INDEX_WORKER_MAX)
+  return Math.min(
+    Math.max(Math.round(bounded / INDEX_WORKER_STEP) * INDEX_WORKER_STEP, INDEX_WORKER_MIN),
+    INDEX_WORKER_MAX,
+  )
+}
+
+function workerCountLabel(value: number) {
+  if (value <= 8) return '안정 우선'
+  if (value < INDEX_WORKER_RECOMMENDED) return '일반 PC'
+  if (value === INDEX_WORKER_RECOMMENDED) return '추천'
+  if (value <= 32) return '고성능 PC'
+  return '매우 높음'
 }
 
 export default function FileManager({
@@ -155,6 +176,8 @@ export default function FileManager({
   const [schemaLoading, setSchemaLoading] = useState(false)
 
   const [confirmDeleteFiles, setConfirmDeleteFiles] = useState<FileInfo[]>([])
+  const [confirmClearAllFilesOpen, setConfirmClearAllFilesOpen] = useState(false)
+  const [deletingFiles, setDeletingFiles] = useState(false)
   const [selectedFileIds, setSelectedFileIds] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [focusedFileId, setFocusedFileId] = useState<number | null>(null)
@@ -165,6 +188,7 @@ export default function FileManager({
     auto_rescan_mode: 'interval',
     auto_rescan_interval_hours: 24,
     auto_rescan_daily_time: '03:00',
+    fast_worker_count: INDEX_WORKER_RECOMMENDED,
     last_rescan_at: null,
   })
   const [folderPathDraft, setFolderPathDraft] = useState('')
@@ -184,6 +208,8 @@ export default function FileManager({
   const [appDataAdvancedOpen, setAppDataAdvancedOpen] = useState(false)
   const [clearAppDataOpen, setClearAppDataOpen] = useState(false)
   const [clearAppDataResult, setClearAppDataResult] = useState<ClearAppDataResult | null>(null)
+  const [indexSettingsOpen, setIndexSettingsOpen] = useState(false)
+  const [indexWorkerDraft, setIndexWorkerDraft] = useState(INDEX_WORKER_RECOMMENDED)
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
   const [closeBehaviorLoading, setCloseBehaviorLoading] = useState(false)
   const officeWhereBridge = getOfficeWhereBridge()
@@ -291,6 +317,11 @@ export default function FileManager({
   }, [])
 
   useEffect(() => {
+    if (!indexSettingsOpen) return
+    setIndexWorkerDraft(normalizeIndexWorkerCount(librarySettings.fast_worker_count ?? INDEX_WORKER_RECOMMENDED))
+  }, [indexSettingsOpen, librarySettings.fast_worker_count])
+
+  useEffect(() => {
     if (confirmDeleteFiles.length === 0) return
     const handler = (event: KeyboardEvent) => {
       if (event.key !== 'Enter') return
@@ -313,12 +344,15 @@ export default function FileManager({
     }
   }
 
-  const saveLibrarySettings = async (next: LibrarySettings) => {
+  const saveLibrarySettings = async (
+    next: LibrarySettings,
+    successMessage = '대상 폴더 설정이 저장되었습니다.',
+  ) => {
     setSettingsLoading(true)
     try {
       const response = await api.library.updateSettings(next)
       setLibrarySettings(response.data)
-      snackbar.success('대상 폴더 설정이 저장되었습니다.')
+      if (successMessage) snackbar.success(successMessage)
       return response.data
     } catch {
       snackbar.error('대상 폴더 설정 저장에 실패했습니다.')
@@ -369,7 +403,7 @@ export default function FileManager({
       snackbar.success('예제 폴더를 추가했습니다. 이제 문서 새로고침을 눌러주세요.')
       return
     }
-    await startRescan('added')
+    await startRescan('added', 'fast')
   }
 
   const handleRemoveWatchedFolder = async (path: string) => {
@@ -413,7 +447,16 @@ export default function FileManager({
 
   const handleRescanLibrary = async () => {
     if (tutorialStep === 'document-refresh') setTourRefreshStartKey(rescanCompletionKey)
-    await startRescan('manual')
+    await startRescan('manual', 'fast')
+  }
+
+  const handleSaveIndexWorkerCount = async () => {
+    const value = normalizeIndexWorkerCount(indexWorkerDraft)
+    const saved = await saveLibrarySettings(
+      { ...librarySettings, fast_worker_count: value },
+      '색인 성능 설정을 저장했습니다.',
+    )
+    if (saved) setIndexSettingsOpen(false)
   }
 
   const openClearAppDataPreset = (candidateIds: string[]) => {
@@ -457,6 +500,14 @@ export default function FileManager({
       return
     }
     setConfirmDeleteFiles(targets)
+  }
+
+  const openClearAllFilesConfirm = () => {
+    if (fileTotal === 0) {
+      snackbar.warn('등록 해제할 파일이 없습니다.')
+      return
+    }
+    setConfirmClearAllFilesOpen(true)
   }
 
   const toggleRegisteredFileSelection = (file: FileInfo, selected?: boolean) => {
@@ -697,6 +748,7 @@ export default function FileManager({
     if (targets.length === 0) return
     const deleted: FileInfo[] = []
     const failed: FileInfo[] = []
+    setDeletingFiles(true)
     try {
       for (const file of targets) {
         try {
@@ -727,7 +779,27 @@ export default function FileManager({
           : fileOffset
       await fetchFiles(nextOffset, fileQuery)
     } finally {
+      setDeletingFiles(false)
       setConfirmDeleteFiles([])
+    }
+  }
+
+  const handleClearAllFiles = async () => {
+    setDeletingFiles(true)
+    try {
+      const response = await api.files.deleteAll()
+      setSelectedFileIds(new Set())
+      setSelectionMode(false)
+      setFileOffset(0)
+      setFileQuery('')
+      setFileQueryDraft('')
+      snackbar.success(`${response.data.deleted}개 파일 등록을 모두 해제했습니다.`)
+      await fetchFiles(0, '')
+    } catch {
+      snackbar.error('전체 등록 해제에 실패했습니다.')
+    } finally {
+      setDeletingFiles(false)
+      setConfirmClearAllFilesOpen(false)
     }
   }
 
@@ -837,16 +909,28 @@ export default function FileManager({
           title="대상 폴더"
           description="자주 쓰는 문서 폴더를 등록하면 검색과 버전 관리에 사용합니다. 앱은 원본 문서를 읽어 색인하며, 파일을 수정하거나 이동하지 않습니다."
           trailing={
-            <Button
-              variant="filled"
-              leadingIcon="sync"
-              onClick={handleRescanLibrary}
-              loading={rescanning}
-              disabled={settingsLoading || librarySettings.watched_folders.length === 0}
-              className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
-            >
-              문서 새로고침
-            </Button>
+            <div className="flex items-center justify-end gap-2 flex-wrap">
+              <Button
+                variant="outlined"
+                leadingIcon="tune"
+                onClick={() => setIndexSettingsOpen(true)}
+                disabled={settingsLoading}
+              >
+                색인 성능 설정
+              </Button>
+              <Button
+                variant="filled"
+                leadingIcon="sync"
+                onClick={handleRescanLibrary}
+                loading={rescanning}
+                disabled={settingsLoading || rescanning || librarySettings.watched_folders.length === 0}
+                className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
+                data-tour-target={tutorialStep === 'document-refresh' ? 'document-refresh' : undefined}
+                title="CPU/RAM을 더 사용해 빠르게 색인합니다."
+              >
+                문서 새로고침
+              </Button>
+            </div>
           }
         >
           <div
@@ -855,6 +939,7 @@ export default function FileManager({
                 ? 'tour-target rounded-2xl ring-1 ring-[var(--md-sys-color-primary)]/25'
                 : ''
             }`}
+            data-tour-target={tutorialStep === 'example-folder' ? 'example-folder' : undefined}
           >
             <div className="flex-1 min-w-0">
               <TextField
@@ -1120,39 +1205,49 @@ export default function FileManager({
         >
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-            <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
-              등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({fileTotal})</span>
-            </h3>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 목록에서만 제거하며 원본 파일은 삭제하지 않습니다.
-            </p>
+              <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
+                등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({fileTotal})</span>
+              </h3>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 앱 목록과 검색 인덱스에서만 제거하며 원본 파일은 삭제하지 않습니다.
+              </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Button
                 variant={selectionMode ? 'tonal' : 'outlined'}
                 leadingIcon={selectionMode ? 'checklist' : 'delete_sweep'}
+                disabled={deletingFiles}
                 onClick={() => {
                   setSelectionMode((value) => !value)
                   if (selectionMode) setSelectedFileIds(new Set())
                 }}
               >
-                {selectionMode ? '선택 종료' : '목록에서 제거하기'}
+                {selectionMode ? '선택 종료' : '선택해서 등록 해제'}
               </Button>
               {selectedCount > 0 && (
                 <Button
                   variant="danger"
                   leadingIcon="delete"
                   onClick={() => openDeleteConfirm(selectedFiles)}
+                  disabled={deletingFiles}
                 >
-                  선택 해제 {selectedCount}개
+                  선택 등록 해제 {selectedCount}개
                 </Button>
               )}
+              <Button
+                variant="danger"
+                leadingIcon="delete_forever"
+                onClick={openClearAllFilesConfirm}
+                disabled={fileTotal === 0 || loading || deletingFiles}
+              >
+                전체 등록 해제
+              </Button>
               <IconButton
                 icon="refresh"
                 label="새로고침"
                 variant="tonal"
                 onClick={() => void fetchFiles(fileOffset, fileQuery)}
-                disabled={loading}
+                disabled={loading || deletingFiles}
               />
             </div>
           </div>
@@ -1190,7 +1285,7 @@ export default function FileManager({
             />
             {fileQuery && <Chip label={`검색어 · ${fileQuery}`} tone="secondary" icon="search" as="span" />}
             {selectedCount > 0 && (
-              <Chip label={`선택 ${selectedCount}개 · Delete로 해제`} tone="warning" icon="keyboard" as="span" />
+              <Chip label={`선택 ${selectedCount}개 · Delete로 등록 해제`} tone="warning" icon="keyboard" as="span" />
             )}
             {fileTypeCounts.map(([fileType, count]) => (
               <span
@@ -1269,6 +1364,7 @@ export default function FileManager({
                     variant="standard"
                     size="sm"
                     onClick={() => openDeleteConfirm([file])}
+                    disabled={deletingFiles}
                     className="text-[var(--md-sys-color-error)]"
                   />
                 </div>
@@ -1481,6 +1577,92 @@ export default function FileManager({
 
 
       <Dialog
+        open={indexSettingsOpen}
+        onClose={() => setIndexSettingsOpen(false)}
+        size="md"
+        icon="tune"
+        title="색인 성능 설정"
+        description="동시에 처리할 문서 수를 정합니다. 기본값 24를 권장합니다."
+        actions={
+          <>
+            <Button variant="text" onClick={() => setIndexSettingsOpen(false)}>
+              취소
+            </Button>
+            <Button
+              variant="filled"
+              leadingIcon="save"
+              onClick={handleSaveIndexWorkerCount}
+              loading={settingsLoading}
+            >
+              저장
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">작업 수</p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  높을수록 빨라질 수 있지만 CPU/RAM/디스크 사용량이 늘어납니다.
+                </p>
+              </div>
+              <Badge tone={indexWorkerDraft === INDEX_WORKER_RECOMMENDED ? 'success' : 'neutral'}>
+                {workerCountLabel(indexWorkerDraft)}
+              </Badge>
+            </div>
+
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-4xl font-semibold tracking-tight text-[var(--md-sys-color-on-surface)]">
+                  {indexWorkerDraft}
+                </p>
+                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                  worker
+                </p>
+              </div>
+              <div className="text-right type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                4 단위 · 최대 48
+              </div>
+            </div>
+
+            <input
+              type="range"
+              min={INDEX_WORKER_MIN}
+              max={INDEX_WORKER_MAX}
+              step={INDEX_WORKER_STEP}
+              value={indexWorkerDraft}
+              onChange={(event) => setIndexWorkerDraft(normalizeIndexWorkerCount(Number(event.target.value)))}
+              className="w-full accent-[var(--md-sys-color-primary)]"
+              aria-label="색인 worker 수"
+            />
+            <div className="grid grid-cols-5 gap-2 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">
+              {[4, 16, 24, 32, 48].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setIndexWorkerDraft(value)}
+                  className={`rounded-full border px-2 py-1 transition-colors ${
+                    indexWorkerDraft === value
+                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                      : 'border-[var(--md-sys-color-outline-variant)] hover:bg-[var(--md-sys-color-surface-container-highest)]'
+                  }`}
+                >
+                  {value}
+                  {value === INDEX_WORKER_RECOMMENDED ? ' 추천' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            네트워크 폴더나 외장 저장장치에서는 값을 너무 높이면 오히려 느려질 수 있습니다.
+          </p>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={clearAppDataOpen}
         onClose={() => setClearAppDataOpen(false)}
         size="lg"
@@ -1572,15 +1754,53 @@ export default function FileManager({
       </Dialog>
 
       <Dialog
+        open={confirmClearAllFilesOpen}
+        onClose={() => setConfirmClearAllFilesOpen(false)}
+        size="sm"
+        icon="delete_forever"
+        title="전체 등록 해제"
+        description={`${fileTotal}개 파일의 등록 정보와 검색 인덱스를 모두 제거합니다.`}
+        actions={
+          <>
+            <Button variant="text" onClick={() => setConfirmClearAllFilesOpen(false)} disabled={deletingFiles}>
+              취소
+            </Button>
+            <Button
+              variant="filled"
+              leadingIcon="delete_forever"
+              className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
+              onClick={() => void handleClearAllFiles()}
+              loading={deletingFiles}
+              autoFocus
+            >
+              전체 등록 해제
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+            앱의 등록 목록과 검색 인덱스만 비웁니다. 원본 문서와 대상 폴더는 삭제하거나 이동하지 않습니다.
+          </p>
+          <div className="rounded-md border border-[var(--md-sys-color-error)]/40 bg-[var(--md-sys-color-error-container)]/20 p-3">
+            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">다시 검색하려면 문서 새로고침이 필요합니다.</p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              대상 폴더 설정은 유지됩니다.
+            </p>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={confirmDeleteFiles.length > 0}
         onClose={() => setConfirmDeleteFiles([])}
         size="sm"
         icon="delete"
         title={confirmDeleteFiles.length > 1 ? `${confirmDeleteFiles.length}개 파일 등록 해제` : '등록 해제'}
-        description={confirmDeleteFiles.length === 1 ? confirmDeleteFiles[0]?.name : '선택한 파일의 등록 정보와 인덱스를 삭제합니다.'}
+        description={confirmDeleteFiles.length === 1 ? confirmDeleteFiles[0]?.name : '선택한 파일의 등록 정보와 검색 인덱스를 제거합니다.'}
         actions={
           <>
-            <Button variant="text" onClick={() => setConfirmDeleteFiles([])}>
+            <Button variant="text" onClick={() => setConfirmDeleteFiles([])} disabled={deletingFiles}>
               취소
             </Button>
             <Button
@@ -1588,15 +1808,16 @@ export default function FileManager({
               leadingIcon="delete"
               className="!bg-[var(--md-sys-color-error)] !text-[var(--md-sys-color-on-error)]"
               onClick={() => void handleDeleteFiles(confirmDeleteFiles)}
+              loading={deletingFiles}
               autoFocus
             >
-              해제
+              등록 해제
             </Button>
           </>
         }
       >
         <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-          등록 정보와 인덱스만 삭제합니다. 원본 파일은 삭제하거나 이동하지 않습니다.
+          앱 목록과 검색 인덱스에서만 제거합니다. 원본 파일은 삭제하거나 이동하지 않습니다.
         </p>
         {confirmDeleteFiles.length > 1 && (
           <div className="mt-3 max-h-48 space-y-2 overflow-auto rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-2">

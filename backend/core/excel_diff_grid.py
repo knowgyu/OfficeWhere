@@ -22,6 +22,7 @@ MAX_SECTIONS = 8
 
 Position = Tuple[int, int]
 Range = Tuple[int, int, int, int]
+ColumnSource = Tuple[int, str]
 
 
 def _coerce_history(history: Any) -> Dict[str, Any]:
@@ -51,6 +52,18 @@ def _normalize_change_type(change_type: str) -> str:
     if "add" in text or "insert" in text or "추가" in text:
         return "added"
     return "changed"
+
+
+def _add_row_alias(lookup: Dict[str, int], value: Any, row_index: int) -> None:
+    key = normalize_key(str(value or ""))
+    if key and key not in lookup:
+        lookup[key] = row_index
+
+
+def _add_column_alias(lookup: Dict[str, ColumnSource], value: Any, column_index: int, source: str) -> None:
+    key = normalize_key(str(value or ""))
+    if key and key not in lookup:
+        lookup[key] = (column_index, source)
 
 
 def _diff_change_type(before: str, after: str) -> str:
@@ -187,12 +200,14 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
     row_count = used_row_count + DISPLAY_ROW_MARGIN if used_row_count > 0 else 0
     column_count = used_column_count + DISPLAY_COL_MARGIN if used_column_count > 0 else 0
     columns = [_column_letter(index) for index in range(1, column_count + 1)]
-    column_indexes = {column: index for index, column in enumerate(columns)}
-    key_col_index = 0
-    key_to_row_index: Dict[str, int] = {
-        normalize_key(str(row_index + 1)): row_index
-        for row_index in range(row_count)
-    }
+    column_lookup: Dict[str, ColumnSource] = {}
+    row_number_lookup: Dict[str, int] = {}
+    key_value_row_lookup: Dict[str, int] = {}
+
+    for column_index, column in enumerate(columns):
+        _add_column_alias(column_lookup, column, column_index, "letter")
+    for row_index in range(row_count):
+        _add_row_alias(row_number_lookup, row_index + 1, row_index)
 
     def value_at(dataframe: Any, row_index: int, column_index: int) -> str:
         if row_index >= len(dataframe.index) or column_index >= len(dataframe.columns):
@@ -201,6 +216,49 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
 
     def latest_value(row_index: int, column_index: int) -> str:
         return value_at(latest_df, row_index, column_index)
+
+    def register_header_aliases(dataframe: Any) -> None:
+        scan_rows = min(len(dataframe.index), 30)
+        scan_cols = min(len(dataframe.columns), column_count)
+        for row_index in range(scan_rows):
+            row_values = [value_at(dataframe, row_index, column_index) for column_index in range(scan_cols)]
+            if sum(1 for value in row_values if value.strip()) < 2:
+                continue
+            for column_index, value in enumerate(row_values):
+                _add_column_alias(column_lookup, value, column_index, "header")
+
+    for _info, dataframe, _config in used_ranges:
+        register_header_aliases(dataframe)
+
+    requested_key_column = str(latest_info.get("key_column", "") or "")
+    key_col_index = 0
+    if requested_key_column:
+        key_column_lookup = column_lookup.get(normalize_key(requested_key_column))
+        if key_column_lookup:
+            key_col_index = key_column_lookup[0]
+
+    for _info, dataframe, _config in used_ranges:
+        for row_index in range(min(len(dataframe.index), row_count)):
+            _add_row_alias(key_value_row_lookup, value_at(dataframe, row_index, key_col_index), row_index)
+
+    def resolve_focus_position(key: str, column: str) -> Position | None:
+        normalized_key = normalize_key(key)
+        column_ref = column_lookup.get(normalize_key(column))
+        if not normalized_key or not column_ref:
+            return None
+
+        column_index, column_source = column_ref
+        if column_source == "letter":
+            row_index = row_number_lookup.get(normalized_key)
+            if row_index is None:
+                row_index = key_value_row_lookup.get(normalized_key)
+        else:
+            row_index = key_value_row_lookup.get(normalized_key)
+            if row_index is None:
+                row_index = row_number_lookup.get(normalized_key)
+        if row_index is None:
+            return None
+        return (row_index, column_index)
 
     histories_by_position: Dict[Position, List[Dict[str, Any]]] = {}
     highlight_by_position: Dict[Position, str] = {}
@@ -230,13 +288,13 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
 
     for raw_focus in focuses:
         focus = _coerce_focus(raw_focus)
-        key = normalize_key(focus.get("key", ""))
+        key = str(focus.get("key", "") or "")
         column = str(focus.get("column", "") or "")
-        if not key or column not in column_indexes or key not in key_to_row_index:
+        position = resolve_focus_position(key, column)
+        if position is None:
             omitted_focus_count += 1
             continue
 
-        position = (key_to_row_index[key], column_indexes[column])
         histories = [_coerce_history(history) for history in focus.get("histories", [])]
         if histories:
             histories_by_position.setdefault(position, []).extend(histories)
@@ -371,7 +429,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         },
         "row_count": row_count,
         "column_count": column_count,
-        "key_column": key_column,
+        "key_column": requested_key_column,
         "sheet_name": str(parser_config["sheet_name"]),
         "partial": partial,
         "omitted_focus_count": omitted_focus_count,

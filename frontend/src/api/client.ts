@@ -18,7 +18,19 @@ export interface ClearAppDataResult {
   exitScheduled?: boolean
 }
 
+export interface ClearRegisteredFilesResult {
+  deleted: number
+  message: string
+}
+
 export type CloseBehavior = 'ask' | 'hide' | 'quit'
+export type AppResetReason = 'safe' | 'full' | 'custom'
+
+export interface AppResetState {
+  resetPending: boolean
+  reason?: AppResetReason
+  resetAt?: string
+}
 
 export interface ExampleLibraryPathResponse {
   available: boolean
@@ -35,6 +47,7 @@ declare global {
     getLogPath?: () => Promise<string>
     getAppDataPaths?: () => Promise<AppDataCandidate[]>
     clearAppData?: (candidateIds: string[], exitAfterClear?: boolean) => Promise<ClearAppDataResult>
+    consumeResetState?: () => Promise<AppResetState>
     getCloseBehavior?: () => Promise<CloseBehavior>
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
     getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
@@ -447,6 +460,7 @@ export type SearchScope = 'filename_content' | 'filename' | 'content'
 export interface SearchRequest {
   query: string
   limit?: number
+  file_limit?: number
   file_types?: string[]
   search_scope?: SearchScope
   modified_from?: string
@@ -457,6 +471,9 @@ export interface SearchResponse {
   query: string
   total: number
   results: SearchResult[]
+  file_count: number
+  file_limit: number
+  has_more: boolean
 }
 
 export interface SchedulerSettings {
@@ -482,6 +499,7 @@ export interface LibrarySettings {
   auto_rescan_mode: 'manual' | 'interval' | 'daily'
   auto_rescan_interval_hours: number
   auto_rescan_daily_time: string
+  fast_worker_count: number
   last_rescan_at?: string | null
 }
 
@@ -508,10 +526,14 @@ export interface LibraryRescanResponse {
   cancelled: number
 }
 
+export type LibraryRescanMode = 'normal' | 'fast'
+
 export interface LibraryRescanStatus {
   running: boolean
   stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
   message: string
+  mode: LibraryRescanMode
+  worker_count: number
   started_at?: string | null
   updated_at?: string | null
   folders_total: number
@@ -1330,6 +1352,7 @@ export const api = {
     register: (data: FileRegisterRequest) =>
       apiPath('/api/files').then((url) => axios.post<FileRegisterResponse>(url, data)),
     delete: async (id: number) => axios.delete(await apiPath(`/api/files/${id}`)),
+    deleteAll: async () => axios.delete<ClearRegisteredFilesResult>(await apiPath('/api/files')),
     schema: async (id: number) => axios.get<SchemaResponse>(await apiPath(`/api/files/${id}/schema`)),
     suggestKey: (id: number) =>
       apiPath(`/api/files/${id}/suggest-key`).then((url) =>
@@ -1373,6 +1396,13 @@ export const api = {
       if (!electron?.clearAppData) desktopError('Electron 앱에서만 앱 데이터를 삭제할 수 있습니다.')
       return { data: await electron.clearAppData(candidateIds, exitAfterClear) }
     },
+    consumeResetState: async () => {
+      const electron = electronApi()
+      if (!electron?.consumeResetState) {
+        return { data: { resetPending: false } as AppResetState }
+      }
+      return { data: await electron.consumeResetState() }
+    },
     getCloseBehavior: async () => {
       const electron = electronApi()
       if (!electron?.getCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
@@ -1386,7 +1416,17 @@ export const api = {
     getExampleLibraryPath: async () => {
       const electron = electronApi()
       if (electron?.getExampleLibraryPath) {
-        return { data: await electron.getExampleLibraryPath() }
+        const desktopResult = await electron.getExampleLibraryPath()
+        if (desktopResult.available) return { data: desktopResult }
+        try {
+          const backendResult = await axios.get<ExampleLibraryPathResponse>(
+            await apiPath('/api/app/example-library-path'),
+          )
+          if (backendResult.data.available) return backendResult
+        } catch {
+          // Keep the clearer Electron-side unavailable reason below.
+        }
+        return { data: desktopResult }
       }
       try {
         return await axios.get<ExampleLibraryPathResponse>(await apiPath('/api/app/example-library-path'))
@@ -1409,8 +1449,10 @@ export const api = {
     getSettings: async () => axios.get<LibrarySettings>(await apiPath('/api/library/settings')),
     updateSettings: (data: LibrarySettings) =>
       apiPath('/api/library/settings').then((url) => axios.put<LibrarySettings>(url, data)),
-    rescan: async () => axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan')),
-    startRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start')),
+    rescan: async (mode: LibraryRescanMode = 'normal') =>
+      axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan'), { mode }),
+    startRescan: async (mode: LibraryRescanMode = 'normal') =>
+      axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start'), { mode }),
     rescanStatus: async () => axios.get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
     cancelRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/cancel')),
     groups: getLibraryGroups,

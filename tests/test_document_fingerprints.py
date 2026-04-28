@@ -1,7 +1,9 @@
 import sqlite3
 
 from backend.database import (
+    delete_all_files,
     delete_file,
+    get_all_files,
     get_file_fingerprints,
     init_db,
     register_file,
@@ -66,6 +68,20 @@ def test_delete_file_removes_fingerprint(tmp_path, monkeypatch):
     assert file_id in get_file_fingerprints([file_id])
     assert delete_file(file_id) is True
     assert get_file_fingerprints([file_id]) == {}
+
+
+def test_delete_all_files_removes_registrations_indexes_and_fingerprints(tmp_path, monkeypatch):
+    _setup_db(tmp_path, monkeypatch)
+    first_id = _register_word(str(tmp_path / "first.docx"), "first.docx")
+    second_id = _register_word(str(tmp_path / "second.docx"), "second.docx")
+    save_file_chunks(first_id, [{"location": "본문", "content": "첫 번째"}])
+    save_file_chunks(second_id, [{"location": "본문", "content": "두 번째"}])
+
+    deleted = delete_all_files()
+
+    assert deleted == 2
+    assert get_all_files() == []
+    assert get_file_fingerprints([first_id, second_id]) == {}
 
 
 def test_group_content_status_uses_fingerprint_evidence(tmp_path, monkeypatch):

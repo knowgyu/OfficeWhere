@@ -1,18 +1,20 @@
 # OfficeWhere TODO
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 This file tracks follow-up work that is not part of the formal release checklist. Keep `docs/release-test-checklist.md` for release validation steps.
 
 ## Immediate follow-ups
 
+- [ ] Verify the embedded-Python Windows package on DRM policy PCs.
+  - Current direction: packaged Windows release runs `backend_server.py` through the bundled `python-runtime/win-x64/python.exe` and vendors exact-pinned parser dependencies.
+  - Confirm DRM-protected `.xlsx` / `.docx` / `.pptx` files index with the same behavior as the successful portable Python probe.
+  - Include paths with spaces and Korean characters in the manual pass.
+  - If a DRM policy PC still blocks reads, collect backend logs and rerun `scripts/drm_probe.py --library-check` with the bundled runtime before changing architecture.
+
 - [ ] Decide whether root agent guides should be versioned.
   - Current state: `AGENTS.md` and `CLAUDE.md` exist locally, but `.gitignore` ignores both.
   - If these should be shared across machines/agents, remove or override those ignore rules and commit both files.
-
-- [ ] Review and commit the current OfficeWhere rename/cleanup batch.
-  - Includes OfficeWhere naming cleanup, `OW_*` env-only config, `window.officeWhere`, dev ports `18765`/`15173`, `officewhere_backend.spec`, and removal of `scripts/run_perf_checks.py`.
-  - Before committing, inspect `git diff` to make sure no unrelated changes are bundled unintentionally.
 
 - [ ] Run full release verification once the working tree is ready.
   - `./venv/bin/python -m pytest -q`
@@ -27,7 +29,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 - [ ] Manually walk through `docs/release-test-checklist.md` on Windows before publishing the next release.
   - Especially mapped/network drive registration, app-data reset, tray close behavior, and original-document safety.
 
-- [ ] Verify packaged Electron behavior on both Windows and macOS.
+- [ ] Verify packaged Electron behavior on Windows and track macOS/Linux embedded-runtime follow-up.
   - Packaged backend should keep using a dynamic localhost port.
   - Dev scripts should default to backend `18765` and frontend `15173`.
 

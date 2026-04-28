@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     import pandas as pd
 
-from .excel_analysis import extract_excel_table, inspect_excel_file_with_recovery
+from .excel_analysis import extract_excel_table_with_recovery, inspect_excel_file_with_recovery
 from .ppt_analysis import inspect_ppt_file
 from .text_analysis import inspect_text_file
 from .word_analysis import inspect_word_file
@@ -31,7 +31,7 @@ def get_file_type(path: str) -> str:
 
 def parse_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> "pd.DataFrame":
     try:
-        return extract_excel_table(path, parser_config)
+        return extract_excel_table_with_recovery(path, parser_config)
     except Exception as exc:
         raise ValueError(f"Excel 파일 파싱 실패: {exc}") from exc
 

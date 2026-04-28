@@ -7,7 +7,8 @@ Use this checklist before publishing a release tag.
 - [ ] `cd frontend && npm run build` passes.
 - [ ] `cd frontend && npm run build:electron` passes.
 - [ ] `git diff --check` passes.
-- [ ] `./venv/bin/python -m compileall -q backend` passes.
+- [ ] `./venv/bin/python -m compileall backend backend_server.py -q` passes.
+- [ ] `./venv/bin/python scripts/run_demo_checks.py` passes.
 
 ## Document registration and search
 - [ ] Register a folder containing Excel, Word, PowerPoint, text, and Markdown files.
@@ -53,6 +54,7 @@ Use this checklist before publishing a release tag.
 - [ ] Full reset remains behind a stronger warning/advanced path.
 - [ ] Original watched folders and Office documents remain untouched after app-data cleanup.
 - [ ] A mapped/network drive folder can be added when the current OS user can access it.
+- [ ] On a DRM policy Windows PC, protected `.xlsx` / `.docx` / `.pptx` files index through the bundled embedded Python runtime.
 - [ ] Search, indexing, and version management read source documents only; they do not delete, move, rename, or save originals.
 - [ ] The OS “open file” action is understood as handing the document to Office; manual user edits in Office are outside app-controlled read-only scanning.
 
@@ -60,5 +62,6 @@ Use this checklist before publishing a release tag.
 - [ ] Version is bumped in `frontend/package.json` and `frontend/package-lock.json`.
 - [ ] Release notes summarize user-visible changes.
 - [ ] Git tag `vX.Y.Z` points at the verified commit.
-- [ ] If publishing through GitHub Actions, push `main` and the `vX.Y.Z` tag.
+- [ ] If publishing through GitHub Actions, push the verified branch/tag; `workflow_dispatch` may be run from a non-`main` release branch with `release_tag` set.
 - [ ] Confirm the GitHub Release contains the Windows zip and `.sha256.txt` asset.
+- [ ] Confirm the Windows zip contains `resources/python-runtime/python.exe` and `resources/backend-source/backend_server.py`.

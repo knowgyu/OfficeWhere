@@ -5,7 +5,7 @@ from pathlib import Path
 import backend_server
 from backend import database
 from backend.main import example_library_path
-from backend.runtime import get_worker_count
+from backend.runtime import get_fast_worker_count, get_worker_count, normalize_fast_worker_count
 
 
 def test_backend_server_reads_ow_env(monkeypatch):
@@ -48,6 +48,23 @@ def test_worker_count_uses_ow_env(monkeypatch):
     monkeypatch.setenv("OW_MAX_WORKERS", "2")
 
     assert get_worker_count(default=4, cap=8) == 2
+
+
+def test_fast_worker_count_uses_separate_ow_env(monkeypatch):
+    monkeypatch.setenv("OW_MAX_WORKERS", "2")
+    monkeypatch.setenv("OW_FAST_MAX_WORKERS", "12")
+
+    assert get_worker_count(default=4, cap=8) == 2
+    assert get_fast_worker_count(default=24, cap=48) == 12
+
+
+def test_fast_worker_count_normalizes_ui_bounds_and_steps(monkeypatch):
+    monkeypatch.delenv("OW_FAST_MAX_WORKERS", raising=False)
+
+    assert get_fast_worker_count() == 24
+    assert normalize_fast_worker_count(2) == 4
+    assert normalize_fast_worker_count(26) == 28
+    assert normalize_fast_worker_count(99) == 48
 
 
 def test_example_library_path_uses_repo_examples():

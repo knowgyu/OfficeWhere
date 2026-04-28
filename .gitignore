@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+!python-runtime/**/*.pyd
 venv/
 env/
 .env
@@ -11,11 +12,6 @@ env/
 dist/
 build/
 .eggs/
-
-# PyInstaller
-*.spec.bak
-dist/
-build/
 
 # SQLite
 *.db

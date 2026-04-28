@@ -1,0 +1,7 @@
+python313.zip
+.
+site-packages
+..\backend-source
+
+# Run site.main() so vendored packages initialize normally.
+import site

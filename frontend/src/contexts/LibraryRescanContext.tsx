@@ -1,9 +1,9 @@
 import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, LibraryRescanResponse, LibraryRescanStatus } from '../api/client'
+import { api, LibraryRescanMode, LibraryRescanResponse, LibraryRescanStatus } from '../api/client'
 import { useSnackbar } from '../ui'
 
-type RescanReason = 'manual' | 'added'
+type RescanReason = 'manual' | 'added' | 'fast'
 
 interface LibraryRescanContextValue {
   status: LibraryRescanStatus | null
@@ -11,7 +11,7 @@ interface LibraryRescanContextValue {
   running: boolean
   cancelling: boolean
   completionKey: number
-  startRescan: (reason?: RescanReason) => Promise<LibraryRescanStatus | null>
+  startRescan: (reason?: RescanReason, mode?: LibraryRescanMode) => Promise<LibraryRescanStatus | null>
   cancelRescan: () => Promise<void>
   refreshStatus: () => Promise<LibraryRescanStatus | null>
 }
@@ -99,18 +99,20 @@ export function LibraryRescanProvider({ children }: { children: ReactNode }) {
     snackbar.success(
       reasonRef.current === 'added'
         ? `폴더 추가 및 색인 완료 · 등록/확인 ${currentSummary.registered + currentSummary.updated + currentSummary.skipped} · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`
+        : reasonRef.current === 'fast'
+          ? `고속 색인 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`
         : `문서 새로고침 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`,
     )
   }, [snackbar, status, summary])
 
   const startRescan = useCallback(
-    async (reason: RescanReason = 'manual') => {
+    async (reason: RescanReason = 'manual', mode: LibraryRescanMode = 'normal') => {
       reasonRef.current = reason
       notifiedStatusRef.current = null
       observedRunningRef.current = true
       setSummary(null)
       try {
-        const response = await api.library.startRescan()
+        const response = await api.library.startRescan(mode)
         return applyStatus(response.data)
       } catch (error) {
         const detail =

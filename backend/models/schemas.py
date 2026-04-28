@@ -39,6 +39,11 @@ class FileRegisterResponse(BaseModel):
     parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
+class FilesDeleteAllResponse(BaseModel):
+    deleted: int
+    message: str
+
+
 class SchemaResponse(BaseModel):
     columns: List[str]
     sample: List[List[Any]]
@@ -296,6 +301,7 @@ class BulkRegisterResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     limit: int = 100
+    file_limit: int = 20
     file_types: List[str] = Field(default_factory=list)
     search_scope: Literal["filename_content", "filename", "content"] = "filename_content"
     modified_from: Optional[str] = None
@@ -315,6 +321,9 @@ class SearchResponse(BaseModel):
     query: str
     total: int
     results: List[SearchResult]
+    file_count: int = 0
+    file_limit: int = 20
+    has_more: bool = False
 
 
 class SchedulerSettings(BaseModel):
@@ -340,6 +349,7 @@ class LibrarySettings(BaseModel):
     auto_rescan_mode: str = "interval"
     auto_rescan_interval_hours: float = 24.0
     auto_rescan_daily_time: str = "03:00"
+    fast_worker_count: int = 24
     last_rescan_at: Optional[str] = None
 
 
@@ -366,10 +376,16 @@ class LibraryRescanResponse(BaseModel):
     cancelled: int = 0
 
 
+class LibraryRescanRequest(BaseModel):
+    mode: Literal["normal", "fast"] = "normal"
+
+
 class LibraryRescanStatus(BaseModel):
     running: bool = False
     stage: str = "idle"
     message: str = ""
+    mode: Literal["normal", "fast"] = "normal"
+    worker_count: int = 0
     started_at: Optional[str] = None
     updated_at: Optional[str] = None
     folders_total: int = 0

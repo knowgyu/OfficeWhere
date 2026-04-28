@@ -1,5 +1,37 @@
 @import './theme/tokens.css';
 
+@font-face {
+  font-family: 'Pretendard Variable';
+  font-style: normal;
+  font-weight: 45 920;
+  font-display: swap;
+  src: url('./assets/fonts/pretendard-variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/jetbrains-mono-400.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/jetbrains-mono-500.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('./assets/fonts/material-symbols-rounded.ttf') format('truetype');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -83,10 +115,15 @@
     letter-spacing: normal;
     text-transform: none;
     display: inline-block;
+    width: 1em;
+    min-width: 1em;
+    overflow: hidden;
+    text-align: center;
     white-space: nowrap;
     word-wrap: normal;
     direction: ltr;
     -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'liga';
     font-variation-settings:
       'FILL' 0,
       'wght' 400,
@@ -330,6 +367,65 @@
   opacity: var(--md-state-pressed);
 }
 
+.diff-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--md-shape-md);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  padding: 0.85rem;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.84) inset,
+    0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.diff-panel::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 0.28rem;
+  pointer-events: none;
+}
+
+.diff-panel-danger {
+  border-color: color-mix(in srgb, var(--md-sys-color-error) 58%, white);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--md-sys-color-error-container) 74%, white),
+      color-mix(in srgb, var(--md-sys-color-error-container) 38%, var(--md-sys-color-surface-container-lowest))
+    );
+}
+
+.diff-panel-danger::before {
+  background: var(--md-sys-color-error);
+}
+
+.diff-panel-success {
+  border-color: color-mix(in srgb, var(--md-sys-color-success) 58%, white);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--md-sys-color-success-container) 78%, white),
+      color-mix(in srgb, var(--md-sys-color-success-container) 36%, var(--md-sys-color-surface-container-lowest))
+    );
+}
+
+.diff-panel-success::before {
+  background: var(--md-sys-color-success);
+}
+
+.diff-panel-label {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 9999px;
+  padding: 0.12rem 0.52rem;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--md-sys-color-on-surface-variant);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.76) inset;
+}
+
 .attention-pulse {
   animation: attention-pulse 1.1s var(--md-motion-standard) infinite;
 }
@@ -389,6 +485,7 @@ body,
   position: relative;
   z-index: 65;
   isolation: isolate;
+  scroll-margin: 7rem;
 }
 
 .tour-target::before {
@@ -408,7 +505,24 @@ body,
 }
 
 .tour-review-target {
-  animation: tour-review-glow 1.45s ease-in-out infinite;
+  animation: tour-review-glow 1.3s ease-in-out infinite;
+}
+
+.tour-review-target::before {
+  inset: -10px;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      circle at 18% 20%,
+      color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--md-sys-color-tertiary) 20%, transparent),
+      transparent 68%
+    );
+  animation: tour-evidence-breathe 1.25s ease-in-out infinite;
 }
 
 .tour-review-target::after {
@@ -428,7 +542,105 @@ body,
   opacity: 0.55;
   mix-blend-mode: screen;
   transform: translateX(-115%);
+  animation: tour-review-sheen 1.25s ease-in-out infinite;
+}
+
+.tour-evidence-note {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 26%, transparent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--md-sys-color-primary-container) 82%, white 18%),
+      color-mix(in srgb, var(--md-sys-color-tertiary-container) 76%, white 24%)
+    );
+  padding: 0.18rem 0.6rem;
+  color: var(--md-sys-color-on-primary-container);
+  font-size: 0.74rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent),
+    0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  animation: tour-note-pop 1.45s ease-in-out infinite;
+}
+
+.tour-version-review-target {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent),
+    0 18px 48px color-mix(in srgb, var(--md-sys-color-primary) 14%, transparent);
+}
+
+.tour-version-evidence-card {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 44%, var(--md-sys-color-outline-variant));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--md-sys-color-primary-container) 36%, var(--md-sys-color-surface-container-lowest)),
+      var(--md-sys-color-surface-container-low)
+    );
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent),
+    0 0 0 1px rgba(255, 255, 255, 0.64) inset;
+}
+
+.tour-version-evidence-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 14% 22%,
+      color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      105deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.35) 48%,
+      transparent 66%
+    );
+  opacity: 0.7;
+  transform: translateX(-110%);
   animation: tour-review-sheen 1.45s ease-in-out infinite;
+}
+
+.tour-version-note {
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent),
+    0 1px 0 rgba(255, 255, 255, 0.8) inset;
+}
+
+.excel-diff-cell-normal {
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+}
+
+.excel-diff-cell-added {
+  background: #d1fae5;
+  color: #064e3b;
+  box-shadow: inset 0 0 0 1px #6ee7b7;
+}
+
+.excel-diff-cell-removed {
+  background: #fee2e2;
+  color: #7f1d1d;
+  box-shadow: inset 0 0 0 1px #fca5a5;
+}
+
+.excel-diff-cell-changed {
+  background: #fef3c7;
+  color: #78350f;
+  box-shadow: inset 0 0 0 1px #fcd34d;
 }
 
 .tour-soft-scrim {
@@ -526,17 +738,15 @@ body,
 
 .tour-hud-line {
   fill: none;
-  stroke: color-mix(in srgb, var(--md-sys-color-primary) 82%, white 18%);
-  stroke-width: 3;
+  stroke: color-mix(in srgb, var(--md-sys-color-primary) 74%, white 26%);
+  stroke-width: 3.25;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 9 11;
-  animation: tour-hud-dash 1.2s linear infinite;
-  filter: drop-shadow(0 8px 14px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent));
-}
-
-.tour-hud-arrowhead {
-  fill: color-mix(in srgb, var(--md-sys-color-primary) 88%, white 12%);
+  stroke-dasharray: 2 12;
+  animation: tour-hud-dash 1.05s linear infinite;
+  filter:
+    drop-shadow(0 8px 14px color-mix(in srgb, var(--md-sys-color-primary) 22%, transparent))
+    drop-shadow(0 0 8px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent));
 }
 
 .tour-hud-target-core {
@@ -620,6 +830,28 @@ body,
   }
 }
 
+@keyframes tour-evidence-breathe {
+  0%,
+  100% {
+    opacity: 0.92;
+    transform: scale(0.985);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.015);
+  }
+}
+
+@keyframes tour-note-pop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
 @keyframes tour-review-glow {
   0%,
   100% {
@@ -649,7 +881,10 @@ body,
   .tour-hud-line,
   .tour-hud-target-halo,
   .tour-review-target,
-  .tour-review-target::after {
+  .tour-review-target::before,
+  .tour-review-target::after,
+  .tour-evidence-note,
+  .tour-version-evidence-card::after {
     animation: none;
   }
 }
