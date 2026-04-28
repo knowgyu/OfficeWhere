@@ -694,6 +694,77 @@ def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
     assert highlighted[0]["column_name"] == "CW"
 
 
+def test_excel_diff_grid_resolves_partial_focus_by_key_value_and_header(tmp_path):
+    latest = tmp_path / "large-key-latest.xlsx"
+    previous = tmp_path / "large-key-previous.xlsx"
+    rows = 120
+    data = {"ID": [f"K{row}" for row in range(1, rows + 1)]}
+    for column in range(1, 120):
+        data[f"C{column}"] = [f"{row}-{column}" for row in range(1, rows + 1)]
+
+    previous_data = {key: list(values) for key, values in data.items()}
+    latest_data = {key: list(values) for key, values in data.items()}
+    previous_data["C119"][100] = "old-budget"
+    latest_data["C119"][100] = "new-budget"
+    _write_dataframe_excel(latest, latest_data)
+    _write_dataframe_excel(previous, previous_data)
+
+    result = build_excel_diff_grid(
+        [
+            {
+                "id": 2,
+                "path": str(latest),
+                "name": "large-key-latest.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": _make_parser_config(columns=120, rows=rows),
+            },
+            {
+                "id": 1,
+                "path": str(previous),
+                "name": "large-key-previous.xlsx",
+                "file_type": "Excel",
+                "key_column": "ID",
+                "parser_config": _make_parser_config(columns=120, rows=rows),
+            },
+        ],
+        [
+            {
+                "key": "K101",
+                "column": "C119",
+                "change_type": "changed",
+                "histories": [
+                    {
+                        "change_type": "changed",
+                        "from_file_id": 1,
+                        "from_file_name": "large-key-previous.xlsx",
+                        "to_file_id": 2,
+                        "to_file_name": "large-key-latest.xlsx",
+                        "before": "old-budget",
+                        "after": "new-budget",
+                        "label": "large-key-previous.xlsx → large-key-latest.xlsx",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert result["partial"] is True
+    assert result["omitted_focus_count"] == 0
+    highlighted = [
+        cell
+        for section in result["sections"]
+        for row in section["rows"]
+        for cell in row["cells"]
+        if cell["highlight"] == "changed"
+    ]
+    assert len(highlighted) == 1
+    assert highlighted[0]["row_number"] == 102
+    assert highlighted[0]["column_letter"] == "DP"
+    assert highlighted[0]["value"] == "new-budget"
+    assert highlighted[0]["histories"][0]["before"] == "old-budget"
+
+
 def test_word_diff_reports_paragraph_and_table_changes(tmp_path):
     left = tmp_path / "left.docx"
     right = tmp_path / "right.docx"

@@ -19,6 +19,13 @@ export interface ClearAppDataResult {
 }
 
 export type CloseBehavior = 'ask' | 'hide' | 'quit'
+export type AppResetReason = 'safe' | 'full' | 'custom'
+
+export interface AppResetState {
+  resetPending: boolean
+  reason?: AppResetReason
+  resetAt?: string
+}
 
 export interface ExampleLibraryPathResponse {
   available: boolean
@@ -35,6 +42,7 @@ declare global {
     getLogPath?: () => Promise<string>
     getAppDataPaths?: () => Promise<AppDataCandidate[]>
     clearAppData?: (candidateIds: string[], exitAfterClear?: boolean) => Promise<ClearAppDataResult>
+    consumeResetState?: () => Promise<AppResetState>
     getCloseBehavior?: () => Promise<CloseBehavior>
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
     getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
@@ -1373,6 +1381,13 @@ export const api = {
       if (!electron?.clearAppData) desktopError('Electron 앱에서만 앱 데이터를 삭제할 수 있습니다.')
       return { data: await electron.clearAppData(candidateIds, exitAfterClear) }
     },
+    consumeResetState: async () => {
+      const electron = electronApi()
+      if (!electron?.consumeResetState) {
+        return { data: { resetPending: false } as AppResetState }
+      }
+      return { data: await electron.consumeResetState() }
+    },
     getCloseBehavior: async () => {
       const electron = electronApi()
       if (!electron?.getCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
@@ -1386,7 +1401,17 @@ export const api = {
     getExampleLibraryPath: async () => {
       const electron = electronApi()
       if (electron?.getExampleLibraryPath) {
-        return { data: await electron.getExampleLibraryPath() }
+        const desktopResult = await electron.getExampleLibraryPath()
+        if (desktopResult.available) return { data: desktopResult }
+        try {
+          const backendResult = await axios.get<ExampleLibraryPathResponse>(
+            await apiPath('/api/app/example-library-path'),
+          )
+          if (backendResult.data.available) return backendResult
+        } catch {
+          // Keep the clearer Electron-side unavailable reason below.
+        }
+        return { data: desktopResult }
       }
       try {
         return await axios.get<ExampleLibraryPathResponse>(await apiPath('/api/app/example-library-path'))

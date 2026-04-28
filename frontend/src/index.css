@@ -475,6 +475,78 @@ body,
   animation: tour-note-pop 1.45s ease-in-out infinite;
 }
 
+.tour-version-review-target {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent),
+    0 18px 48px color-mix(in srgb, var(--md-sys-color-primary) 14%, transparent);
+}
+
+.tour-version-evidence-card {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--md-sys-color-primary) 44%, var(--md-sys-color-outline-variant));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--md-sys-color-primary-container) 36%, var(--md-sys-color-surface-container-lowest)),
+      var(--md-sys-color-surface-container-low)
+    );
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent),
+    0 0 0 1px rgba(255, 255, 255, 0.64) inset;
+}
+
+.tour-version-evidence-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at 14% 22%,
+      color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent),
+      transparent 28%
+    ),
+    linear-gradient(
+      105deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.35) 48%,
+      transparent 66%
+    );
+  opacity: 0.7;
+  transform: translateX(-110%);
+  animation: tour-review-sheen 1.45s ease-in-out infinite;
+}
+
+.tour-version-note {
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--md-sys-color-tertiary) 18%, transparent),
+    0 1px 0 rgba(255, 255, 255, 0.8) inset;
+}
+
+.excel-diff-cell-normal {
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+}
+
+.excel-diff-cell-added {
+  background: #d1fae5;
+  color: #064e3b;
+  box-shadow: inset 0 0 0 1px #6ee7b7;
+}
+
+.excel-diff-cell-removed {
+  background: #fee2e2;
+  color: #7f1d1d;
+  box-shadow: inset 0 0 0 1px #fca5a5;
+}
+
+.excel-diff-cell-changed {
+  background: #fef3c7;
+  color: #78350f;
+  box-shadow: inset 0 0 0 1px #fcd34d;
+}
+
 .tour-soft-scrim {
   background:
     radial-gradient(
@@ -715,7 +787,8 @@ body,
   .tour-review-target,
   .tour-review-target::before,
   .tour-review-target::after,
-  .tour-evidence-note {
+  .tour-evidence-note,
+  .tour-version-evidence-card::after {
     animation: none;
   }
 }

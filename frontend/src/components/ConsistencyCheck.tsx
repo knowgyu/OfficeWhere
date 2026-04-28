@@ -406,6 +406,29 @@ export default function ConsistencyCheck({
     })
   }, [activeGroupDetail?.id, pendingScrollGroupId])
 
+  useEffect(() => {
+    if (
+      tutorialStep !== 'version-ppt-review' &&
+      tutorialStep !== 'version-excel-review' &&
+      tutorialStep !== 'excel-table-review'
+    ) {
+      return undefined
+    }
+
+    const timers = [180, 760, 1500].map((delay, index) =>
+      window.setTimeout(() => {
+        const target = document.querySelector<HTMLElement>(`[data-tour-target="${tutorialStep}"]`)
+        target?.scrollIntoView({
+          behavior: 'smooth',
+          block: index === 0 ? 'center' : 'nearest',
+          inline: 'center',
+        })
+      }, delay),
+    )
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer))
+  }, [tutorialStep])
+
   const knownFilesById = useMemo(() => {
     const byId = new Map<number, FileInfo>()
     files.forEach((file) => byId.set(file.id, file))
@@ -1423,6 +1446,8 @@ function GroupTimeline({
               leadingIcon="table_chart"
               className={`shadow-elev-1 ${highlightExcelGrid ? 'attention-pulse tour-target' : ''}`}
               data-tour-target={highlightExcelGrid ? excelGridTourTarget : undefined}
+              loading={Boolean(historyState?.loading)}
+              disabled={Boolean(historyState?.loading)}
               onClick={onOpenExcelGrid}
             >
               표로 보기
@@ -1433,7 +1458,7 @@ function GroupTimeline({
 
       <div
         className={`rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4 ${
-          highlightReview ? 'tour-target tour-review-target' : ''
+          highlightReview ? 'tour-target tour-review-target tour-version-review-target' : ''
         }`}
         data-tour-target={highlightReview ? reviewTourTarget : undefined}
       >
@@ -1444,9 +1469,9 @@ function GroupTimeline({
               바로 이전 버전과 다음 버전만 순서대로 비교해 변경 증거를 분리합니다.
             </p>
             {highlightReview && (
-              <span className="tour-evidence-note mt-2">
+              <span className="tour-evidence-note tour-version-note mt-2">
                 <Icon name="auto_awesome" size={14} />
-                실제 변경 증거가 여기에 모입니다
+                변경 증거를 찾았습니다
               </span>
             )}
           </div>
@@ -1459,7 +1484,7 @@ function GroupTimeline({
             최신 {detail.files.length}개만 표시되어 이 범위 안의 변경점만 계산했습니다.
           </p>
         )}
-        <HistoryTransitions transitions={historyState?.transitions ?? []} />
+        <HistoryTransitions transitions={historyState?.transitions ?? []} highlightReview={highlightReview} />
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1536,7 +1561,13 @@ function GroupTimeline({
   )
 }
 
-function HistoryTransitions({ transitions }: { transitions: HistoryTransition[] }) {
+function HistoryTransitions({
+  transitions,
+  highlightReview = false,
+}: {
+  transitions: HistoryTransition[]
+  highlightReview?: boolean
+}) {
   if (transitions.length === 0) {
     return (
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
@@ -1547,8 +1578,12 @@ function HistoryTransitions({ transitions }: { transitions: HistoryTransition[] 
 
   return (
     <div className="space-y-3">
-      {transitions.map((transition) => (
-        <HistoryTransitionCard key={transition.id} transition={transition} />
+      {transitions.map((transition, index) => (
+        <HistoryTransitionCard
+          key={transition.id}
+          transition={transition}
+          highlightReview={highlightReview && index === 0}
+        />
       ))}
     </div>
   )
@@ -1561,7 +1596,13 @@ function changeCount(result: CheckResponse | null) {
   return result.slides.length
 }
 
-function HistoryTransitionCard({ transition }: { transition: HistoryTransition }) {
+function HistoryTransitionCard({
+  transition,
+  highlightReview = false,
+}: {
+  transition: HistoryTransition
+  highlightReview?: boolean
+}) {
   const count = changeCount(transition.result)
   const statusTone =
     transition.status === 'error'
@@ -1583,7 +1624,11 @@ function HistoryTransitionCard({ transition }: { transition: HistoryTransition }
           : '대기'
 
   return (
-    <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3">
+    <div
+      className={`rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 space-y-3 ${
+        highlightReview ? 'tour-version-evidence-card' : ''
+      }`}
+    >
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0 flex-1 space-y-2">
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
@@ -1989,15 +2034,15 @@ function ExcelDigestDetailPanel({ row }: { row: ExcelDigestRow | null }) {
 
 function excelGridHighlightClass(highlight: ExcelDiffHighlight | null) {
   if (highlight === 'added') {
-    return 'bg-emerald-100 text-emerald-950 ring-1 ring-inset ring-emerald-300'
+    return 'excel-diff-cell-added'
   }
   if (highlight === 'removed') {
-    return 'bg-red-100 text-red-950 ring-1 ring-inset ring-red-300'
+    return 'excel-diff-cell-removed'
   }
   if (highlight === 'changed') {
-    return 'bg-amber-100 text-amber-950 ring-1 ring-inset ring-amber-300'
+    return 'excel-diff-cell-changed'
   }
-  return 'bg-[var(--md-sys-color-surface-container-lowest)] text-[var(--md-sys-color-on-surface)]'
+  return 'excel-diff-cell-normal'
 }
 
 function excelGridHighlightLabel(highlight: ExcelDiffHighlight | null) {

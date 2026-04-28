@@ -11,6 +11,16 @@ const STARTUP_TIMEOUT_MS = 30_000
 const STARTUP_ATTEMPTS = 2
 
 const DATA_CLEANUP_RETRIES = 3
+const SAFE_RESET_CANDIDATE_IDS = new Set([
+  'backend-data',
+  'logs',
+  'chromium-cache',
+  'chromium-code-cache',
+  'chromium-local-storage',
+  'chromium-session-storage',
+  'chromium-gpu-cache',
+  'legacy-home-data',
+])
 
 type AppDataCandidate = {
   id: string
@@ -34,6 +44,13 @@ type ClearAppDataResult = {
 }
 
 type CloseBehavior = 'ask' | 'hide' | 'quit'
+type AppResetReason = 'safe' | 'full' | 'custom'
+
+type AppResetState = {
+  resetPending: boolean
+  reason?: AppResetReason
+  resetAt?: string
+}
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -92,6 +109,7 @@ function registerIpcHandlers() {
   ipcMain.handle('app:get-log-path', () => backendLogPath)
   ipcMain.handle('app:get-data-paths', async () => getPublicAppDataCandidates())
   ipcMain.handle('app:clear-app-data', async (_event, payload: unknown) => clearAppData(payload))
+  ipcMain.handle('app:consume-reset-state', () => consumeResetState())
   ipcMain.handle('app:get-close-behavior', () => readCloseBehavior())
   ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
   ipcMain.handle('app:get-example-library-path', () => getExampleLibraryPath())
@@ -195,6 +213,42 @@ function getExampleLibraryPath(): { available: boolean; path: string; reason?: s
 
 function settingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json')
+}
+
+function resetMarkerPath(): string {
+  return path.join(app.getPath('appData'), 'officewhere-reset-pending.json')
+}
+
+function resetReasonForCandidates(candidates: AppDataCandidate[]): AppResetReason {
+  if (candidates.some((candidate) => candidate.id === 'user-data-root')) return 'full'
+  if (candidates.every((candidate) => SAFE_RESET_CANDIDATE_IDS.has(candidate.id))) return 'safe'
+  return 'custom'
+}
+
+function writeResetMarker(candidates: AppDataCandidate[]): void {
+  const marker = {
+    resetPending: true,
+    reason: resetReasonForCandidates(candidates),
+    resetAt: new Date().toISOString(),
+  } satisfies AppResetState
+
+  try {
+    fs.writeFileSync(resetMarkerPath(), JSON.stringify(marker, null, 2), 'utf-8')
+  } catch {
+    // Best effort only. The on-disk app data has already been removed safely.
+  }
+}
+
+function consumeResetState(): AppResetState {
+  const markerPath = resetMarkerPath()
+  try {
+    const raw = fs.readFileSync(markerPath, 'utf-8')
+    fs.rmSync(markerPath, { force: true })
+    const parsed = JSON.parse(raw) as AppResetState
+    return parsed.resetPending ? parsed : { resetPending: false }
+  } catch {
+    return { resetPending: false }
+  }
 }
 
 function readSettings(): { closeBehavior?: CloseBehavior } {
@@ -332,7 +386,9 @@ async function startBackendWithRetry() {
 
 async function startBackend(port: number) {
   const dataDir = path.join(app.getPath('userData'), 'backend-data')
+  const pythonCacheDir = path.join(dataDir, 'pycache')
   fs.mkdirSync(dataDir, { recursive: true })
+  fs.mkdirSync(pythonCacheDir, { recursive: true })
 
   const logDir = app.getPath('logs')
   fs.mkdirSync(logDir, { recursive: true })
@@ -353,6 +409,7 @@ async function startBackend(port: number) {
       OW_HOST: HOST,
       OW_PORT: String(port),
       PYTHONUTF8: '1',
+      PYTHONPYCACHEPREFIX: pythonCacheDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -654,6 +711,29 @@ function touchesElectronSessionData(candidate: AppDataCandidate): boolean {
   return candidate.id === 'user-data-root' || candidate.id.startsWith('chromium-')
 }
 
+async function clearRendererStorageData(): Promise<void> {
+  try {
+    session.defaultSession.flushStorageData()
+  } catch {
+    // best-effort flush before clearing Chromium-managed state
+  }
+  await session.defaultSession
+    .clearStorageData({
+      storages: [
+        'cookies',
+        'filesystem',
+        'indexdb',
+        'localstorage',
+        'shadercache',
+        'websql',
+        'serviceworkers',
+        'cachestorage',
+      ],
+    })
+    .catch(() => undefined)
+  await session.defaultSession.clearCache().catch(() => undefined)
+}
+
 async function closeRendererForAppDataCleanup(candidates: AppDataCandidate[]): Promise<void> {
   if (!candidates.some(touchesElectronSessionData)) return
 
@@ -663,12 +743,7 @@ async function closeRendererForAppDataCleanup(candidates: AppDataCandidate[]): P
     await delay(200)
   }
 
-  try {
-    session.defaultSession.flushStorageData()
-  } catch {
-    // best-effort flush before removing on-disk app-owned data
-  }
-  await session.defaultSession.clearCache().catch(() => undefined)
+  await clearRendererStorageData()
 }
 
 async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
@@ -719,6 +794,10 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
         result.success = false
         result.failed.push({ id: candidate.id, path: candidate.path, error: errorToMessage(error) })
       }
+    }
+
+    if (result.success) {
+      writeResetMarker(selected)
     }
 
     if (result.success && shouldExitAfterClear) {

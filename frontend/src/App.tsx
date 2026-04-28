@@ -62,6 +62,7 @@ const LS_TAB = 'officewhere:last-tab'
 const LEGACY_LS_TAB = 'odj:last-tab'
 const LS_ONBOARDING_DONE = 'officewhere:onboarding-complete:v1'
 const LOGO_SRC = './officewhere-logo.png'
+const LOCAL_STATE_PREFIXES = ['officewhere:', 'odj:']
 
 interface Point {
   x: number
@@ -106,9 +107,9 @@ const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
 
 const TUTORIAL_REVIEW_DELAY_MS: Partial<Record<TutorialStep, number>> = {
   'search-review': 3600,
-  'version-ppt-review': 3400,
-  'version-excel-review': 3400,
-  'excel-table-review': 3800,
+  'version-ppt-review': 5000,
+  'version-excel-review': 5200,
+  'excel-table-review': 5600,
 }
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
@@ -150,8 +151,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'version-ppt-review': {
     eyebrow: 'PPT 변경',
-    title: '슬라이드 변화가 표시됐어요',
-    description: '변경 건수와 버전 흐름을 여기서 봅니다.',
+    title: '바뀐 슬라이드가 잡혔어요',
+    description: '빛나는 카드가 실제 변경 증거입니다.',
     icon: 'fact_check',
   },
   'version-excel': {
@@ -162,8 +163,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'version-excel-review': {
     eyebrow: 'Excel 변경',
-    title: '값 차이가 표시됐어요',
-    description: '색으로 표시된 변경 요약을 확인하세요.',
+    title: '값 차이가 잡혔어요',
+    description: '노랑·초록·빨강 요약이 변경 지점입니다.',
     icon: 'fact_check',
   },
   'excel-table': {
@@ -174,8 +175,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'excel-table-review': {
     eyebrow: '셀 변경',
-    title: '바뀐 셀이 보입니다',
-    description: '색이 들어간 셀이 실제 변경 지점입니다.',
+    title: '색이 들어간 셀을 보세요',
+    description: '초록 추가, 빨강 삭제, 노랑 수정입니다.',
     icon: 'table_view',
   },
   done: {
@@ -251,6 +252,27 @@ function getTutorialTargetElement(step: TutorialStep) {
   return targeted ?? document.querySelector<HTMLElement>('.tour-target')
 }
 
+function clearOfficeWhereLocalState() {
+  const keys = Array.from({ length: window.localStorage.length }, (_value, index) =>
+    window.localStorage.key(index),
+  ).filter((key): key is string => Boolean(key))
+
+  keys.forEach((key) => {
+    if (LOCAL_STATE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      window.localStorage.removeItem(key)
+    }
+  })
+}
+
+function isPointInsideRect(point: Point, rect: TourRect, padding = 8) {
+  return (
+    point.x >= rect.left - padding &&
+    point.x <= rect.left + rect.width + padding &&
+    point.y >= rect.top - padding &&
+    point.y <= rect.top + rect.height + padding
+  )
+}
+
 export default function App() {
   const snackbar = useSnackbar()
   const [activeTab, setActiveTab] = useState<Tab>(() => {
@@ -272,6 +294,33 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(LS_TAB, activeTab)
   }, [activeTab])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const consumeResetState = async () => {
+      try {
+        const response = await api.app.consumeResetState()
+        if (cancelled || !response.data.resetPending) return
+
+        clearOfficeWhereLocalState()
+        resetTextSize()
+        setExampleLibraryPath('')
+        setTutorialStep(null)
+        setOnboardingReplay(false)
+        setActiveTab('search')
+        setOnboardingOpen(true)
+        snackbar.info('앱 데이터를 초기화했습니다. 처음 둘러보기를 다시 시작합니다.')
+      } catch {
+        // Browser/dev mode has no reset marker to consume.
+      }
+    }
+
+    void consumeResetState()
+    return () => {
+      cancelled = true
+    }
+  }, [resetTextSize, snackbar])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -589,6 +638,7 @@ function GuidedTourHud({
       }
     : null
   const targetAnchor = targetRect ? getRectBoundaryPoint(targetRect, pointer) : null
+  const pointerOverTarget = targetRect ? isPointInsideRect(pointer, targetRect, 10) : false
   const bubbleLeft = clamp(
     targetCenter && pointer.x < targetCenter.x ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
     16,
@@ -599,7 +649,7 @@ function GuidedTourHud({
     16,
     Math.max(16, viewport.height - bubbleHeight - 16),
   )
-  const curve = targetAnchor
+  const curve = targetAnchor && !pointerOverTarget
     ? {
         startX: pointer.x,
         startY: pointer.y,

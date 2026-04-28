@@ -9,6 +9,7 @@ const officeWhereBridge = {
   getAppDataPaths: () => ipcRenderer.invoke('app:get-data-paths'),
   clearAppData: (candidateIds: string[], exitAfterClear = true) =>
     ipcRenderer.invoke('app:clear-app-data', { candidateIds, exitAfterClear }),
+  consumeResetState: () => ipcRenderer.invoke('app:consume-reset-state'),
   getCloseBehavior: () => ipcRenderer.invoke('app:get-close-behavior'),
   setCloseBehavior: (behavior: string) => ipcRenderer.invoke('app:set-close-behavior', { behavior }),
   getExampleLibraryPath: () => ipcRenderer.invoke('app:get-example-library-path'),
