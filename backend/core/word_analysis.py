@@ -1,61 +1,72 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import zipfile
+from xml.etree import ElementTree as ET
+from typing import Any, Dict, Iterable, List
 
 from .normalizer import normalize_value
 
+WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+WORD_TAG = f"{{{WORD_NS}}}"
 
-def _count_page_breaks(element) -> int:
-    """Count explicit/rendered Word page-break markers inside an XML element.
 
-    DOCX files do not store stable page numbers as document data; Word and
-    compatible editors paginate dynamically based on printer, font, and layout.
-    The best source available without rendering the document is explicit
-    `<w:br w:type="page">` markers plus Word's optional
-    `<w:lastRenderedPageBreak>` markers when the file has been saved by Word.
-    """
+def _text_from_word_element(element: ET.Element) -> str:
+    parts: List[str] = []
+    for child in element.iter():
+        if child.tag == f"{WORD_TAG}t" and child.text:
+            parts.append(child.text)
+        elif child.tag == f"{WORD_TAG}tab":
+            parts.append("\t")
+        elif child.tag == f"{WORD_TAG}br":
+            parts.append("\n")
+    return "".join(parts).strip()
 
+
+def _count_page_breaks_xml(element: ET.Element) -> int:
     page_breaks = 0
     for child in element.iter():
-        tag = str(child.tag)
-        if tag.endswith("}lastRenderedPageBreak"):
+        if child.tag == f"{WORD_TAG}lastRenderedPageBreak":
             page_breaks += 1
             continue
-        if tag.endswith("}br"):
-            break_type = child.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type")
-            if break_type == "page":
-                page_breaks += 1
+        if child.tag == f"{WORD_TAG}br" and child.get(f"{WORD_TAG}type") == "page":
+            page_breaks += 1
     return page_breaks
 
 
-def _iter_document_blocks(document):
-    from docx.oxml.table import CT_Tbl
-    from docx.oxml.text.paragraph import CT_P
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
-
-    for child in document.element.body.iterchildren():
-        if isinstance(child, CT_P):
-            yield Paragraph(child, document)
-        elif isinstance(child, CT_Tbl):
-            yield Table(child, document)
+def _iter_body_blocks(body: ET.Element) -> Iterable[ET.Element]:
+    for child in list(body):
+        if child.tag in {f"{WORD_TAG}p", f"{WORD_TAG}tbl"}:
+            yield child
 
 
 def extract_word_blocks(path: str) -> List[Dict[str, Any]]:
-    from docx import Document
-    from docx.text.paragraph import Paragraph
+    """Extract searchable/comparable Word text without loading embedded media.
 
-    document = Document(path)
+    DOCX files are ZIP packages.  Reading only `word/document.xml` avoids
+    touching images, videos, or other binary parts whose CRC errors should not
+    block text indexing/version comparison.
+    """
+    with zipfile.ZipFile(path) as archive:
+        try:
+            document_xml = archive.read("word/document.xml")
+        except KeyError as exc:
+            raise ValueError("Word 본문 XML을 찾을 수 없습니다.") from exc
+
+    root = ET.fromstring(document_xml)
+    body = root.find(f"{WORD_TAG}body")
+    if body is None:
+        return []
+
     blocks: List[Dict[str, Any]] = []
     paragraph_idx = 0
     table_idx = 0
     page_number = 1
 
-    for block in _iter_document_blocks(document):
-        if isinstance(block, Paragraph):
-            text = block.text.strip()
+    for block in _iter_body_blocks(body):
+        if block.tag == f"{WORD_TAG}p":
+            text = _text_from_word_element(block)
             block_page_number = page_number
-            page_number += _count_page_breaks(block._p)
+            page_number += _count_page_breaks_xml(block)
             if not text:
                 continue
             paragraph_idx += 1
@@ -71,11 +82,11 @@ def extract_word_blocks(path: str) -> List[Dict[str, Any]]:
             continue
 
         table_idx += 1
-        for row_idx, row in enumerate(block.rows, start=1):
+        for row_idx, row in enumerate(block.findall(f".//{WORD_TAG}tr"), start=1):
             row_page_number = page_number
-            cell_texts = [cell.text.strip() for cell in row.cells]
+            cell_texts = [_text_from_word_element(cell) for cell in row.findall(f"{WORD_TAG}tc")]
             row_text = " | ".join(text for text in cell_texts if text)
-            page_number += _count_page_breaks(row._tr)
+            page_number += _count_page_breaks_xml(row)
             if not row_text:
                 continue
             blocks.append(
@@ -91,8 +102,7 @@ def extract_word_blocks(path: str) -> List[Dict[str, Any]]:
     return blocks
 
 
-def inspect_word_file(path: str) -> Dict[str, Any]:
-    blocks = extract_word_blocks(path)
+def inspect_word_blocks(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
     sample = [[block["block_type"], block["text"]] for block in blocks[:5]]
     return {
         "parser_config": {},
@@ -101,3 +111,7 @@ def inspect_word_file(path: str) -> Dict[str, Any]:
         "sample": sample,
         "block_count": len(blocks),
     }
+
+
+def inspect_word_file(path: str) -> Dict[str, Any]:
+    return inspect_word_blocks(extract_word_blocks(path))

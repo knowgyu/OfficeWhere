@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     import pandas as pd
 
-from .excel_analysis import extract_excel_table
+from .excel_analysis import extract_excel_table_with_recovery
 from .normalizer import normalize_key
 
 
@@ -22,7 +22,7 @@ def join_files(file_specs: List[Dict[str, Any]], join_type: str = "outer") -> "p
         if spec.get("file_type") != "Excel":
             raise ValueError("JOIN은 Excel 파일만 지원합니다.")
 
-        df = extract_excel_table(spec["path"], spec.get("parser_config"))
+        df = extract_excel_table_with_recovery(spec["path"], spec.get("parser_config"))
         key_column = spec["key_column"]
         if not key_column:
             raise ValueError(f"파일 '{spec['file_name']}'의 key_column 이 비어 있습니다.")

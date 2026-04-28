@@ -18,6 +18,7 @@ from ..models.schemas import (
     LibraryGroupDetail,
     LibraryGroupLatestFileRequest,
     LibraryGroupsResponse,
+    LibraryRescanRequest,
     LibraryRescanResponse,
     LibraryRescanStatus,
     LibrarySettings,
@@ -37,13 +38,13 @@ def update_library_settings(settings: LibrarySettings):
 
 
 @router.post("/rescan", response_model=LibraryRescanResponse)
-def trigger_library_rescan():
-    return rescan_library()
+def trigger_library_rescan(request: Optional[LibraryRescanRequest] = None):
+    return rescan_library(mode=(request.mode if request else "normal"))
 
 
 @router.post("/rescan/start", response_model=LibraryRescanStatus)
-def start_library_rescan_job():
-    return start_library_rescan()
+def start_library_rescan_job(request: Optional[LibraryRescanRequest] = None):
+    return start_library_rescan(mode=(request.mode if request else "normal"))
 
 
 @router.get("/rescan/status", response_model=LibraryRescanStatus)

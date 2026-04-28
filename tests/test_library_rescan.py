@@ -1,6 +1,6 @@
 from backend.core.library import save_library_settings
 from backend.database import get_all_files, init_db, register_file
-from backend.models.schemas import LibrarySettings
+from backend.models.schemas import LibraryRescanRequest, LibrarySettings
 
 
 def _write_excel(path, data: dict):
@@ -55,6 +55,50 @@ def test_cancel_library_rescan_marks_running_job(tmp_path, monkeypatch):
     assert status.stage == "cancelled"
 
 
+def test_start_library_rescan_fast_status_and_running_job_mode_are_stable(tmp_path, monkeypatch):
+    import time
+
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    monkeypatch.setattr("backend.core.library.get_fast_worker_count", lambda: 12)
+    init_db()
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    def slow_collect(_path, _recursive):
+        time.sleep(0.2)
+        return []
+
+    monkeypatch.setattr(library, "_collect_supported_paths", slow_collect)
+
+    first = library.start_library_rescan(mode="fast")
+    second = library.start_library_rescan(mode="normal")
+
+    assert first.mode == "fast"
+    assert first.worker_count == 12
+    assert second.mode == "fast"
+    assert second.worker_count == 12
+
+    deadline = time.time() + 2
+    status = library.get_library_rescan_status()
+    while status.running and time.time() < deadline:
+        time.sleep(0.05)
+        status = library.get_library_rescan_status()
+
+    assert status.running is False
+
+
+def test_library_rescan_request_rejects_invalid_mode():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        LibraryRescanRequest(mode="turbo")
+
+
 def test_classify_index_error_parser_config_out_of_range():
     from backend.core.library import classify_index_error
 
@@ -85,6 +129,28 @@ def test_classify_index_error_database_locked_is_specific():
     assert diagnostic["error_code"] == "database_locked"
     assert diagnostic["error_stage"] == "database"
     assert "새로고침" in diagnostic["error_hint"]
+
+
+def test_collect_supported_paths_filters_supported_files_once(tmp_path):
+    from pathlib import Path
+
+    from backend.core.library import _collect_supported_paths
+
+    (tmp_path / "report.xlsx").write_text("x")
+    (tmp_path / "note.md").write_text("x")
+    (tmp_path / "~$temp.xlsx").write_text("x")
+    (tmp_path / "image.png").write_text("x")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "deck.pptx").write_text("x")
+
+    recursive = _collect_supported_paths(str(tmp_path), recursive=True)
+    flat = _collect_supported_paths(str(tmp_path), recursive=False)
+
+    assert {tmp_path / "note.md", tmp_path / "report.xlsx", nested / "deck.pptx"} == {
+        Path(path) for path in recursive
+    }
+    assert {tmp_path / "note.md", tmp_path / "report.xlsx"} == {Path(path) for path in flat}
 
 
 def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch, caplog):
@@ -167,6 +233,40 @@ def test_rescan_excel_refreshes_parser_config_and_indexes_used_range(tmp_path, m
     updated_row = get_all_files()[0]
     assert updated_row["parser_config"]["end_col"] == 3
     assert search("새값")[0]["location"] == "Sheet1 시트 | 2행 C열"
+
+
+def test_fast_rescan_skips_unchanged_stale_excel_config_but_normal_repairs(tmp_path, monkeypatch):
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    target = tmp_path / "budget.xlsx"
+    _write_excel(target, {"ID": ["A"], "담당자": ["Kim"]})
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    first = library.rescan_library(mode="normal")
+    assert first.registered == 1
+
+    stale_parser_config = {
+        "sheet_name": "Sheet1",
+        "header_row": 1,
+        "start_col": 1,
+        "end_col": 99,
+        "end_row": 99,
+    }
+    register_file(str(target), target.name, "Excel", "ID", 99, parser_config=stale_parser_config)
+
+    fast = library.rescan_library(mode="fast")
+    assert fast.skipped == 1
+    assert get_all_files()[0]["parser_config"]["end_col"] == 99
+
+    repaired = library.rescan_library(mode="normal")
+    assert repaired.updated == 1
+    assert get_all_files()[0]["parser_config"]["end_col"] == 2
 
 
 def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path, monkeypatch):

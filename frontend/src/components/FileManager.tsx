@@ -60,6 +60,7 @@ function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
 function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescanResponse | null, rescanning: boolean) {
   if (rescanning && status) {
     const foundText = `발견 ${status.found}개`
+    const modeText = status.mode === 'fast' ? `고속 · 작업 ${status.worker_count}개` : ''
     const progressText =
       status.total > 0
         ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}%`
@@ -67,7 +68,7 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
           ? `폴더 ${status.folders_processed}/${status.folders_total}`
           : '진행률 계산 중'
     const current = status.current_file ? ` · 현재 ${status.current_file}` : ''
-    return `${foundText} · ${progressText}${current}`
+    return [foundText, modeText, progressText].filter(Boolean).join(' · ') + current
   }
 
   const source = summary ?? status?.summary
@@ -414,6 +415,10 @@ export default function FileManager({
   const handleRescanLibrary = async () => {
     if (tutorialStep === 'document-refresh') setTourRefreshStartKey(rescanCompletionKey)
     await startRescan('manual')
+  }
+
+  const handleFastRescanLibrary = async () => {
+    await startRescan('fast', 'fast')
   }
 
   const openClearAppDataPreset = (candidateIds: string[]) => {
@@ -837,17 +842,29 @@ export default function FileManager({
           title="대상 폴더"
           description="자주 쓰는 문서 폴더를 등록하면 검색과 버전 관리에 사용합니다. 앱은 원본 문서를 읽어 색인하며, 파일을 수정하거나 이동하지 않습니다."
           trailing={
-            <Button
-              variant="filled"
-              leadingIcon="sync"
-              onClick={handleRescanLibrary}
-              loading={rescanning}
-              disabled={settingsLoading || librarySettings.watched_folders.length === 0}
-              className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
-              data-tour-target={tutorialStep === 'document-refresh' ? 'document-refresh' : undefined}
-            >
-              문서 새로고침
-            </Button>
+            <div className="flex items-center justify-end gap-2 flex-wrap">
+              <Button
+                variant="outlined"
+                leadingIcon="bolt"
+                onClick={handleFastRescanLibrary}
+                loading={rescanning && rescanStatus?.mode === 'fast'}
+                disabled={settingsLoading || rescanning || librarySettings.watched_folders.length === 0}
+                title="CPU/RAM을 더 사용해 큰 폴더를 빠르게 색인합니다."
+              >
+                고속 색인
+              </Button>
+              <Button
+                variant="filled"
+                leadingIcon="sync"
+                onClick={handleRescanLibrary}
+                loading={rescanning && rescanStatus?.mode !== 'fast'}
+                disabled={settingsLoading || rescanning || librarySettings.watched_folders.length === 0}
+                className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
+                data-tour-target={tutorialStep === 'document-refresh' ? 'document-refresh' : undefined}
+              >
+                문서 새로고침
+              </Button>
+            </div>
           }
         >
           <div

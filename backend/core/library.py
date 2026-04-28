@@ -37,12 +37,11 @@ from .indexer import inspect_and_chunk
 from .parser import SUPPORTED_EXTENSIONS
 from .normalizer import suggest_key_column
 from .excel_analysis import normalize_excel_parser_config
-from ..runtime import get_worker_count
+from ..runtime import get_fast_worker_count, get_worker_count
 
 SETTINGS_KEY = "library_settings"
 LAST_RESCAN_KEY = "library_last_rescan_at"
 MANUAL_LATEST_SETTING_KEY = "library_manual_latest_files"
-MAX_WORKERS = get_worker_count()
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[Dict[str, Any]], None]
 OFFICE_FILE_TYPES = {"Excel", "Word", "PowerPoint"}
@@ -54,6 +53,14 @@ MAX_GROUP_SUMMARY_FINGERPRINT_FILES = 5
 _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
 _cancel_event = threading.Event()
+
+
+def _normalize_rescan_mode(mode: str = "normal") -> str:
+    return "fast" if mode == "fast" else "normal"
+
+
+def _rescan_worker_count(mode: str) -> int:
+    return get_fast_worker_count() if mode == "fast" else get_worker_count()
 
 
 def _now_iso() -> str:
@@ -318,12 +325,14 @@ def _collect_supported_paths(folder_path: str, recursive: bool) -> List[str]:
     if not folder.is_dir():
         raise ValueError(f"폴더가 아닙니다: {folder_path}")
 
-    glob_pattern = "**/*" if recursive else "*"
+    iterator = folder.rglob("*") if recursive else folder.glob("*")
+    supported = {extension.lower() for extension in SUPPORTED_EXTENSIONS}
     return sorted(
         os.path.normpath(str(path))
-        for ext in SUPPORTED_EXTENSIONS
-        for path in folder.glob(f"{glob_pattern}{ext}")
-        if path.is_file() and not path.name.startswith("~$")
+        for path in iterator
+        if path.is_file()
+        and not path.name.startswith("~$")
+        and path.suffix.lower() in supported
     )
 
 
@@ -357,12 +366,26 @@ def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
     suffix = Path(path).suffix.lower()
     error_type = exc.__class__.__name__
 
+    if "bad crc-32" in lower or "crc" in lower:
+        return {
+            "error_code": "embedded_media_or_package_corrupt",
+            "error_stage": "office_package",
+            "error_type": error_type,
+            "error_hint": "문서 패키지 안의 일부 미디어/첨부 데이터가 손상되어 이 파일만 건너뛰었습니다. Office에서 열어 다른 이름으로 저장하면 복구될 수 있습니다.",
+        }
+    if "custom" in lower and "property" in lower:
+        return {
+            "error_code": "office_metadata_invalid",
+            "error_stage": "office_metadata",
+            "error_type": error_type,
+            "error_hint": "문서의 부가 메타데이터가 비정상이라 이 파일만 건너뛰었습니다. 본문 파일은 수정하지 않았습니다.",
+        }
     if "parser_config" in message and ("row 범위" in message or "column 범위" in message):
         return {
             "error_code": "parser_config_out_of_range",
             "error_stage": "parser_config",
             "error_type": error_type,
-            "error_hint": "저장된 Excel 표 범위가 현재 시트 크기를 벗어났습니다. 파일 관리에서 표 범위를 다시 선택한 뒤 등록/새로고침해 주세요.",
+            "error_hint": "저장된 Excel 표 범위가 현재 시트 크기와 맞지 않습니다. 일반 문서 새로고침으로 자동 복구를 시도합니다.",
         }
     if "parser_config" in message and ("정수" in message or "invalid" in lower):
         return {
@@ -437,7 +460,12 @@ def _failed_result(
     )
 
 
-def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> LibraryRescanResponse:
+def rescan_library(
+    progress_callback: Optional[ProgressCallback] = None,
+    mode: str = "normal",
+) -> LibraryRescanResponse:
+    mode = _normalize_rescan_mode(mode)
+    worker_count = _rescan_worker_count(mode)
     settings = load_library_settings()
     if not settings.watched_folders:
         if progress_callback:
@@ -445,6 +473,8 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                 {
                     "stage": "completed",
                     "message": "등록된 대상 폴더가 없습니다.",
+                    "mode": mode,
+                    "worker_count": worker_count,
                     "percent": 100.0,
                     "total": 0,
                     "processed": 0,
@@ -460,7 +490,9 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
         progress_callback(
             {
                 "stage": "scanning",
-                "message": "대상 폴더를 확인하는 중입니다.",
+                "message": "대상 폴더를 확인하는 중입니다." if mode == "normal" else "고속 색인을 위해 대상 폴더를 확인하는 중입니다.",
+                "mode": mode,
+                "worker_count": worker_count,
                 "folders_total": folders_total,
                 "folders_processed": 0,
                 "found": 0,
@@ -496,6 +528,8 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                 {
                     "stage": "cancelling" if _cancel_event.is_set() else "scanning",
                     "message": "정지 요청을 처리하는 중입니다." if _cancel_event.is_set() else f"파일 경로 확인 중 · 폴더 {folder_index}/{folders_total}",
+                    "mode": mode,
+                    "worker_count": worker_count,
                     "folders_total": folders_total,
                     "folders_processed": folder_index,
                     "found": len(found_paths),
@@ -520,7 +554,7 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
             current_mtime = os.path.getmtime(path)
             if existing and existing.get("file_mtime") is not None:
                 if abs(float(existing["file_mtime"]) - current_mtime) < 1.0:
-                    if not _is_excel_path(path) or _saved_excel_config_is_valid(path, existing.get("parser_config")):
+                    if mode == "fast" or not _is_excel_path(path) or _saved_excel_config_is_valid(path, existing.get("parser_config")):
                         return LibraryRescanResult(
                             path=path,
                             name=name,
@@ -576,7 +610,13 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
         progress_callback(
             {
                 "stage": "cancelling" if _cancel_event.is_set() else ("indexing" if total > 0 else "completed"),
-                "message": "정지 요청을 처리하는 중입니다." if _cancel_event.is_set() else f"변경 여부 확인 및 색인 준비 중 · 파일 {total}개 발견",
+                "message": (
+                    "정지 요청을 처리하는 중입니다."
+                    if _cancel_event.is_set()
+                    else f"{'고속 ' if mode == 'fast' else ''}변경 여부 확인 및 색인 준비 중 · 파일 {total}개 발견"
+                ),
+                "mode": mode,
+                "worker_count": worker_count,
                 "found": total,
                 "total": total,
                 "processed": 0,
@@ -595,6 +635,8 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                 {
                     "stage": "cancelled",
                     "message": "문서 새로고침이 정지되었습니다.",
+                    "mode": mode,
+                    "worker_count": worker_count,
                     "found": total,
                     "total": total,
                     "processed": 0,
@@ -609,9 +651,9 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
 
     if total > 0:
         pending_paths = iter(sorted_paths)
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures: Dict[Any, str] = {}
-            for _ in range(min(MAX_WORKERS, total)):
+            for _ in range(min(worker_count, total)):
                 path = next(pending_paths, None)
                 if path is None:
                     break
@@ -644,7 +686,13 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
                         progress_callback(
                             {
                                 "stage": "cancelling" if _cancel_event.is_set() else "indexing",
-                                "message": "정지 요청을 처리하는 중입니다." if _cancel_event.is_set() else f"변경 확인 및 색인 중 · {processed}/{total}",
+                                "message": (
+                                    "정지 요청을 처리하는 중입니다."
+                                    if _cancel_event.is_set()
+                                    else f"{'고속 ' if mode == 'fast' else ''}변경 확인 및 색인 중 · {processed}/{total}"
+                                ),
+                                "mode": mode,
+                                "worker_count": worker_count,
                                 "found": total,
                                 "total": total,
                                 "processed": processed,
@@ -691,6 +739,8 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
             {
                 "stage": "cancelled" if cancelled else "completed",
                 "message": "문서 새로고침이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
+                "mode": mode,
+                "worker_count": worker_count,
                 "found": total,
                 "total": total,
                 "processed": len(results) - len(scan_errors),
@@ -705,15 +755,17 @@ def rescan_library(progress_callback: Optional[ProgressCallback] = None) -> Libr
     return response
 
 
-def _run_rescan_job() -> None:
+def _run_rescan_job(mode: str) -> None:
+    mode = _normalize_rescan_mode(mode)
     try:
-        summary = rescan_library(progress_callback=_update_rescan_status)
+        summary = rescan_library(progress_callback=_update_rescan_status, mode=mode)
         cancelled = _cancel_event.is_set()
         _update_rescan_status(
             {
                 "running": False,
                 "stage": "cancelled" if cancelled else "completed",
                 "message": "문서 새로고침이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
+                "mode": mode,
                 "percent": _rescan_status.get("percent", 100.0),
                 "eta_seconds": None,
                 "summary": summary,
@@ -728,6 +780,7 @@ def _run_rescan_job() -> None:
                 "running": False,
                 "stage": "failed",
                 "message": "대상 폴더 색인에 실패했습니다.",
+                "mode": mode,
                 "eta_seconds": None,
                 "error": str(exc),
             }
@@ -736,7 +789,9 @@ def _run_rescan_job() -> None:
         _cancel_event.clear()
 
 
-def start_library_rescan() -> LibraryRescanStatus:
+def start_library_rescan(mode: str = "normal") -> LibraryRescanStatus:
+    mode = _normalize_rescan_mode(mode)
+    worker_count = _rescan_worker_count(mode)
     with _rescan_status_lock:
         if _rescan_status.get("running"):
             return LibraryRescanStatus(**_rescan_status)
@@ -747,13 +802,15 @@ def start_library_rescan() -> LibraryRescanStatus:
             LibraryRescanStatus(
                 running=True,
                 stage="queued",
-                message="대상 폴더 색인을 준비하는 중입니다.",
+                message="대상 폴더 색인을 준비하는 중입니다." if mode == "normal" else "고속 색인을 준비하는 중입니다.",
+                mode=mode,
+                worker_count=worker_count,
                 started_at=_now_iso(),
                 updated_at=_now_iso(),
             ).model_dump()
         )
 
-    thread = threading.Thread(target=_run_rescan_job, daemon=True, name="library-rescan")
+    thread = threading.Thread(target=_run_rescan_job, args=(mode,), daemon=True, name="library-rescan")
     thread.start()
     return _status_snapshot()
 

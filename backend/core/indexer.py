@@ -17,10 +17,10 @@ from ..database import (
 )
 from .excel_analysis import extract_excel_used_range, inspect_excel_file_with_recovery
 from .parser import get_file_type
-from .ppt_analysis import extract_ppt_slides, inspect_ppt_file
+from .ppt_analysis import extract_ppt_slides, inspect_ppt_slides
 from .text_analysis import extract_text_blocks, inspect_text_file
 from ..runtime import get_worker_count
-from .word_analysis import extract_word_blocks, inspect_word_file
+from .word_analysis import extract_word_blocks, inspect_word_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +55,15 @@ def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] 
 
 
 def _inspect_and_chunk_word(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
-    inspection = inspect_word_file(path)
     blocks = extract_word_blocks(path)
+    inspection = inspect_word_blocks(blocks)
     chunks = [{"location": block["location"], "content": block["text"]} for block in blocks]
     return inspection, chunks
 
 
 def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
-    inspection = inspect_ppt_file(path)
     slides = extract_ppt_slides(path)
+    inspection = inspect_ppt_slides(slides)
     chunks: List[Dict[str, str]] = []
     for slide in slides:
         if slide["title"]:

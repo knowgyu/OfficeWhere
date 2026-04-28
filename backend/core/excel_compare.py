@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING, Any, Dict, List
 if TYPE_CHECKING:
     import pandas as pd
 
-from .excel_analysis import extract_excel_table, extract_excel_used_range, normalize_excel_parser_config
+from .excel_analysis import (
+    extract_excel_table,
+    extract_excel_used_range,
+    recover_excel_parser_config,
+)
 from .normalizer import normalize_key, values_equal
 
 
@@ -334,9 +338,7 @@ def compare_excel_files(file_infos: List[Dict[str, Any]], comparison_scope: str 
     all_keys: set[str] = set()
 
     for file_info in file_infos:
-        parser_config = normalize_excel_parser_config(
-            file_info["path"], file_info.get("parser_config")
-        )
+        parser_config = recover_excel_parser_config(file_info["path"], file_info.get("parser_config"))
         df = extract_excel_table(file_info["path"], parser_config)
         key_column = file_info["key_column"]
         if not key_column:

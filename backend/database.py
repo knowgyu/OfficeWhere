@@ -229,6 +229,24 @@ def init_db():
             """
         )
         _ensure_registered_files_columns(cursor)
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_registered_files_created_at
+            ON registered_files(created_at DESC, id DESC)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_registered_files_file_type
+            ON registered_files(file_type)
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_registered_files_file_mtime
+            ON registered_files(file_mtime DESC)
+            """
+        )
 
         cursor.execute(
             """

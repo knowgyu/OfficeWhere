@@ -366,10 +366,16 @@ class LibraryRescanResponse(BaseModel):
     cancelled: int = 0
 
 
+class LibraryRescanRequest(BaseModel):
+    mode: Literal["normal", "fast"] = "normal"
+
+
 class LibraryRescanStatus(BaseModel):
     running: bool = False
     stage: str = "idle"
     message: str = ""
+    mode: Literal["normal", "fast"] = "normal"
+    worker_count: int = 0
     started_at: Optional[str] = None
     updated_at: Optional[str] = None
     folders_total: int = 0

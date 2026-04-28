@@ -516,10 +516,14 @@ export interface LibraryRescanResponse {
   cancelled: number
 }
 
+export type LibraryRescanMode = 'normal' | 'fast'
+
 export interface LibraryRescanStatus {
   running: boolean
   stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
   message: string
+  mode: LibraryRescanMode
+  worker_count: number
   started_at?: string | null
   updated_at?: string | null
   folders_total: number
@@ -1434,8 +1438,10 @@ export const api = {
     getSettings: async () => axios.get<LibrarySettings>(await apiPath('/api/library/settings')),
     updateSettings: (data: LibrarySettings) =>
       apiPath('/api/library/settings').then((url) => axios.put<LibrarySettings>(url, data)),
-    rescan: async () => axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan')),
-    startRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start')),
+    rescan: async (mode: LibraryRescanMode = 'normal') =>
+      axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan'), { mode }),
+    startRescan: async (mode: LibraryRescanMode = 'normal') =>
+      axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start'), { mode }),
     rescanStatus: async () => axios.get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
     cancelRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/cancel')),
     groups: getLibraryGroups,

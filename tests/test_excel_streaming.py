@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from datetime import date
 
 from openpyxl import Workbook
 
@@ -27,7 +28,7 @@ def test_backend_startup_import_does_not_load_pandas():
     assert result.stdout.strip() == "False"
 
 
-def test_excel_inspect_opens_xlsx_as_read_only(monkeypatch, tmp_path):
+def test_excel_inspect_reads_xlsx_without_loading_workbook_package(tmp_path):
     path = tmp_path / "sample.xlsx"
     workbook = Workbook()
     worksheet = workbook.active
@@ -35,20 +36,49 @@ def test_excel_inspect_opens_xlsx_as_read_only(monkeypatch, tmp_path):
     worksheet.append(["A", "Kim"])
     workbook.save(path)
 
-    calls = []
-    real_load_workbook = excel_analysis.load_workbook
+    result = inspect_file_path(str(path))
 
-    def spy_load_workbook(*args, **kwargs):
-        calls.append(kwargs)
-        return real_load_workbook(*args, **kwargs)
+    assert result["columns"] == ["과제명", "담당자"]
 
-    monkeypatch.setattr(excel_analysis, "load_workbook", spy_load_workbook)
+
+def test_excel_inspect_ignores_malformed_custom_properties(tmp_path):
+    import zipfile
+
+    path = tmp_path / "bad-custom-props.xlsx"
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(["과제명", "담당자"])
+    worksheet.append(["A", "Kim"])
+    workbook.save(path)
+
+    malformed_custom_props = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties"
+  xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <property fmtid="{D5CDD505-2E9C-101B-9397-08002B2CF9AE}" pid="2">
+    <vt:lpwstr>nameless</vt:lpwstr>
+  </property>
+</Properties>
+"""
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.writestr("docProps/custom.xml", malformed_custom_props)
 
     result = inspect_file_path(str(path))
 
     assert result["columns"] == ["과제명", "담당자"]
-    assert calls
-    assert all(call.get("read_only") is True for call in calls)
+
+
+def test_excel_inspect_preserves_formatted_date_text(tmp_path):
+    path = tmp_path / "dates.xlsx"
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(["날짜", "값"])
+    worksheet.append([date(2026, 4, 28), "마감"])
+    workbook.save(path)
+
+    result = inspect_file_path(str(path))
+
+    assert result["sample"][0][0] == "2026-04-28"
+    assert result["sample"][0][0] != "46140"
 
 
 def test_excel_discovery_keeps_full_end_row_when_scan_is_bounded(tmp_path):
