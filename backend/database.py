@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -47,6 +48,103 @@ class PreparedIndexedFile:
     chunk_count: int
 
 
+@dataclass
+class InitialIndexStagingDatabase:
+    """Temporary DB used to bulk-build a first index before copying it in."""
+
+    path: Path
+    conn: sqlite3.Connection
+    file_count: int = 0
+    chunk_count: int = 0
+    closed: bool = False
+
+    def save_indexed_files_batch(self, payloads: Sequence[PreparedIndexedFile]) -> List[int]:
+        file_ids = _save_indexed_files_batch_on_connection(
+            self.conn,
+            payloads,
+            db_target="initial_staging",
+            search_trigger_mode="deferred",
+        )
+        self.file_count += len(payloads)
+        self.chunk_count += sum(payload.chunk_count for payload in payloads)
+        return file_ids
+
+    def set_setting(self, key: str, value: str) -> None:
+        cursor = self.conn.cursor()
+        _set_setting_with_cursor(cursor, key, value)
+        self.conn.commit()
+
+    def finalize_to_main(self) -> Dict[str, Any]:
+        """Build deferred FTS indexes, verify the temp DB, then copy into DB_PATH."""
+        if self.closed:
+            raise RuntimeError("Initial index staging database is already closed")
+
+        metrics: Dict[str, Any] = {
+            "db_target": "initial_staging",
+            "temp_db_path": str(self.path),
+            "file_count": self.file_count,
+            "chunk_count": self.chunk_count,
+        }
+        cursor = self.conn.cursor()
+        finalize_started = perf_counter()
+        try:
+            search_metrics = _rebuild_search_indexes(cursor, optimize=True)
+            metrics.update(search_metrics)
+            trigger_started = perf_counter()
+            _create_fts_triggers(cursor)
+            metrics["create_triggers_ms"] = elapsed_ms(trigger_started)
+
+            quick_check_started = perf_counter()
+            cursor.execute("PRAGMA quick_check")
+            quick_check = str(cursor.fetchone()[0])
+            metrics["quick_check_ms"] = elapsed_ms(quick_check_started)
+            metrics["quick_check"] = quick_check
+            if quick_check.lower() != "ok":
+                raise RuntimeError(f"staging DB quick_check failed: {quick_check}")
+
+            commit_started = perf_counter()
+            self.conn.commit()
+            metrics["staging_commit_ms"] = elapsed_ms(commit_started)
+            metrics["staging_finalize_ms"] = elapsed_ms(finalize_started)
+            self.close(remove_files=False)
+
+            backup_started = perf_counter()
+            with _DB_WRITE_LOCK:
+                source = sqlite3.connect(str(self.path))
+                target = _connect()
+                try:
+                    source.backup(target)
+                    target.execute("PRAGMA journal_mode=WAL")
+                    target.commit()
+                finally:
+                    source.close()
+                    target.close()
+            metrics["backup_to_main_ms"] = elapsed_ms(backup_started)
+            metrics["temp_db_bytes"] = self.path.stat().st_size if self.path.exists() else 0
+            metrics["total_ms"] = elapsed_ms(finalize_started)
+            metrics["success"] = True
+            log_index_perf("initial_index_staging_finalized", **metrics)
+            _remove_sqlite_sidecar_files(self.path)
+            return metrics
+        except Exception as exc:
+            if not self.closed:
+                self.conn.rollback()
+            metrics["success"] = False
+            metrics["error_type"] = exc.__class__.__name__
+            metrics["error"] = str(exc)
+            metrics["total_ms"] = elapsed_ms(finalize_started)
+            log_index_perf("initial_index_staging_finalized", **metrics)
+            self.close(remove_files=True)
+            raise
+
+    def close(self, *, remove_files: bool = True) -> None:
+        if not self.closed:
+            self.conn.close()
+            self.closed = True
+        if remove_files:
+            _remove_sqlite_sidecar_files(self.path)
+
+
 def configure_database(data_dir: str | os.PathLike[str]):
     global DB_DIR, DB_PATH
     DB_DIR = Path(data_dir).expanduser()
@@ -57,14 +155,26 @@ def get_db_path() -> str:
     return str(DB_PATH)
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+def _connect_path(path: Path, *, bulk_load: bool = False) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(path), timeout=30)
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-32000")
+    if bulk_load:
+        # Safe for rebuildable staging DBs only. If the process/OS dies, the
+        # temp DB is discarded and the user's source documents/main DB remain
+        # untouched.
+        conn.execute("PRAGMA journal_mode=OFF")
+        conn.execute("PRAGMA synchronous=OFF")
+        conn.execute("PRAGMA cache_size=-131072")
+    else:
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=-32000")
     conn.execute("PRAGMA temp_store=MEMORY")
     conn.execute("PRAGMA mmap_size=134217728")
     return conn
+
+
+def _connect() -> sqlite3.Connection:
+    return _connect_path(DB_PATH)
 
 
 def _supports_fts5_trigram() -> bool:
@@ -276,8 +386,20 @@ def _upsert_document_fingerprint(
     )
 
 
-def _save_prepared_indexed_file(cursor: sqlite3.Cursor, payload: PreparedIndexedFile, now: str) -> int:
+def _add_elapsed_metric(metrics: Optional[Dict[str, Any]], key: str, started: float) -> None:
+    if metrics is None:
+        return
+    metrics[key] = round(float(metrics.get(key, 0.0)) + elapsed_ms(started), 3)
+
+
+def _save_prepared_indexed_file(
+    cursor: sqlite3.Cursor,
+    payload: PreparedIndexedFile,
+    now: str,
+    metrics: Optional[Dict[str, Any]] = None,
+) -> int:
     try:
+        metadata_started = perf_counter()
         cursor.execute(
             """
             INSERT INTO registered_files (
@@ -298,7 +420,11 @@ def _save_prepared_indexed_file(cursor: sqlite3.Cursor, payload: PreparedIndexed
             ),
         )
         file_id = cursor.lastrowid
+        _add_elapsed_metric(metrics, "metadata_insert_ms", metadata_started)
+        if metrics is not None:
+            metrics["metadata_insert_count"] = int(metrics.get("metadata_insert_count", 0)) + 1
     except sqlite3.IntegrityError:
+        metadata_started = perf_counter()
         cursor.execute(
             """
             UPDATE registered_files
@@ -317,11 +443,19 @@ def _save_prepared_indexed_file(cursor: sqlite3.Cursor, payload: PreparedIndexed
                 payload.path,
             ),
         )
+        _add_elapsed_metric(metrics, "metadata_update_ms", metadata_started)
+        if metrics is not None:
+            metrics["metadata_update_count"] = int(metrics.get("metadata_update_count", 0)) + 1
+        metadata_select_started = perf_counter()
         cursor.execute("SELECT id FROM registered_files WHERE path=?", (payload.path,))
         row = cursor.fetchone()
         file_id = row[0] if row else -1
+        _add_elapsed_metric(metrics, "metadata_select_ms", metadata_select_started)
 
+    chunk_delete_started = perf_counter()
     cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
+    _add_elapsed_metric(metrics, "chunk_delete_ms", chunk_delete_started)
+    chunk_insert_started = perf_counter()
     cursor.executemany(
         "INSERT INTO file_chunks (file_id, location, content, search_text, trigram_text) VALUES (?, ?, ?, ?, ?)",
         [
@@ -329,6 +463,10 @@ def _save_prepared_indexed_file(cursor: sqlite3.Cursor, payload: PreparedIndexed
             for location, content, search_text, trigram_text in payload.chunk_values
         ],
     )
+    _add_elapsed_metric(metrics, "chunk_insert_ms", chunk_insert_started)
+    if metrics is not None:
+        metrics["chunk_insert_count"] = int(metrics.get("chunk_insert_count", 0)) + payload.chunk_count
+    fingerprint_started = perf_counter()
     _upsert_document_fingerprint(
         cursor,
         file_id,
@@ -336,6 +474,7 @@ def _save_prepared_indexed_file(cursor: sqlite3.Cursor, payload: PreparedIndexed
         source_mtime=payload.file_mtime,
         fingerprint=payload.fingerprint,
     )
+    _add_elapsed_metric(metrics, "fingerprint_upsert_ms", fingerprint_started)
     return file_id
 
 
@@ -344,169 +483,252 @@ def _batched_values(values: Sequence[int], size: int = 900):
         yield values[index : index + size]
 
 
+def _remove_sqlite_sidecar_files(path: Path) -> None:
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm"), Path(f"{path}-journal")):
+        try:
+            candidate.unlink()
+        except FileNotFoundError:
+            continue
+
+
+def _create_fts_tables(cursor: sqlite3.Cursor) -> None:
+    cursor.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS file_search_ko USING fts5(
+            search_text,
+            content='file_chunks',
+            content_rowid='id',
+            tokenize='unicode61'
+        )
+        """
+    )
+    if _supports_fts5_trigram():
+        cursor.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS file_search_trigram USING fts5(
+                trigram_text,
+                content='file_chunks',
+                content_rowid='id',
+                tokenize='trigram'
+            )
+            """
+        )
+
+
+def _create_fts_triggers(cursor: sqlite3.Cursor) -> None:
+    cursor.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS chunks_ai_ko AFTER INSERT ON file_chunks BEGIN
+            INSERT INTO file_search_ko(rowid, search_text) VALUES (new.id, new.search_text);
+        END
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS chunks_ad_ko AFTER DELETE ON file_chunks BEGIN
+            INSERT INTO file_search_ko(file_search_ko, rowid, search_text)
+            VALUES ('delete', old.id, old.search_text);
+        END
+        """
+    )
+
+    if _supports_fts5_trigram():
+        cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS chunks_ai_trigram AFTER INSERT ON file_chunks BEGIN
+                INSERT INTO file_search_trigram(rowid, trigram_text) VALUES (new.id, new.trigram_text);
+            END
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS chunks_ad_trigram AFTER DELETE ON file_chunks BEGIN
+                INSERT INTO file_search_trigram(file_search_trigram, rowid, trigram_text)
+                VALUES ('delete', old.id, old.trigram_text);
+            END
+            """
+        )
+
+
+def _rebuild_search_indexes(cursor: sqlite3.Cursor, *, optimize: bool = True) -> Dict[str, Any]:
+    metrics: Dict[str, Any] = {}
+    ko_rebuild_started = perf_counter()
+    cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('rebuild')")
+    metrics["fts_ko_rebuild_ms"] = elapsed_ms(ko_rebuild_started)
+    if optimize:
+        ko_optimize_started = perf_counter()
+        cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('optimize')")
+        metrics["fts_ko_optimize_ms"] = elapsed_ms(ko_optimize_started)
+
+    if _supports_fts5_trigram():
+        trigram_rebuild_started = perf_counter()
+        cursor.execute("INSERT INTO file_search_trigram(file_search_trigram) VALUES ('rebuild')")
+        metrics["fts_trigram_rebuild_ms"] = elapsed_ms(trigram_rebuild_started)
+        if optimize:
+            trigram_optimize_started = perf_counter()
+            cursor.execute("INSERT INTO file_search_trigram(file_search_trigram) VALUES ('optimize')")
+            metrics["fts_trigram_optimize_ms"] = elapsed_ms(trigram_optimize_started)
+
+    _set_setting_with_cursor(cursor, "search_index_version", SEARCH_INDEX_VERSION)
+    return metrics
+
+
+def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = True) -> None:
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS registered_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            key_column TEXT NOT NULL,
+            column_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    _ensure_registered_files_columns(cursor)
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_registered_files_created_at
+        ON registered_files(created_at DESC, id DESC)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_registered_files_file_type
+        ON registered_files(file_type)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_registered_files_file_mtime
+        ON registered_files(file_mtime DESC)
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS file_chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id INTEGER NOT NULL,
+            location TEXT NOT NULL,
+            content TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON file_chunks(file_id)")
+    _ensure_file_chunks_columns(cursor)
+    _drop_legacy_file_search(cursor)
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+
+    _create_fts_tables(cursor)
+    if create_search_triggers:
+        _create_fts_triggers(cursor)
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_fingerprints (
+            file_id INTEGER PRIMARY KEY,
+            normalized_hash TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            content_chars INTEGER NOT NULL,
+            chunk_count INTEGER NOT NULL,
+            fingerprint_version INTEGER NOT NULL,
+            source_mtime REAL,
+            fingerprinted_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_document_fingerprints_normalized_hash
+        ON document_fingerprints(normalized_hash)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS comparison_cache (
+            cache_key TEXT PRIMARY KEY,
+            file_ids TEXT NOT NULL,
+            comparison_scope TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_comparison_cache_created_at
+        ON comparison_cache(created_at DESC)
+        """
+    )
+
+
 def init_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
     with _write_connection() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS registered_files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                path TEXT NOT NULL UNIQUE,
-                name TEXT NOT NULL,
-                file_type TEXT NOT NULL,
-                key_column TEXT NOT NULL,
-                column_count INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        _ensure_registered_files_columns(cursor)
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_registered_files_created_at
-            ON registered_files(created_at DESC, id DESC)
-            """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_registered_files_file_type
-            ON registered_files(file_type)
-            """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_registered_files_file_mtime
-            ON registered_files(file_mtime DESC)
-            """
-        )
-
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS file_chunks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_id INTEGER NOT NULL,
-                location TEXT NOT NULL,
-                content TEXT NOT NULL
-            )
-            """
-        )
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON file_chunks(file_id)")
-        _ensure_file_chunks_columns(cursor)
-        _drop_legacy_file_search(cursor)
-
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
-        )
-
-        cursor.execute(
-            """
-            CREATE VIRTUAL TABLE IF NOT EXISTS file_search_ko USING fts5(
-                search_text,
-                content='file_chunks',
-                content_rowid='id',
-                tokenize='unicode61'
-            )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS chunks_ai_ko AFTER INSERT ON file_chunks BEGIN
-                INSERT INTO file_search_ko(rowid, search_text) VALUES (new.id, new.search_text);
-            END
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS chunks_ad_ko AFTER DELETE ON file_chunks BEGIN
-                INSERT INTO file_search_ko(file_search_ko, rowid, search_text)
-                VALUES ('delete', old.id, old.search_text);
-            END
-            """
-        )
-
-        if _supports_fts5_trigram():
-            cursor.execute(
-                """
-                CREATE VIRTUAL TABLE IF NOT EXISTS file_search_trigram USING fts5(
-                    trigram_text,
-                    content='file_chunks',
-                    content_rowid='id',
-                    tokenize='trigram'
-                )
-                """
-            )
-            cursor.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS chunks_ai_trigram AFTER INSERT ON file_chunks BEGIN
-                    INSERT INTO file_search_trigram(rowid, trigram_text) VALUES (new.id, new.trigram_text);
-                END
-                """
-            )
-            cursor.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS chunks_ad_trigram AFTER DELETE ON file_chunks BEGIN
-                    INSERT INTO file_search_trigram(file_search_trigram, rowid, trigram_text)
-                    VALUES ('delete', old.id, old.trigram_text);
-                END
-                """
-            )
-
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS document_fingerprints (
-                file_id INTEGER PRIMARY KEY,
-                normalized_hash TEXT NOT NULL,
-                content_hash TEXT NOT NULL,
-                content_chars INTEGER NOT NULL,
-                chunk_count INTEGER NOT NULL,
-                fingerprint_version INTEGER NOT NULL,
-                source_mtime REAL,
-                fingerprinted_at TEXT NOT NULL
-            )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_document_fingerprints_normalized_hash
-            ON document_fingerprints(normalized_hash)
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS comparison_cache (
-                cache_key TEXT PRIMARY KEY,
-                file_ids TEXT NOT NULL,
-                comparison_scope TEXT NOT NULL,
-                result_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_comparison_cache_created_at
-            ON comparison_cache(created_at DESC)
-            """
-        )
+        _create_schema(cursor, create_search_triggers=True)
 
         if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
             _refresh_search_text(cursor)
-            cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('rebuild')")
-            cursor.execute("INSERT INTO file_search_ko(file_search_ko) VALUES ('optimize')")
-            if _supports_fts5_trigram():
-                cursor.execute("INSERT INTO file_search_trigram(file_search_trigram) VALUES ('rebuild')")
-                cursor.execute("INSERT INTO file_search_trigram(file_search_trigram) VALUES ('optimize')")
-            _set_setting_with_cursor(cursor, "search_index_version", SEARCH_INDEX_VERSION)
+            _rebuild_search_indexes(cursor, optimize=True)
 
         conn.commit()
+
+
+def begin_initial_index_staging() -> InitialIndexStagingDatabase:
+    """Create a rebuildable temp DB for first-run bulk indexing.
+
+    The current app settings are copied in so the finished DB can replace the
+    main DB through sqlite backup without losing the watched-folder config that
+    triggered the scan.
+    """
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+    temp_path = DB_DIR / f"data.initial-index.{uuid.uuid4().hex}.tmp.db"
+    _remove_sqlite_sidecar_files(temp_path)
+    conn = _connect_path(temp_path, bulk_load=True)
+    cursor = conn.cursor()
+    _create_schema(cursor, create_search_triggers=False)
+
+    settings_rows: List[Tuple[str, str]] = []
+    if DB_PATH.exists():
+        source = _connect()
+        try:
+            source_cursor = source.cursor()
+            source_cursor.execute("SELECT key, value FROM settings")
+            settings_rows = [(str(row[0]), str(row[1])) for row in source_cursor.fetchall()]
+        except sqlite3.Error:
+            settings_rows = []
+        finally:
+            source.close()
+    if settings_rows:
+        cursor.executemany(
+            """
+            INSERT INTO settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+            """,
+            settings_rows,
+        )
+    conn.commit()
+    log_index_perf(
+        "initial_index_staging_started",
+        db_target="initial_staging",
+        temp_db_path=str(temp_path),
+        copied_setting_count=len(settings_rows),
+    )
+    return InitialIndexStagingDatabase(path=temp_path, conn=conn)
 
 
 def register_file(
@@ -585,21 +807,58 @@ def save_prepared_indexed_file(payload: PreparedIndexedFile) -> int:
             raise
 
 
+def _save_indexed_files_batch_on_connection(
+    conn: sqlite3.Connection,
+    payloads: Sequence[PreparedIndexedFile],
+    *,
+    db_target: str,
+    search_trigger_mode: str,
+) -> List[int]:
+    if not payloads:
+        return []
+
+    metrics: Dict[str, Any] = {
+        "db_target": db_target,
+        "search_trigger_mode": search_trigger_mode,
+        "batch_file_count": len(payloads),
+        "batch_chunk_count": sum(payload.chunk_count for payload in payloads),
+        "success": True,
+    }
+    transaction_started = perf_counter()
+    try:
+        cursor = conn.cursor()
+        now = datetime.now().isoformat()
+        file_ids = [_save_prepared_indexed_file(cursor, payload, now, metrics) for payload in payloads]
+        commit_started = perf_counter()
+        conn.commit()
+        metrics["commit_ms"] = elapsed_ms(commit_started)
+        metrics["transaction_ms"] = elapsed_ms(transaction_started)
+        log_index_perf("db_batch_save_done", **metrics)
+        return file_ids
+    except Exception as exc:
+        rollback_started = perf_counter()
+        conn.rollback()
+        metrics["rollback_ms"] = elapsed_ms(rollback_started)
+        metrics["transaction_ms"] = elapsed_ms(transaction_started)
+        metrics["success"] = False
+        metrics["error_type"] = exc.__class__.__name__
+        metrics["error"] = str(exc)
+        log_index_perf("db_batch_save_done", **metrics)
+        raise
+
+
 def save_indexed_files_batch(payloads: Sequence[PreparedIndexedFile]) -> List[int]:
     """Save multiple prepared index payloads in one SQLite transaction."""
     if not payloads:
         return []
 
     with _write_connection() as conn:
-        try:
-            cursor = conn.cursor()
-            now = datetime.now().isoformat()
-            file_ids = [_save_prepared_indexed_file(cursor, payload, now) for payload in payloads]
-            conn.commit()
-            return file_ids
-        except Exception:
-            conn.rollback()
-            raise
+        return _save_indexed_files_batch_on_connection(
+            conn,
+            payloads,
+            db_target="main",
+            search_trigger_mode="active",
+        )
 
 
 def get_all_files() -> List[Dict[str, Any]]:

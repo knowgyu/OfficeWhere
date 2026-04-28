@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..database import (
+    InitialIndexStagingDatabase,
     PreparedIndexedFile,
+    begin_initial_index_staging,
     delete_files_by_types,
     ensure_file_fingerprints,
     get_all_files,
@@ -67,6 +69,7 @@ MAX_GROUP_SUMMARY_FINGERPRINT_FILES = 5
 BATCH_FLUSH_FILE_LIMIT = 24
 BATCH_FLUSH_CHUNK_LIMIT = 5000
 BATCH_FLUSH_INTERVAL_SECONDS = 1.0
+INITIAL_STAGING_FILE_THRESHOLD = 50
 
 _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
@@ -926,6 +929,7 @@ def rescan_library(
     total = len(sorted_paths)
     results: List[LibraryRescanResult] = []
     write_buffer: List[_PreparedLibraryWrite] = []
+    initial_staging: Optional[InitialIndexStagingDatabase] = None
     processed = 0
     last_flush_at = time.perf_counter()
 
@@ -1014,7 +1018,7 @@ def rescan_library(
         )
 
     def _flush_write_buffer(reason: str) -> None:
-        nonlocal flush_count, flush_total_ms, flush_max_ms, large_file_flush_count, last_flush_at, registered_chunk_count
+        nonlocal flush_count, flush_total_ms, flush_max_ms, large_file_flush_count, last_flush_at, registered_chunk_count, initial_staging
         if not write_buffer:
             return
 
@@ -1047,7 +1051,10 @@ def rescan_library(
             )
 
         try:
-            file_ids = save_indexed_files_batch([item.payload for item in batch])
+            if initial_staging is not None:
+                file_ids = initial_staging.save_indexed_files_batch([item.payload for item in batch])
+            else:
+                file_ids = save_indexed_files_batch([item.payload for item in batch])
             batch_save_ms = elapsed_ms(flush_started)
             flush_count += 1
             registered_chunk_count += batch_chunk_count
@@ -1102,6 +1109,10 @@ def rescan_library(
                 error_type=exc.__class__.__name__,
                 error=str(exc),
             )
+            if initial_staging is not None:
+                initial_staging.close()
+                initial_staging = None
+                raise
             for item in batch:
                 single_started = time.perf_counter()
                 try:
@@ -1188,6 +1199,29 @@ def rescan_library(
         return response
 
     if total > 0:
+        if not existing_by_path and total >= INITIAL_STAGING_FILE_THRESHOLD:
+            try:
+                initial_staging = begin_initial_index_staging()
+                log_index_perf(
+                    "initial_index_staging_selected",
+                    operation="library_rescan",
+                    mode=mode,
+                    worker_count=worker_count,
+                    total=total,
+                    threshold=INITIAL_STAGING_FILE_THRESHOLD,
+                )
+            except Exception as exc:
+                initial_staging = None
+                log_index_perf(
+                    "initial_index_staging_unavailable",
+                    operation="library_rescan",
+                    mode=mode,
+                    worker_count=worker_count,
+                    total=total,
+                    threshold=INITIAL_STAGING_FILE_THRESHOLD,
+                    error_type=exc.__class__.__name__,
+                    error=str(exc),
+                )
         pending_paths = iter(sorted_paths)
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures: Dict[Any, str] = {}
@@ -1257,6 +1291,27 @@ def rescan_library(
                     break
 
         _flush_write_buffer("final")
+        if initial_staging is not None:
+            if progress_callback:
+                counts = _result_counts([*results, *scan_errors])
+                progress_callback(
+                    {
+                        "stage": "saving",
+                        "message": "검색 인덱스를 마무리하는 중입니다.",
+                        "mode": mode,
+                        "worker_count": worker_count,
+                        "found": total,
+                        "total": total,
+                        "processed": processed,
+                        "percent": round((processed / total) * 100, 1) if total else 100.0,
+                        "eta_seconds": None,
+                        "current_file": None,
+                        "cancel_requested": _cancel_event.is_set(),
+                        "pruned_unsupported": pruned_unsupported,
+                        **counts,
+                    }
+                )
+            initial_staging.finalize_to_main()
 
     results.extend(scan_errors)
     set_setting(LAST_RESCAN_KEY, datetime.now().isoformat())

@@ -522,6 +522,64 @@ def test_library_rescan_flushes_prepared_files_in_batches(tmp_path, monkeypatch)
     assert len(get_all_files()) == 3
 
 
+def test_initial_rescan_stages_bulk_index_and_preserves_settings(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library
+    from backend.core.indexer import search
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    monkeypatch.setattr("backend.core.library.INITIAL_STAGING_FILE_THRESHOLD", 2)
+    init_db()
+
+    targets = []
+    for index in range(3):
+        target = tmp_path / f"staged-{index}.docx"
+        target.write_text("placeholder", encoding="utf-8")
+        targets.append(target)
+
+    save_library_settings(
+        LibrarySettings(
+            watched_folders=[{"path": str(tmp_path), "recursive": True}],
+            fast_worker_count=24,
+        )
+    )
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(
+            paths=[str(path) for path in targets]
+        ),
+    )
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda path, parser_config=None: (
+            {
+                "name": Path(path).name,
+                "file_type": "Word",
+                "columns": [],
+                "parser_config": {},
+            },
+            [{"location": "문단", "content": f"{Path(path).stem} 초기 스테이징 색인"}],
+        ),
+    )
+
+    events = []
+    monkeypatch.setattr("backend.database.log_index_perf", lambda event, **fields: events.append((event, fields)))
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert response.registered == 3
+    assert len(get_all_files()) == 3
+    assert search("초기 스테이징", file_limit=3)
+    assert library.load_library_settings().watched_folders[0].path == str(tmp_path)
+    assert any(event == "db_batch_save_done" and fields["db_target"] == "initial_staging" for event, fields in events)
+    assert any(event == "initial_index_staging_finalized" and fields["success"] is True for event, fields in events)
+
+
 def test_library_rescan_flushes_by_chunk_count_and_emits_saving_stage(tmp_path, monkeypatch):
     from pathlib import Path
 
