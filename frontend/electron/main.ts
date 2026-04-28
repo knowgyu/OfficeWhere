@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, Tray } from 'electron'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -306,6 +306,7 @@ function ensureTray() {
 }
 
 function showMainWindow() {
+  if (isQuitting || appDataCleanupInProgress) return
   if (!mainWindow || mainWindow.isDestroyed()) {
     void createMainWindow()
     return
@@ -484,16 +485,27 @@ function getPythonExecutable(repoRoot: string): string {
 }
 
 function stopBackend() {
-  if (!backendProcess || backendProcess.killed) return
+  if (!backendProcess) return
   expectedBackendExits.add(backendProcess)
-  backendProcess.kill()
+  if (!backendProcess.killed) backendProcess.kill()
 }
 
 async function stopBackendAndWait(timeoutMs = 5_000): Promise<boolean> {
   const child = backendProcess
-  if (!child || child.killed) return true
+  if (!child) return true
 
   expectedBackendExits.add(child)
+  const exitPromise = waitForProcessExit(child, timeoutMs)
+  if (!child.killed) child.kill()
+  if (await exitPromise) return true
+
+  await forceKillProcessTree(child)
+  return waitForProcessExit(child, 2_000)
+}
+
+function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (backendProcess !== child) return Promise.resolve(true)
+
   return new Promise((resolve) => {
     let settled = false
     const finish = (value: boolean) => {
@@ -506,8 +518,26 @@ async function stopBackendAndWait(timeoutMs = 5_000): Promise<boolean> {
       clearTimeout(timeout)
       finish(true)
     })
-    child.kill()
   })
+}
+
+async function forceKillProcessTree(child: ChildProcess): Promise<void> {
+  const pid = child.pid
+  if (!pid) return
+
+  expectedBackendExits.add(child)
+  if (process.platform === 'win32') {
+    await new Promise<void>((resolve) => {
+      execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve())
+    })
+    return
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    // The process may have exited between the timeout and the forced kill.
+  }
 }
 
 function getSafeAppPath(name: Parameters<typeof app.getPath>[0]): string {
@@ -802,9 +832,12 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
 
     if (result.success && shouldExitAfterClear) {
       result.exitScheduled = true
+      isQuitting = true
+      tray?.destroy()
+      tray = null
       setTimeout(() => {
-        isQuitting = true
-        app.exit(0)
+        app.quit()
+        setTimeout(() => app.exit(0), 1_000)
       }, 250)
     }
 

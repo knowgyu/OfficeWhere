@@ -106,10 +106,10 @@ const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
 }
 
 const TUTORIAL_REVIEW_DELAY_MS: Partial<Record<TutorialStep, number>> = {
-  'search-review': 3600,
-  'version-ppt-review': 5000,
-  'version-excel-review': 5200,
-  'excel-table-review': 5600,
+  'search-review': 2520,
+  'version-ppt-review': 3500,
+  'version-excel-review': 3640,
+  'excel-table-review': 3920,
 }
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {

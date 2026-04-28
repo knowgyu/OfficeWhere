@@ -2510,13 +2510,9 @@ function DiffPanel({
   content: string
   tone: 'danger' | 'success'
 }) {
-  const bg =
-    tone === 'danger'
-      ? 'bg-[var(--md-sys-color-error-container)]/50 border-[var(--md-sys-color-error)]/70'
-      : 'bg-[var(--md-sys-color-success-container)]/50 border-[var(--md-sys-color-success)]/70'
   return (
-    <div className={`rounded-md border-2 p-3 ${bg}`}>
-      <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+    <div className={`diff-panel diff-panel-${tone}`}>
+      <p className="diff-panel-label type-label-md">
         {title}
       </p>
       <p className="type-body-md text-[var(--md-sys-color-on-surface)] mt-2 whitespace-pre-wrap break-words">
