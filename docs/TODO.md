@@ -6,60 +6,46 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 ## Immediate follow-ups
 
-- [ ] Verify the embedded-Python Windows package on DRM policy PCs.
+- [ ] Implement the version-management first-load plan in `docs/version-management-first-load-plan.md`.
+  - First paint should show registered Office files quickly.
+  - Version-family / duplicate-content group analysis may warm in the background and refresh the group list when ready.
+  - Start with lazy UI + revision-based cache invalidation + single-flight warmup before considering materialized group tables.
+
+- [ ] Verify the embedded-Python Windows package on DRM policy PCs if DRM policy machines still behave differently from the portable Python probe.
   - Current direction: packaged Windows release runs `backend_server.py` through the bundled `python-runtime/win-x64/python.exe` and vendors exact-pinned parser dependencies.
-  - Confirm DRM-protected `.xlsx` / `.docx` / `.pptx` files index with the same behavior as the successful portable Python probe.
-  - Include paths with spaces and Korean characters in the manual pass.
+  - Include paths with spaces and Korean characters if this is retested.
   - If a DRM policy PC still blocks reads, collect backend logs and rerun `scripts/drm_probe.py --library-check` with the bundled runtime before changing architecture.
 
 - [ ] Decide whether root agent guides should be versioned.
   - Current state: `AGENTS.md` and `CLAUDE.md` exist locally, but `.gitignore` ignores both.
   - If these should be shared across machines/agents, remove or override those ignore rules and commit both files.
 
-- [ ] Run full release verification once the working tree is ready.
-  - `./venv/bin/python -m pytest -q`
-  - `cd frontend && npm run build`
-  - `cd frontend && npm run build:electron`
-  - `./venv/bin/python scripts/run_demo_checks.py`
-  - `./venv/bin/python -m compileall backend backend_server.py -q`
-  - `git diff --check`
-
 ## Product / engineering follow-ups
-
-- [ ] Manually walk through `docs/release-test-checklist.md` on Windows before publishing the next release.
-  - Especially mapped/network drive registration, app-data reset, tray close behavior, and original-document safety.
-
-- [ ] Verify packaged Electron behavior on Windows and track macOS/Linux embedded-runtime follow-up.
-  - Packaged backend should keep using a dynamic localhost port.
-  - Dev scripts should default to backend `18765` and frontend `15173`.
-
-- [ ] Re-test large-library search/version responsiveness after the search-version performance pass.
-  - Current direction: base `file_search` is no longer maintained, `file_search_ko` is a compact short-query fallback, version groups are cached by registered-file signature, and unchanged comparison results are reused by file stat/scope cache key.
-  - If the first version-tab load is still slow, consider materializing group summaries in app-owned SQLite instead of rebuilding from all registered files after each process start.
-  - If repeated comparisons accumulate too much app-data, add a comparison-cache retention policy by age/count.
-  - Choseong-only search such as `ㅎㅇㄹ` is intentionally no longer guaranteed; keep 1-2 character Korean substring search working.
 
 - [ ] Add a search-result file context menu on the filename/header area.
   - Suggested actions: open file, show in folder/file location, copy full path, and optionally show app-level file details.
   - Electron does not automatically expose the OS shell context menu inside the React result card; implement an app-owned context menu wired through preload/main APIs such as `shell.showItemInFolder` when this is prioritized.
   - Keep the menu small and user-facing; avoid parser/debug actions in the first pass.
 
-- [ ] Re-test large-library indexing with both `index-performance.log` and `parsing-performance.log`.
-  - Compare 24-worker default against lower values on the same local folder.
-  - Mark known heavy Excel/PPT files and check whether parser tails or DB flush tails dominate.
-  - Use `docs/performance-experiment-log.md` as the narrative template for future observations.
-
 - [ ] Keep Python backend boundary refactor staged and performance-guarded.
   - Use `docs/backend-python-boundary-refactor-plan.md` as the source of truth before moving modules.
   - Start with characterization tests and compatibility facades; do not begin with a broad package rewrite.
-  - Treat search/version first-paint and indexing throughput as acceptance criteria, not optional follow-up.
+  - Treat search/version first-paint and indexing throughput as acceptance criteria.
 
 - [ ] Revisit simple scheduling only if logs show a likely 10%+ wall-clock gain.
   - Candidate: Excel-first ordering with about half the worker slots reserved for Excel-heavy runs.
   - Avoid complex cost prediction until repeated traces justify it.
 
-- [ ] Consider adding a lightweight dependency/security audit pass before release.
+- [ ] Consider adding a lightweight dependency/security audit pass before a published GitHub Release.
   - `frontend/package-lock.json` contains transitive deprecation notices from the Electron/Vite ecosystem; evaluate only if they affect release risk.
+
+## Completed / user-owned for now
+
+- App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
+- In-app update notice and portable zip update flow are implemented.
+- First-run onboarding/tutorial is implemented.
+- Large DB/indexing structural optimization is considered complete enough for now; remaining performance work is the version-management first-load plan above.
+- Manual release checklist walk-through is user-owned and should not block agent follow-up work unless explicitly requested.
 
 ## Maintenance notes
 

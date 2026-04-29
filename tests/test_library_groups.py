@@ -197,6 +197,39 @@ def test_set_group_latest_file_persists_manual_order(tmp_path, monkeypatch):
     assert [file.id for file in cleared.files] == [v3_id, v2_id, v1_id]
 
 
+def test_set_group_latest_file_responds_from_warm_group_cache(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.core.library import get_file_group_detail, list_file_groups, set_group_latest_file
+
+    _setup_db(tmp_path, monkeypatch)
+    v1_id = _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
+    _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
+
+    group = list_file_groups(kind="version_family", limit=10).groups[0]
+    calls = 0
+    real_get_all_files = library.get_all_files
+
+    def counted_get_all_files():
+        nonlocal calls
+        calls += 1
+        return real_get_all_files()
+
+    monkeypatch.setattr(library, "get_all_files", counted_get_all_files)
+
+    updated = set_group_latest_file(group.id, v1_id)
+
+    assert updated is not None
+    assert updated.latest_file.id == v1_id
+    assert updated.manual_latest_file_id == v1_id
+    assert calls == 0
+
+    reloaded = get_file_group_detail(group.id)
+
+    assert reloaded is not None
+    assert reloaded.latest_file.id == v1_id
+    assert calls == 1
+
+
 def test_set_group_latest_file_rejects_file_outside_group(tmp_path, monkeypatch):
     from backend.core.library import get_file_group_detail, list_file_groups, set_group_latest_file
 

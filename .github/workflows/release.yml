@@ -190,7 +190,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub Release assets
-    if: needs.release-metadata.outputs.tag != ''
+    if: github.event_name == 'workflow_dispatch' && needs.release-metadata.outputs.tag != ''
     needs:
       - release-metadata
       - windows-release

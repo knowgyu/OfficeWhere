@@ -738,8 +738,8 @@ export default function ConsistencyCheck({
       setHistoryState(null)
       const nextSelection = defaultCompareSelection(updated)
       setCompareSelections((current) => ({ ...current, [updated.id]: nextSelection }))
-      await runHistoryDiffs(updated, nextSelection)
       snackbar.success('최신 파일로 지정했습니다.')
+      void runHistoryDiffs(updated, nextSelection)
     } catch (error) {
       const detailMessage =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
@@ -770,8 +770,8 @@ export default function ConsistencyCheck({
       setHistoryState(null)
       const nextSelection = defaultCompareSelection(updated)
       setCompareSelections((current) => ({ ...current, [updated.id]: nextSelection }))
-      await runHistoryDiffs(updated, nextSelection)
       snackbar.success('자동 최신 정렬로 되돌렸습니다.')
+      void runHistoryDiffs(updated, nextSelection)
     } catch (error) {
       const detailMessage =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??

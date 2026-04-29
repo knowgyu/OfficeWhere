@@ -126,6 +126,20 @@ function SnippetText({ snippet }: { snippet: string }) {
   return <HighlightedSnippet snippet={snippet} />
 }
 
+function getContentFileKey(item: SearchResult) {
+  return `${item.file_id}:${item.name}`
+}
+
+function getContentFileKeys(results: SearchResult[]) {
+  const keys = new Set<string>()
+  for (const result of results) {
+    if (result.location !== '파일명') {
+      keys.add(getContentFileKey(result))
+    }
+  }
+  return keys
+}
+
 function SearchResultListItem({
   item,
   onOpen,
@@ -246,14 +260,23 @@ export default function FileSearch({
     customTo: string,
   ) => JSON.stringify([q.trim(), [...fileTypes].sort(), scope, dateFilter, customFrom, customTo])
 
-  const applySearchResponse = (data: SearchResponse, fallbackFileLimit: number) => {
+  const applySearchResponse = (
+    data: SearchResponse,
+    fallbackFileLimit: number,
+    keepExpandedContentFiles = false,
+  ) => {
     setResults(data.results)
     setSearchMeta({
       fileCount: data.file_count ?? new Set(data.results.map((item) => item.file_id)).size,
       fileLimit: data.file_limit ?? fallbackFileLimit,
       hasMore: Boolean(data.has_more),
     })
-    setExpandedContentFiles(new Set())
+    setExpandedContentFiles((current) => {
+      if (!keepExpandedContentFiles) return new Set()
+
+      const nextContentFileKeys = getContentFileKeys(data.results)
+      return new Set([...current].filter((fileKey) => nextContentFileKeys.has(fileKey)))
+    })
     setSearched(true)
     return data.results.length > 0
   }
@@ -311,7 +334,7 @@ export default function FileSearch({
               })
         if (requestId !== searchRequestSeq.current) return false
         prefetchedSearchRef.current = null
-        const hasResults = applySearchResponse(response.data, nextFileLimit)
+        const hasResults = applySearchResponse(response.data, nextFileLimit, mode === 'more')
         const preloadFileLimit = Math.min(nextFileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
         if (response.data.has_more && preloadFileLimit > nextFileLimit) {
           setPrefetching(true)

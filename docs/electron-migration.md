@@ -74,9 +74,9 @@ Electron 개발 실행에서 Python interpreter를 직접 지정할 때도 `OW_*
 
 ## GitHub Actions Release
 
-태그 `vX.Y.Z`를 push하면 `.github/workflows/release.yml`이 embedded Python runtime을 포함한 Windows zip과 SHA256 파일을 Release asset으로 업로드한다.
+태그 `vX.Y.Z`를 push하면 `.github/workflows/release.yml`이 embedded Python runtime을 포함한 Windows zip과 SHA256 파일을 Actions artifact로 만든다. 태그 push만으로는 GitHub Release를 만들지 않는다.
 
-수동 실행에서는 `release_tag`를 비우면 Actions artifact만 만들고, 값을 입력하면 해당 태그의 Release를 생성하거나 갱신한다.
+GitHub Release를 publish하려면 `workflow_dispatch`를 수동 실행하고 `release_tag`에 대상 태그를 입력한다. `release_tag`를 비우면 Actions artifact만 만든다.
 
 ## Windows 로컬 빌드 주의
 

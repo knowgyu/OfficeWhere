@@ -62,6 +62,7 @@ Use this checklist before publishing a release tag.
 - [ ] Version is bumped in `frontend/package.json` and `frontend/package-lock.json`.
 - [ ] Release notes summarize user-visible changes.
 - [ ] Git tag `vX.Y.Z` points at the verified commit.
-- [ ] If publishing through GitHub Actions, push the verified branch/tag; `workflow_dispatch` may be run from a non-`main` release branch with `release_tag` set.
-- [ ] Confirm the GitHub Release contains the Windows zip and `.sha256.txt` asset.
+- [ ] Push the verified branch/tag. Tag push builds Actions artifacts but does not publish a GitHub Release.
+- [ ] If publishing a GitHub Release, run `workflow_dispatch` with `release_tag` set to the verified tag.
+- [ ] Confirm the GitHub Release contains the Windows zip and `.sha256.txt` asset only when a Release was intentionally published.
 - [ ] Confirm the Windows zip contains `resources/python-runtime/python.exe` and `resources/backend-source/backend_server.py`.

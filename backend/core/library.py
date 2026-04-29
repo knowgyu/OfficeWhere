@@ -1579,6 +1579,42 @@ def _version_file_sort_key(file_info: FileInfo) -> Tuple[Any, ...]:
     return (*identity["sort_key"], *file_sort_key(file_info))
 
 
+def _ordered_group_files(
+    files: List[FileInfo],
+    group_kind: str,
+    manual_file_id: Optional[int] = None,
+) -> Tuple[List[FileInfo], Optional[int]]:
+    ordered = sorted(
+        files,
+        key=_version_file_sort_key if group_kind == "version_family" else file_sort_key,
+        reverse=True,
+    )
+    if manual_file_id is None:
+        return ordered, None
+
+    manual_file = next((file for file in ordered if file.id == manual_file_id), None)
+    if not manual_file:
+        return ordered, None
+    return [manual_file, *(file for file in ordered if file.id != manual_file_id)], manual_file.id
+
+
+def _with_manual_latest_file(
+    group: LibraryGroupDetail,
+    manual_file_id: Optional[int],
+) -> LibraryGroupDetail:
+    ordered, manual_latest_file_id = _ordered_group_files(group.files, group.group_kind, manual_file_id)
+    return LibraryGroupDetail(
+        **{
+            **group.model_dump(exclude={"files", "latest_file", "previous_file", "title", "manual_latest_file_id"}),
+            "title": ordered[0].name if ordered else group.title,
+            "latest_file": ordered[0] if ordered else None,
+            "previous_file": ordered[1] if len(ordered) > 1 else None,
+            "manual_latest_file_id": manual_latest_file_id,
+            "files": ordered,
+        }
+    )
+
+
 def _group_detail(
     *,
     group_kind: str,
@@ -1592,18 +1628,8 @@ def _group_detail(
     manual_latest_by_group: Optional[Dict[str, int]] = None,
 ) -> LibraryGroupDetail:
     group_id = _slug(f"{group_kind}-{file_type}-{base_name}")
-    ordered = sorted(
-        files,
-        key=_version_file_sort_key if group_kind == "version_family" else file_sort_key,
-        reverse=True,
-    )
-    manual_latest_file_id: Optional[int] = None
     manual_file_id = (manual_latest_by_group or {}).get(group_id)
-    if manual_file_id is not None:
-        manual_file = next((file for file in ordered if file.id == manual_file_id), None)
-        if manual_file:
-            ordered = [manual_file, *(file for file in ordered if file.id != manual_file_id)]
-            manual_latest_file_id = manual_file.id
+    ordered, manual_latest_file_id = _ordered_group_files(files, group_kind, manual_file_id)
 
     content = _content_evidence(ordered, fingerprint_by_id or {}, expected_count=len(ordered))
     return LibraryGroupDetail(
@@ -1830,15 +1856,20 @@ def get_file_group_detail(group_id: str, *, limit: int = MAX_GROUP_DETAIL_LIMIT)
     for group in _all_file_group_details():
         if group.id != group_id:
             continue
-        page_files = group.files[:safe_limit]
-        enriched = _with_content_evidence(group, page_files)
-        return LibraryGroupDetail(
-            **{
-                **enriched.model_dump(exclude={"files"}),
-                "files": page_files,
-            }
-        )
+        return _paged_group_detail(group, safe_limit)
     return None
+
+
+def _paged_group_detail(group: LibraryGroupDetail, limit: int = MAX_GROUP_DETAIL_LIMIT) -> LibraryGroupDetail:
+    safe_limit = _bounded_limit(limit, default=MAX_GROUP_DETAIL_LIMIT, maximum=MAX_GROUP_DETAIL_LIMIT)
+    page_files = group.files[:safe_limit]
+    enriched = _with_content_evidence(group, page_files)
+    return LibraryGroupDetail(
+        **{
+            **enriched.model_dump(exclude={"files"}),
+            "files": page_files,
+        }
+    )
 
 
 def set_group_latest_file(group_id: str, file_id: int) -> Optional[LibraryGroupDetail]:
@@ -1858,7 +1889,7 @@ def set_group_latest_file(group_id: str, file_id: int) -> Optional[LibraryGroupD
     manual_latest[group_id] = safe_file_id
     _save_manual_latest_map(manual_latest)
 
-    return get_file_group_detail(group_id)
+    return _paged_group_detail(_with_manual_latest_file(target_group, safe_file_id))
 
 
 def clear_group_latest_file(group_id: str) -> Optional[LibraryGroupDetail]:
@@ -1871,7 +1902,7 @@ def clear_group_latest_file(group_id: str) -> Optional[LibraryGroupDetail]:
         manual_latest.pop(group_id, None)
         _save_manual_latest_map(manual_latest)
 
-    return get_file_group_detail(group_id)
+    return _paged_group_detail(_with_manual_latest_file(target_group, None))
 
 
 def build_file_groups() -> List[LibraryFileGroup]:
