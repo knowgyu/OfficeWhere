@@ -5,8 +5,8 @@ import JoinQuery from './components/JoinQuery'
 import ConsistencyCheck from './components/ConsistencyCheck'
 import FileSearch from './components/FileSearch'
 import OnboardingCarousel from './components/OnboardingCarousel'
-import { api } from './api/client'
-import { Button, Icon, Spinner } from './ui'
+import { api, type UpdateCheckResult } from './api/client'
+import { Button, Dialog, Icon, Spinner } from './ui'
 import { useSnackbar } from './ui'
 import { useLibraryRescan } from './contexts/LibraryRescanContext'
 import { useDisplaySettings } from './contexts/DisplaySettingsContext'
@@ -61,6 +61,7 @@ const TABS: TabDef[] = [
 const LS_TAB = 'officewhere:last-tab'
 const LEGACY_LS_TAB = 'odj:last-tab'
 const LS_ONBOARDING_DONE = 'officewhere:onboarding-complete:v1'
+const LS_UPDATE_DISMISSED_VERSION = 'officewhere:update-dismissed-version'
 const LOGO_SRC = './officewhere-logo.png'
 const LOCAL_STATE_PREFIXES = ['officewhere:', 'odj:']
 
@@ -317,6 +318,9 @@ export default function App() {
   const [onboardingReplay, setOnboardingReplay] = useState(false)
   const [tutorialStep, setTutorialStep] = useState<TutorialStep | null>(null)
   const [exampleLibraryPath, setExampleLibraryPath] = useState('')
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
+  const [updateDownloading, setUpdateDownloading] = useState(false)
   const { textSize, increaseTextSize, decreaseTextSize, resetTextSize } = useDisplaySettings()
 
   useEffect(() => {
@@ -349,6 +353,54 @@ export default function App() {
       cancelled = true
     }
   }, [resetTextSize, snackbar])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await api.app.consumeSchemaResetState()
+        if (cancelled || !response.data.resetPending) return
+        setActiveTab('files')
+        snackbar.warn(
+          response.data.message ||
+            '색인 구조가 정리되었습니다. 원본 문서는 그대로이며 대상 폴더를 다시 새로고침해 주세요.',
+          8000,
+        )
+      } catch {
+        // Browser/dev mode can ignore this backend-only maintenance notice.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [snackbar])
+
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await api.app.checkForUpdates()
+          if (cancelled || !response.data.updateAvailable) return
+          if (
+            response.data.latestVersion &&
+            window.localStorage.getItem(LS_UPDATE_DISMISSED_VERSION) === response.data.latestVersion
+          ) {
+            return
+          }
+          setUpdateInfo(response.data)
+          setUpdateDialogOpen(true)
+        } catch {
+          // Update checks must never block startup or local document work.
+        }
+      })()
+    }, 2200)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -419,6 +471,35 @@ export default function App() {
 
   const handleTutorialStep = (next: TutorialStep | null) => {
     setTutorialStep(next)
+  }
+
+  const dismissUpdateDialog = () => {
+    if (updateInfo?.latestVersion) {
+      window.localStorage.setItem(LS_UPDATE_DISMISSED_VERSION, updateInfo.latestVersion)
+    }
+    setUpdateDialogOpen(false)
+  }
+
+  const handleOpenReleasePage = async () => {
+    try {
+      await api.app.openReleasePage()
+    } catch {
+      snackbar.warn('릴리즈 페이지를 열지 못했습니다.')
+    }
+  }
+
+  const handleDownloadUpdate = async () => {
+    setUpdateDownloading(true)
+    try {
+      const response = await api.app.downloadUpdate()
+      snackbar.success(`업데이트 zip을 다운로드했습니다: ${response.data.fileName}`, 6000)
+      dismissUpdateDialog()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '업데이트 다운로드에 실패했습니다.'
+      snackbar.error(message)
+    } finally {
+      setUpdateDownloading(false)
+    }
   }
 
   useEffect(() => {
@@ -506,6 +587,54 @@ export default function App() {
         onStartExample={handleStartExample}
         onStartOwnFolder={handleStartOwnFolder}
       />
+      <Dialog
+        open={updateDialogOpen && Boolean(updateInfo)}
+        onClose={dismissUpdateDialog}
+        icon="download"
+        title="새 버전을 받을 수 있습니다"
+        description={
+          updateInfo
+            ? `현재 ${updateInfo.currentVersion || '알 수 없음'} · 최신 ${updateInfo.latestVersion}`
+            : undefined
+        }
+        actions={
+          <>
+            <Button variant="text" onClick={dismissUpdateDialog}>
+              나중에
+            </Button>
+            <Button variant="outlined" leadingIcon="open_in_new" onClick={handleOpenReleasePage}>
+              릴리즈 보기
+            </Button>
+            <Button
+              variant="filled"
+              leadingIcon="download"
+              onClick={handleDownloadUpdate}
+              loading={updateDownloading}
+              disabled={!updateInfo?.asset}
+            >
+              zip 다운로드
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
+            다운로드만 진행합니다. 압축을 푼 뒤 기존 앱을 종료하고 새 폴더의 OfficeWhere.exe를 실행해 주세요.
+          </p>
+          {updateInfo?.asset ? (
+            <div className="rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-3">
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{updateInfo.asset.name}</p>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                다운로드 위치: Windows 다운로드 폴더
+              </p>
+            </div>
+          ) : (
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              이 릴리즈에는 Windows zip 파일이 없어 릴리즈 페이지에서 직접 확인해 주세요.
+            </p>
+          )}
+        </div>
+      </Dialog>
     </div>
   )
 }

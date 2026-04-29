@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .normalizer import suggest_key_column
 from .file_scope import (
     DEFAULT_EXCLUDED_FOLDER_NAMES,
     SUPPORTED_EXTENSIONS,
@@ -35,7 +34,7 @@ def inspect_file_path(path: str) -> Dict[str, Any]:
         "file_type": file_type,
         "columns": columns,
         "sample": schema["sample"],
-        "suggested_key_column": suggest_key_column(columns) if file_type == "Excel" else None,
+        "suggested_key_column": None,
         "parser_config": schema.get("parser_config", {}),
         "table_candidates": schema.get("table_candidates", []),
         "comparison_mode": file_type.lower().replace("powerpoint", "ppt"),

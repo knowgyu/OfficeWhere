@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from .database import get_db_path, init_db
+from .database import get_db_path, init_db, pop_setting
 from .api.files import router as files_router
 from .api.query import router as query_router
 from .api.check import router as check_router
@@ -67,6 +67,21 @@ async def example_library_path():
         "available": False,
         "path": "",
         "reason": "examples/officewhere_test_library 폴더를 찾지 못했습니다.",
+    }
+
+
+@app.get("/api/app/schema-reset-state")
+async def schema_reset_state():
+    raw = pop_setting("last_schema_reset", "")
+    return {
+        "resetPending": bool(raw),
+        "detail": raw,
+        "message": (
+            "검색/버전 관리용 색인 구조가 정리되어 등록 목록을 새로 만들었습니다. "
+            "원본 문서는 삭제되지 않았으며, 대상 폴더를 다시 추가하거나 새로고침해 주세요."
+            if raw
+            else ""
+        ),
     }
 
 

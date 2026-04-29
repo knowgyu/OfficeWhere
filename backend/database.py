@@ -7,7 +7,7 @@ import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -26,8 +26,11 @@ def _default_db_dir() -> Path:
 DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
-SEARCH_INDEX_VERSION = "5"
-COMPARISON_CACHE_VERSION = 1
+SEARCH_INDEX_VERSION = "6"
+COMPARISON_CACHE_VERSION = 2
+COMPARISON_CACHE_MAX_BYTES = 100 * 1024 * 1024
+COMPARISON_CACHE_MAX_AGE_DAYS = 90
+COMPARISON_CACHE_MIN_KEEP_ROWS = 300
 _DB_WRITE_LOCK = threading.RLock()
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
 
@@ -39,10 +42,8 @@ class PreparedIndexedFile:
     path: str
     name: str
     file_type: str
-    key_column: str
     column_count: int
     file_mtime: float
-    parser_config_json: str
     chunk_values: List[Tuple[str, str, str, str]]
     fingerprint: Dict[str, Any]
     chunk_count: int
@@ -210,14 +211,43 @@ def _write_connection():
             conn.close()
 
 
-def _ensure_registered_files_columns(cursor: sqlite3.Cursor):
+def _registered_files_columns(cursor: sqlite3.Cursor) -> set[str]:
     cursor.execute("PRAGMA table_info(registered_files)")
-    existing_columns = {row[1] for row in cursor.fetchall()}
+    return {str(row[1]) for row in cursor.fetchall()}
+
+
+def _reset_legacy_join_schema_if_needed(cursor: sqlite3.Cursor) -> bool:
+    """Drop app-owned index tables when the legacy Join metadata schema exists.
+
+    OfficeWhere 0.6 removes persisted Excel Join/table metadata from the
+    production search/version domain.  SQLite cannot drop columns cheaply, and
+    stale file IDs/cache entries would be misleading after the contract change,
+    so the app-owned index tables are rebuilt on next launch/rescan.  Source
+    Office documents and settings are not touched.
+    """
+    existing_columns = _registered_files_columns(cursor)
+    if not existing_columns or not {"key_column", "parser_config"}.intersection(existing_columns):
+        return False
+
+    _drop_current_search_indexes(cursor)
+    _drop_legacy_file_search(cursor)
+    cursor.execute("DROP TABLE IF EXISTS file_chunks")
+    cursor.execute("DROP TABLE IF EXISTS document_fingerprints")
+    cursor.execute("DROP TABLE IF EXISTS comparison_cache")
+    cursor.execute("DROP TABLE IF EXISTS registered_files")
+    log_index_perf(
+        "db_schema_reset",
+        reason="remove_excel_join_metadata",
+        legacy_columns=sorted(existing_columns),
+    )
+    return True
+
+
+def _ensure_registered_files_columns(cursor: sqlite3.Cursor):
+    existing_columns = _registered_files_columns(cursor)
 
     if "file_mtime" not in existing_columns:
         cursor.execute("ALTER TABLE registered_files ADD COLUMN file_mtime REAL")
-    if "parser_config" not in existing_columns:
-        cursor.execute("ALTER TABLE registered_files ADD COLUMN parser_config TEXT NOT NULL DEFAULT '{}'")
 
 
 def _ensure_file_chunks_columns(cursor: sqlite3.Cursor):
@@ -273,15 +303,14 @@ def _set_setting_with_cursor(cursor: sqlite3.Cursor, key: str, value: str):
     )
 
 
-def _decode_parser_config(row: Dict[str, Any]) -> Dict[str, Any]:
-    raw_value = row.get("parser_config", "{}")
-    if isinstance(raw_value, dict):
-        row["parser_config"] = raw_value
-        return row
-    try:
-        row["parser_config"] = json.loads(raw_value or "{}")
-    except json.JSONDecodeError:
-        row["parser_config"] = {}
+def _normalize_file_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Return file rows with transitional API fields synthesized.
+
+    The DB no longer persists Join-only metadata, but older renderer/test code
+    may still tolerate these keys while the UI is simplified.
+    """
+    row.setdefault("key_column", "")
+    row["parser_config"] = {}
     return row
 
 
@@ -349,10 +378,8 @@ def prepare_indexed_file(
         path=path,
         name=name,
         file_type=file_type,
-        key_column=key_column,
         column_count=column_count,
         file_mtime=file_mtime,
-        parser_config_json=json.dumps(parser_config or {}, ensure_ascii=False),
         chunk_values=_chunk_insert_values(chunks),
         fingerprint=_build_document_fingerprint(chunks, source_mtime=file_mtime),
         chunk_count=len(chunks),
@@ -413,20 +440,18 @@ def _save_prepared_indexed_file(
         cursor.execute(
             """
             INSERT INTO registered_files (
-                path, name, file_type, key_column, column_count,
-                created_at, file_mtime, parser_config
+                path, name, file_type, column_count,
+                created_at, file_mtime
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.path,
                 payload.name,
                 payload.file_type,
-                payload.key_column,
                 payload.column_count,
                 now,
                 payload.file_mtime,
-                payload.parser_config_json,
             ),
         )
         file_id = cursor.lastrowid
@@ -438,18 +463,16 @@ def _save_prepared_indexed_file(
         cursor.execute(
             """
             UPDATE registered_files
-            SET name=?, file_type=?, key_column=?, column_count=?,
-                created_at=?, file_mtime=?, parser_config=?
+            SET name=?, file_type=?, column_count=?,
+                created_at=?, file_mtime=?
             WHERE path=?
             """,
             (
                 payload.name,
                 payload.file_type,
-                payload.key_column,
                 payload.column_count,
                 now,
                 payload.file_mtime,
-                payload.parser_config_json,
                 payload.path,
             ),
         )
@@ -593,9 +616,9 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
             path TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             file_type TEXT NOT NULL,
-            key_column TEXT NOT NULL,
             column_count INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            file_mtime REAL
         )
         """
     )
@@ -690,7 +713,20 @@ def init_db():
     with _write_connection() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
+        legacy_reset = _reset_legacy_join_schema_if_needed(cursor)
         _create_schema(cursor, create_search_triggers=True)
+        if legacy_reset:
+            _set_setting_with_cursor(
+                cursor,
+                "last_schema_reset",
+                json.dumps(
+                    {
+                        "at": datetime.now().isoformat(),
+                        "reason": "remove_excel_join_metadata",
+                    },
+                    ensure_ascii=False,
+                ),
+            )
 
         if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
             _refresh_search_text(cursor)
@@ -757,17 +793,16 @@ def register_file(
     with _write_connection() as conn:
         cursor = conn.cursor()
         now = datetime.now().isoformat()
-        parser_config_json = json.dumps(parser_config or {}, ensure_ascii=False)
 
         try:
             cursor.execute(
                 """
                 INSERT INTO registered_files (
-                    path, name, file_type, key_column, column_count, created_at, parser_config
+                    path, name, file_type, column_count, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (path, name, file_type, key_column, column_count, now, parser_config_json),
+                (path, name, file_type, column_count, now),
             )
             conn.commit()
             return cursor.lastrowid
@@ -775,10 +810,10 @@ def register_file(
             cursor.execute(
                 """
                 UPDATE registered_files
-                SET name=?, file_type=?, key_column=?, column_count=?, created_at=?, parser_config=?
+                SET name=?, file_type=?, column_count=?, created_at=?
                 WHERE path=?
                 """,
-                (name, file_type, key_column, column_count, now, parser_config_json, path),
+                (name, file_type, column_count, now, path),
             )
             conn.commit()
             cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
@@ -883,7 +918,7 @@ def get_all_files() -> List[Dict[str, Any]]:
     cursor.execute("SELECT * FROM registered_files ORDER BY created_at DESC")
     rows = cursor.fetchall()
     conn.close()
-    return [_decode_parser_config(dict(row)) for row in rows]
+    return [_normalize_file_row(dict(row)) for row in rows]
 
 
 def get_registered_files_signature() -> str:
@@ -893,8 +928,8 @@ def get_registered_files_signature() -> str:
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT id, path, name, file_type, key_column, column_count,
-               created_at, file_mtime, parser_config
+        SELECT id, path, name, file_type, column_count,
+               created_at, file_mtime
         FROM registered_files
         ORDER BY id
         """
@@ -966,7 +1001,7 @@ def list_files_page(
     )
     rows = cursor.fetchall()
     conn.close()
-    return [_decode_parser_config(dict(row)) for row in rows]
+    return [_normalize_file_row(dict(row)) for row in rows]
 
 
 def count_files(
@@ -1010,7 +1045,7 @@ def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
     cursor.execute("SELECT * FROM registered_files WHERE id=?", (file_id,))
     row = cursor.fetchone()
     conn.close()
-    return _decode_parser_config(dict(row)) if row else None
+    return _normalize_file_row(dict(row)) if row else None
 
 
 def search_file_names(
@@ -1057,7 +1092,7 @@ def search_file_names(
     )
     rows = cursor.fetchall()
     conn.close()
-    return [_decode_parser_config(dict(row)) for row in rows]
+    return [_normalize_file_row(dict(row)) for row in rows]
 
 
 def delete_file(file_id: int) -> bool:
@@ -1153,6 +1188,86 @@ def get_cached_comparison_result(cache_key: str) -> Optional[Dict[str, Any]]:
     return result if isinstance(result, dict) else None
 
 
+def _prune_comparison_cache_with_cursor(
+    cursor: sqlite3.Cursor,
+    *,
+    max_bytes: int = COMPARISON_CACHE_MAX_BYTES,
+    max_age_days: int = COMPARISON_CACHE_MAX_AGE_DAYS,
+    min_keep_rows: int = COMPARISON_CACHE_MIN_KEEP_ROWS,
+) -> Dict[str, int]:
+    """Bound comparison-cache size without deleting the newest keep-floor rows."""
+    keep_floor = max(0, int(min_keep_rows))
+    deleted_age = 0
+    deleted_size = 0
+
+    if max_age_days > 0:
+        cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+        cursor.execute(
+            """
+            DELETE FROM comparison_cache
+            WHERE created_at < ?
+              AND cache_key NOT IN (
+                SELECT cache_key
+                FROM comparison_cache
+                ORDER BY created_at DESC
+                LIMIT ?
+              )
+            """,
+            (cutoff, keep_floor),
+        )
+        deleted_age = cursor.rowcount if cursor.rowcount != -1 else 0
+
+    cursor.execute(
+        """
+        SELECT cache_key, COALESCE(length(result_json), 0) AS bytes
+        FROM comparison_cache
+        ORDER BY created_at DESC
+        """
+    )
+    rows = [(str(row[0]), int(row[1] or 0)) for row in cursor.fetchall()]
+    total_bytes = sum(size for _key, size in rows)
+    if max_bytes > 0 and total_bytes > max_bytes:
+        keys_to_delete: List[str] = []
+        for index, (cache_key, size) in enumerate(reversed(rows)):
+            original_index = len(rows) - 1 - index
+            if original_index < keep_floor:
+                continue
+            if total_bytes <= max_bytes:
+                break
+            keys_to_delete.append(cache_key)
+            total_bytes -= size
+
+        for batch in [keys_to_delete[index : index + 900] for index in range(0, len(keys_to_delete), 900)]:
+            if not batch:
+                continue
+            placeholders = ",".join("?" for _ in batch)
+            cursor.execute(f"DELETE FROM comparison_cache WHERE cache_key IN ({placeholders})", batch)
+            deleted_size += cursor.rowcount if cursor.rowcount != -1 else 0
+
+    return {
+        "deleted_age": deleted_age,
+        "deleted_size": deleted_size,
+    }
+
+
+def prune_comparison_cache(
+    *,
+    max_bytes: int = COMPARISON_CACHE_MAX_BYTES,
+    max_age_days: int = COMPARISON_CACHE_MAX_AGE_DAYS,
+    min_keep_rows: int = COMPARISON_CACHE_MIN_KEEP_ROWS,
+) -> Dict[str, int]:
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        result = _prune_comparison_cache_with_cursor(
+            cursor,
+            max_bytes=max_bytes,
+            max_age_days=max_age_days,
+            min_keep_rows=min_keep_rows,
+        )
+        conn.commit()
+        return result
+
+
 def save_cached_comparison_result(
     cache_key: str,
     file_ids: Sequence[int],
@@ -1179,6 +1294,7 @@ def save_cached_comparison_result(
                 datetime.now().isoformat(),
             ),
         )
+        _prune_comparison_cache_with_cursor(cursor)
         conn.commit()
 
 
@@ -1481,3 +1597,13 @@ def set_setting(key: str, value: str):
         cursor = conn.cursor()
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
+
+
+def pop_setting(key: str, default: str = "") -> str:
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        cursor.execute("DELETE FROM settings WHERE key = ?", (key,))
+        conn.commit()
+    return row[0] if row else default

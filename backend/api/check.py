@@ -27,8 +27,6 @@ def _comparison_cache_key(file_infos: List[Dict[str, Any]], comparison_scope: st
                 "id": info["id"],
                 "path": info["path"],
                 "file_type": info["file_type"],
-                "key_column": info.get("key_column", ""),
-                "parser_config": info.get("parser_config", {}),
                 "mtime_ns": stat_result.st_mtime_ns,
                 "size": stat_result.st_size,
             }
@@ -46,6 +44,7 @@ def consistency_check(req: CheckRequest):
     if len(req.file_ids) < 2:
         raise HTTPException(status_code=400, detail="정합성 검사는 최소 2개 파일을 선택해야 합니다.")
 
+    comparison_scope = "version_history"
     file_infos = []
     for file_id in req.file_ids:
         file_row = get_file_by_id(file_id)
@@ -62,8 +61,6 @@ def consistency_check(req: CheckRequest):
                 "path": file_row["path"],
                 "name": file_row["name"],
                 "file_type": file_row["file_type"],
-                "key_column": file_row["key_column"],
-                "parser_config": file_row.get("parser_config", {}),
             }
         )
 
@@ -71,7 +68,7 @@ def consistency_check(req: CheckRequest):
     if len(file_types) != 1:
         raise HTTPException(status_code=400, detail="서로 다른 파일 형식은 함께 비교할 수 없습니다.")
 
-    cache_key = _comparison_cache_key(file_infos, req.comparison_scope)
+    cache_key = _comparison_cache_key(file_infos, comparison_scope)
     cached = get_cached_comparison_result(cache_key)
     if cached is not None:
         try:
@@ -80,14 +77,14 @@ def consistency_check(req: CheckRequest):
             cached = None
 
     try:
-        result = run_consistency_check(file_infos, comparison_scope=req.comparison_scope)
+        result = run_consistency_check(file_infos, comparison_scope=comparison_scope)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"정합성 검사 중 오류가 발생했습니다: {exc}")
 
     response = CheckResponse(**result)
-    save_cached_comparison_result(cache_key, req.file_ids, req.comparison_scope, response.model_dump())
+    save_cached_comparison_result(cache_key, req.file_ids, comparison_scope, response.model_dump())
     return response
 
 
@@ -115,8 +112,6 @@ def excel_diff_grid(req: ExcelDiffGridRequest):
                 "path": file_row["path"],
                 "name": file_row["name"],
                 "file_type": file_row["file_type"],
-                "key_column": file_row["key_column"],
-                "parser_config": file_row.get("parser_config", {}),
             }
         )
 

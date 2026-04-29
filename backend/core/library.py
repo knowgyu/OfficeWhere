@@ -52,8 +52,6 @@ from .file_scope import (
     should_exclude_dir,
     sorted_counter_map,
 )
-from .normalizer import suggest_key_column
-from .excel_analysis import normalize_excel_parser_config
 from ..runtime import get_fast_worker_count, get_worker_count, normalize_fast_worker_count
 
 SETTINGS_KEY = "library_settings"
@@ -156,7 +154,7 @@ def file_info_from_row(row: Dict[str, Any]) -> FileInfo:
         name=row["name"],
         path=row["path"],
         file_type=row["file_type"],
-        key_column=row["key_column"],
+        key_column=row.get("key_column", ""),
         column_count=row["column_count"],
         parser_config=row.get("parser_config", {}),
         created_at=row.get("created_at"),
@@ -510,16 +508,6 @@ def _is_excel_path(path: str) -> bool:
     return Path(path).suffix.lower() in {".xls", ".xlsx"}
 
 
-def _saved_excel_config_is_valid(path: str, parser_config: Optional[Dict[str, Any]]) -> bool:
-    if not parser_config:
-        return False
-    try:
-        normalize_excel_parser_config(path, parser_config)
-        return True
-    except ValueError:
-        return False
-
-
 def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
     message = str(exc)
     lower = message.lower()
@@ -864,45 +852,29 @@ def _rescan_library_impl(
             metrics["size_bytes"] = stat_result.st_size
             if existing and existing.get("file_mtime") is not None:
                 if abs(float(existing["file_mtime"]) - current_mtime) < 1.0:
-                    config_valid = True
-                    if mode != "fast" and _is_excel_path(path):
-                        config_valid = timed_ms(
-                            metrics,
-                            "config_check_ms",
-                            lambda: _saved_excel_config_is_valid(path, existing.get("parser_config")),
-                        )
-                    if mode == "fast" or not _is_excel_path(path) or config_valid:
-                        metrics.update(
-                            action="skipped",
-                            success=True,
-                            file_id=existing["id"],
-                            total_ms=elapsed_ms(file_started),
-                        )
-                        log_index_perf("file_done", **metrics)
-                        return LibraryRescanResult(
-                            path=path,
-                            name=name,
-                            success=True,
-                            action="skipped",
-                            file_id=existing["id"],
-                        )
+                    metrics.update(
+                        action="skipped",
+                        success=True,
+                        file_id=existing["id"],
+                        total_ms=elapsed_ms(file_started),
+                    )
+                    log_index_perf("file_done", **metrics)
+                    return LibraryRescanResult(
+                        path=path,
+                        name=name,
+                        success=True,
+                        action="skipped",
+                        file_id=existing["id"],
+                    )
 
             if _cancel_event.is_set():
                 return _cancelled_result(path)
 
-            if _is_excel_path(path):
-                parser_config = None
-            else:
-                parser_config = existing.get("parser_config") if existing else None
             info, chunks = timed_ms(
                 metrics,
                 "inspect_chunk_ms",
-                lambda: inspect_and_chunk(path, parser_config=parser_config),
+                lambda: inspect_and_chunk(path),
             )
-            key_column = ""
-            if info["file_type"] == "Excel":
-                key_column = timed_ms(metrics, "key_column_ms", lambda: suggest_key_column(info["columns"])) or ""
-
             payload = timed_ms(
                 metrics,
                 "prepare_index_ms",
@@ -910,11 +882,11 @@ def _rescan_library_impl(
                     path=path,
                     name=info["name"],
                     file_type=info["file_type"],
-                    key_column=key_column,
+                    key_column="",
                     column_count=len(info["columns"]),
                     chunks=chunks,
                     file_mtime=current_mtime,
-                    parser_config=info["parser_config"],
+                    parser_config=None,
                 ),
             )
             metrics.update(

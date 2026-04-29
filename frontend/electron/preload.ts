@@ -13,6 +13,9 @@ const officeWhereBridge = {
   getCloseBehavior: () => ipcRenderer.invoke('app:get-close-behavior'),
   setCloseBehavior: (behavior: string) => ipcRenderer.invoke('app:set-close-behavior', { behavior }),
   getExampleLibraryPath: () => ipcRenderer.invoke('app:get-example-library-path'),
+  checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
+  openReleasePage: () => ipcRenderer.invoke('app:open-release-page'),
 }
 
 contextBridge.exposeInMainWorld('officeWhere', officeWhereBridge)

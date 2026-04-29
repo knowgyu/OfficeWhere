@@ -705,7 +705,6 @@ export default function FileManager({
   }, [inspectedFile, selectedCandidate])
 
   const availableColumns = selectedCandidate?.table.columns ?? inspectedFile?.keyOptions ?? []
-  const effectiveParserConfig = selectedCandidate?.parserConfig ?? inspectedFile?.parserConfig ?? {}
   const keyRequired = inspectedFile?.keyRequired ?? false
   const normalizedFolderDraft = folderPathDraft.trim()
   const hasPendingNewFolder =
@@ -801,11 +800,7 @@ export default function FileManager({
 
     setRegistering(true)
     try {
-      await api.files.register({
-        path: filePath.trim(),
-        key_column: keyRequired ? keyColumn.trim() : '',
-        parser_config: effectiveParserConfig,
-      })
+      await api.files.register({ path: filePath.trim() })
       snackbar.success(`"${inspectedFile.name}" 등록 완료.`)
       setFilePath('')
       resetInspection()
@@ -1258,7 +1253,6 @@ export default function FileManager({
                 inspectedFile={inspectedFile}
                 selectedCandidateId={selectedCandidateId}
                 effectivePreview={effectivePreview}
-                effectiveParserConfig={effectiveParserConfig}
                 keyColumn={keyColumn}
                 onKeyColumn={setKeyColumn}
                 onCandidateChange={handleCandidateChange}
@@ -1992,7 +1986,6 @@ function InspectionCard({
   inspectedFile,
   selectedCandidateId,
   effectivePreview,
-  effectiveParserConfig,
   keyColumn,
   onKeyColumn,
   onCandidateChange,
@@ -2003,7 +1996,6 @@ function InspectionCard({
   inspectedFile: NormalizedFileInspect
   selectedCandidateId: string
   effectivePreview: NormalizedPreview | null
-  effectiveParserConfig: NormalizedFileInspect['parserConfig']
   keyColumn: string
   onKeyColumn: (value: string) => void
   onCandidateChange: (id: string) => void
@@ -2011,7 +2003,7 @@ function InspectionCard({
   onRegister: () => void
   registering: boolean
 }) {
-  const parserSummary = formatParserConfigSummary(effectiveParserConfig)
+  const parserSummary: string[] = []
   const keyRequired = inspectedFile.keyRequired
 
   return (

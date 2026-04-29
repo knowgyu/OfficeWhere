@@ -17,7 +17,7 @@ from ..database import (
     set_setting,
     update_file_mtime,
 )
-from .excel_analysis import extract_excel_used_range, inspect_excel_file_with_recovery
+from .excel_analysis import extract_excel_used_range
 from .file_scope import SUPPORTED_EXTENSIONS
 from .index_perf import elapsed_ms, log_index_perf, log_parse_perf, timed_ms
 from .parser import get_file_type
@@ -31,7 +31,13 @@ _scheduler_thread: threading.Thread | None = None
 _MAX_WORKERS = get_worker_count()
 
 
-def _excel_used_range_chunks(path: str) -> List[Dict[str, str]]:
+def _excel_preview_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _excel_used_range_inspection_and_chunks(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     started = time.perf_counter()
     metrics: Dict[str, Any] = {
         "path": path,
@@ -55,6 +61,27 @@ def _excel_used_range_chunks(path: str) -> List[Dict[str, str]]:
                             "content": text,
                         }
                     )
+        if df.empty:
+            columns: List[str] = []
+            sample: List[List[str]] = []
+            preview_config = config
+        else:
+            header_values = [_excel_preview_text(value) for value in df.iloc[0].tolist()]
+            columns = [
+                header if header else str(fallback)
+                for header, fallback in zip(header_values, df.columns.tolist())
+            ]
+            sample = [
+                [_excel_preview_text(value) for value in row.tolist()]
+                for _, row in df.iloc[1:].head(5).iterrows()
+            ]
+            preview_config = {**config, "header_row": 1}
+        inspection = {
+            "parser_config": preview_config,
+            "table_candidates": [],
+            "columns": columns,
+            "sample": sample,
+        }
 
         metrics.update(
             success=True,
@@ -65,7 +92,7 @@ def _excel_used_range_chunks(path: str) -> List[Dict[str, str]]:
             duration_ms=elapsed_ms(started),
         )
         log_parse_perf("excel_used_range_chunks_done", **metrics)
-        return chunks
+        return inspection, chunks
     except Exception as exc:
         metrics.update(
             success=False,
@@ -86,12 +113,7 @@ def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] 
         "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
     }
     try:
-        inspection = timed_ms(
-            metrics,
-            "metadata_ms",
-            lambda: inspect_excel_file_with_recovery(path, parser_config=parser_config),
-        )
-        chunks = timed_ms(metrics, "used_range_chunk_ms", lambda: _excel_used_range_chunks(path))
+        inspection, chunks = timed_ms(metrics, "used_range_chunk_ms", lambda: _excel_used_range_inspection_and_chunks(path))
         metrics.update(
             success=True,
             file_type="Excel",
@@ -110,6 +132,11 @@ def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] 
         )
         log_parse_perf("excel_inspect_and_chunk_done", **metrics)
         raise
+
+
+def _excel_used_range_chunks(path: str) -> List[Dict[str, str]]:
+    _inspection, chunks = _excel_used_range_inspection_and_chunks(path)
+    return chunks
 
 
 def _inspect_and_chunk_word(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
@@ -310,7 +337,7 @@ def reindex_all() -> Dict[str, int]:
         if not os.path.exists(path):
             return "failed"
         try:
-            index_file(file_info["id"], path, parser_config=file_info.get("parser_config"))
+            index_file(file_info["id"], path)
             return "success"
         except Exception:
             diagnostic_id = uuid.uuid4().hex[:8]
@@ -339,7 +366,7 @@ def _do_reindex_incremental():
             stored_mtime = file_info.get("file_mtime")
             if stored_mtime is not None and abs(current_mtime - stored_mtime) < 1.0:
                 continue
-            index_file(file_info["id"], path, parser_config=file_info.get("parser_config"))
+            index_file(file_info["id"], path)
         except Exception:
             diagnostic_id = uuid.uuid4().hex[:8]
             logger.exception("incremental index failed diagnostic_id=%s path=%s", diagnostic_id, path)

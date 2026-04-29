@@ -335,7 +335,7 @@ def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch,
     assert result.diagnostic_id in caplog.text
 
 
-def test_rescan_excel_refreshes_parser_config_and_indexes_used_range(tmp_path, monkeypatch):
+def test_rescan_excel_indexes_used_range_without_parser_config(tmp_path, monkeypatch):
     import os
     import time
 
@@ -356,7 +356,7 @@ def test_rescan_excel_refreshes_parser_config_and_indexes_used_range(tmp_path, m
     assert first.failed == 0
     assert first.registered == 1
     first_row = get_all_files()[0]
-    assert first_row["parser_config"]["end_col"] == 2
+    assert first_row["parser_config"] == {}
 
     stale_parser_config = {
         "sheet_name": "Sheet1",
@@ -370,9 +370,9 @@ def test_rescan_excel_refreshes_parser_config_and_indexes_used_range(tmp_path, m
     repaired = library.rescan_library()
 
     assert repaired.failed == 0
-    assert repaired.updated == 1
+    assert repaired.skipped == 1
     repaired_row = get_all_files()[0]
-    assert repaired_row["parser_config"]["end_col"] == 2
+    assert repaired_row["parser_config"] == {}
 
     _write_excel(target, {"ID": ["A"], "담당자": ["Kim"], "새열": ["새값"]})
     next_mtime = time.time() + 3
@@ -383,11 +383,11 @@ def test_rescan_excel_refreshes_parser_config_and_indexes_used_range(tmp_path, m
     assert second.failed == 0
     assert second.updated == 1
     updated_row = get_all_files()[0]
-    assert updated_row["parser_config"]["end_col"] == 3
+    assert updated_row["parser_config"] == {}
     assert search("새값")[0]["location"] == "Sheet1 시트 | 2행 C열"
 
 
-def test_fast_rescan_skips_unchanged_stale_excel_config_but_normal_repairs(tmp_path, monkeypatch):
+def test_rescan_ignores_legacy_stale_excel_config_for_unchanged_files(tmp_path, monkeypatch):
     from backend.core import library
 
     monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
@@ -414,11 +414,11 @@ def test_fast_rescan_skips_unchanged_stale_excel_config_but_normal_repairs(tmp_p
 
     fast = library.rescan_library(mode="fast")
     assert fast.skipped == 1
-    assert get_all_files()[0]["parser_config"]["end_col"] == 99
+    assert get_all_files()[0]["parser_config"] == {}
 
     repaired = library.rescan_library(mode="normal")
-    assert repaired.updated == 1
-    assert get_all_files()[0]["parser_config"]["end_col"] == 2
+    assert repaired.skipped == 1
+    assert get_all_files()[0]["parser_config"] == {}
 
 
 def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path, monkeypatch):

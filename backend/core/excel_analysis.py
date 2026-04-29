@@ -706,17 +706,33 @@ def extract_excel_used_range(path: str, sheet_name: Optional[str] = None) -> Tup
 
 
 def inspect_excel_file(path: str, parser_config: Optional[ParserConfig] = None) -> Dict[str, Any]:
-    candidates = detect_excel_table_candidates(path)
-    config = normalize_excel_parser_config(path, parser_config or (candidates[0] if candidates else None))
-    df = extract_excel_table(path, config)
-    sample: List[List[str]] = []
-    for _, row in df.head(5).iterrows():
-        sample.append([_stringify(value) for value in row.tolist()])
+    # Search/version management no longer needs registered-table detection or
+    # key-column setup.  Use the visible used range as a lightweight preview so
+    # registration/rescan does not pay the old Join/table metadata cost.
+    df, config = extract_excel_used_range(path)
+    if df.empty:
+        return {
+            "parser_config": config,
+            "table_candidates": [],
+            "columns": [],
+            "sample": [],
+        }
 
-    columns = [str(column) for column in df.columns.tolist()]
+    header_values = [_stringify(value) for value in df.iloc[0].tolist()]
+    columns = [
+        header if header else str(fallback)
+        for header, fallback in zip(header_values, df.columns.tolist())
+    ]
+    sample: List[List[str]] = []
+    for _, row in df.iloc[1:].head(5).iterrows():
+        sample.append([_stringify(value) for value in row.tolist()])
+    preview_config = {
+        **config,
+        "header_row": 1,
+    }
     return {
-        "parser_config": config,
-        "table_candidates": candidates,
+        "parser_config": preview_config,
+        "table_candidates": [],
         "columns": columns,
         "sample": sample,
     }
@@ -762,7 +778,7 @@ def recover_excel_parser_config(
     path: str,
     parser_config: Optional[ParserConfig] = None,
 ) -> ParserConfig:
-    """Return a usable parser config, falling back from stale saved ranges."""
+    """Return a used-range parser config for legacy callers."""
     return inspect_excel_file_with_recovery(path, parser_config=parser_config)["parser_config"]
 
 

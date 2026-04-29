@@ -35,7 +35,7 @@ Use this checklist before publishing a release tag.
 - [ ] Excel added/removed cell content appears under 추가/삭제된 내용, and missing rows/columns show actual content previews rather than only row/column labels.
 - [ ] Excel version groups show a prominent `표로 보기` button that opens a large modal grid.
 - [ ] Excel `값 변경` and `추가/삭제된 내용` sections are collapsed by default and expand on click.
-- [ ] Excel version history does not show parser_config range errors when a saved table range is stale.
+- [ ] Excel version history uses cell/used-range comparison and does not rely on saved table/parser settings.
 - [ ] Version Management auto-detected groups remain one column on a wide screen.
 - [ ] Version group cards do not show `최신 후보` / `이전 후보` labels.
 - [ ] Excel Integration shows a visible development-warning notice at the top.

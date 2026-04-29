@@ -17,7 +17,7 @@ def test_inspect_file_path_returns_schema(tmp_path):
 
     assert result["path"] == str(file_path)
     assert result["name"] == "sample.xlsx"
-    assert result["suggested_key_column"] == "과제명"
+    assert result["suggested_key_column"] is None
     assert result["columns"] == ["과제명", "담당자"]
     assert result["sample"] == [["A", "Kim"]]
     assert result["comparison_mode"] == "excel"

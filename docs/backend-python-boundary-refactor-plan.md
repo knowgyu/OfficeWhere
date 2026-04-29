@@ -2,7 +2,8 @@
 
 작성일: 2026-04-29
 
-상태: **문서화 전용 계획**. 이 문서는 현재 코드 동작을 바꾸지 않는다.
+상태: **0.6 구조 정리 반영 중**. 2026-04-29 작업에서 검색/버전 관리 중심으로
+Excel Join 메타데이터 의존성을 제거하는 1차 구조 변경을 적용했다.
 
 ## 목적
 
@@ -32,6 +33,18 @@ FastAPI routers
 ```
 
 즉, Electron은 지금처럼 앱 실행/종료/보안 경계를 맡고, Python backend는 계속 로컬 앱 백엔드 역할을 한다. 다만 Python 내부에서 “문서 추출”, “색인 파이프라인”, “SQLite/FTS 저장”, “검색”, “버전관리”, “HTTP API”가 서로의 내부를 덜 알게 만든다.
+
+## 0.6에서 먼저 적용한 결정
+
+- 제품 hot path를 **검색 + 버전 관리**로 좁혔다.
+- Excel Join/key-column/parser_config 기반 등록 표 비교는 비활성화했다.
+- Join 탭은 미래 기능 placeholder만 남기고 backend `/api/query/*`는 410으로 막는다.
+- `registered_files` DB schema에서 Join-only `key_column`, `parser_config` persisted field를 제거했다.
+- legacy DB에서 해당 column이 감지되면 app-owned 등록/index/cache table을 재생성한다. 원본 문서는 건드리지 않는다.
+- Excel indexing/registration/rescan은 table 후보 탐색 대신 used-range/cell-coordinate extraction만 사용한다.
+- Excel version comparison은 항상 used-range cell diff를 사용한다.
+- comparison cache는 version/key 변경 후 100MB/90일/최신 300개 기준으로 pruning한다.
+- portable update는 GitHub Release 확인 + Windows zip 다운로드까지만 제공한다. 자동 압축해제/교체는 하지 않는다.
 
 ## 왜 당장 Node app-core로 옮기지 않는가
 
@@ -90,7 +103,6 @@ backend/
     library_rescan_service.py
     library_group_service.py
     comparison_service.py
-    join_service.py
 
   domain/
     documents.py             # DocumentInspection, DocumentChunk, FileRef 등 순수 DTO
@@ -160,21 +172,19 @@ class DocumentAdapter(Protocol):
     file_type: str
     extensions: set[str]
 
-    def inspect(self, path: str, parser_config: Mapping[str, Any] | None) -> DocumentInspection: ...
-    def chunks(self, path: str, parser_config: Mapping[str, Any] | None) -> list[DocumentChunk]: ...
+    def inspect(self, path: str) -> DocumentInspection: ...
+    def chunks(self, path: str) -> list[DocumentChunk]: ...
 ```
 
 선택 확장:
 
 ```python
-class TableDocumentAdapter(DocumentAdapter, Protocol):
-    def table(self, path: str, parser_config: Mapping[str, Any] | None) -> TableExtraction: ...
-
 class ComparableDocumentAdapter(DocumentAdapter, Protocol):
     def compare(self, file_infos: list[FileRef], scope: str) -> ComparisonResult: ...
 ```
 
-중요: adapter는 DB를 몰라야 한다. adapter는 파일 경로와 parser_config를 받아 추출 결과만 반환한다.
+중요: adapter는 DB를 몰라야 한다. adapter는 파일 경로와 추출 옵션만 받아 추출 결과만 반환한다.
+Excel Join/table extraction이 다시 필요해지면 검색/버전 adapter와 별도 feature adapter로 설계한다.
 
 ### Storage repositories
 
@@ -297,7 +307,7 @@ POST /api/check
 - [ ] Excel/Word/PPT adapter wrapper만 추가하고 기존 parser 함수는 facade로 유지.
 - [ ] `get_file_type`/extension dispatch 중복을 registry로 흡수.
 - [ ] adapter는 DB import 금지.
-- [ ] Excel parser_config recovery 동작을 그대로 통과시킨다.
+- [x] 0.6: 검색/버전 경로에서 Excel parser_config recovery 대신 used-range extraction으로 단순화했다.
 
 ### Phase 4 — indexing/library pipeline split
 

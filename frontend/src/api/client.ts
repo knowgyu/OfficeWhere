@@ -38,6 +38,33 @@ export interface ExampleLibraryPathResponse {
   reason?: string
 }
 
+export interface SchemaResetState {
+  resetPending: boolean
+  detail?: string
+  message?: string
+}
+
+export interface UpdateAssetInfo {
+  name: string
+  url: string
+  sizeBytes?: number
+}
+
+export interface UpdateCheckResult {
+  currentVersion: string
+  latestVersion: string
+  updateAvailable: boolean
+  releaseUrl: string
+  asset?: UpdateAssetInfo
+}
+
+export interface UpdateDownloadResult {
+  success: boolean
+  path: string
+  fileName: string
+  sizeBytes: number
+}
+
 declare global {
   interface OfficeWhereBridge {
     getBackendBaseUrl?: () => Promise<string>
@@ -51,6 +78,9 @@ declare global {
     getCloseBehavior?: () => Promise<CloseBehavior>
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
     getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
+    checkForUpdates?: () => Promise<UpdateCheckResult>
+    downloadUpdate?: () => Promise<UpdateDownloadResult>
+    openReleasePage?: () => Promise<void>
   }
 
   interface Window {
@@ -969,7 +999,7 @@ export function normalizeFileInspect(payload: FileInspectResponse): NormalizedFi
     name: payload.name,
     fileType,
     compareMode,
-    keyRequired: compareMode === 'excel',
+    keyRequired: false,
     suggestedKey: toStringValue(payload.suggested_key_column),
     keyOptions,
     parserConfig:
@@ -1413,6 +1443,34 @@ export const api = {
       if (!electron?.setCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
       return { data: await electron.setCloseBehavior(behavior) }
     },
+    checkForUpdates: async () => {
+      const electron = electronApi()
+      if (!electron?.checkForUpdates) {
+        return {
+          data: {
+            currentVersion: '',
+            latestVersion: '',
+            updateAvailable: false,
+            releaseUrl: '',
+          } satisfies UpdateCheckResult,
+        }
+      }
+      return { data: await electron.checkForUpdates() }
+    },
+    downloadUpdate: async () => {
+      const electron = electronApi()
+      if (!electron?.downloadUpdate) desktopError('Electron 앱에서만 업데이트 zip을 다운로드할 수 있습니다.')
+      return { data: await electron.downloadUpdate() }
+    },
+    openReleasePage: async () => {
+      const electron = electronApi()
+      if (!electron?.openReleasePage) {
+        window.open('https://github.com/knowgyu/OfficeWhere/releases/latest', '_blank', 'noopener,noreferrer')
+        return { data: undefined }
+      }
+      await electron.openReleasePage()
+      return { data: undefined }
+    },
     getExampleLibraryPath: async () => {
       const electron = electronApi()
       if (electron?.getExampleLibraryPath) {
@@ -1442,6 +1500,13 @@ export const api = {
               path: '',
               reason: '브라우저 개발 모드에서는 예제 폴더 자동 지정이 비활성화되어 있습니다.',
             },
+      }
+    },
+    consumeSchemaResetState: async () => {
+      try {
+        return await axios.get<SchemaResetState>(await apiPath('/api/app/schema-reset-state'))
+      } catch {
+        return { data: { resetPending: false } as SchemaResetState }
       }
     },
   },

@@ -230,12 +230,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
     for _info, dataframe, _config in used_ranges:
         register_header_aliases(dataframe)
 
-    requested_key_column = str(latest_info.get("key_column", "") or "")
     key_col_index = 0
-    if requested_key_column:
-        key_column_lookup = column_lookup.get(normalize_key(requested_key_column))
-        if key_column_lookup:
-            key_col_index = key_column_lookup[0]
 
     for _info, dataframe, _config in used_ranges:
         for row_index in range(min(len(dataframe.index), row_count)):
@@ -429,7 +424,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         },
         "row_count": row_count,
         "column_count": column_count,
-        "key_column": requested_key_column,
+        "key_column": "",
         "sheet_name": str(parser_config["sheet_name"]),
         "partial": partial,
         "omitted_focus_count": omitted_focus_count,

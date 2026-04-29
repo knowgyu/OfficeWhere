@@ -110,24 +110,22 @@ def _write_ppt(path: Path, first_body: str, include_inserted_slide: bool):
     presentation.save(path)
 
 
-def test_excel_inspect_detects_table_not_at_top_left(tmp_path):
+def test_excel_inspect_uses_visible_range_without_table_detection(tmp_path):
     file_path = tmp_path / "offset.xlsx"
     _write_excel_with_offset_table(file_path)
 
     result = inspect_file_path(str(file_path))
 
-    assert result["columns"] == ["과제명", "담당자", "예산"]
-    assert result["sample"] == [["A", "Kim", "100"], ["B", "Lee", "200"]]
-    assert result["parser_config"] == {
-        "sheet_name": "사업현황",
-        "header_row": 3,
-        "start_col": 3,
-        "end_col": 5,
-        "end_row": 5,
-    }
+    assert result["table_candidates"] == []
+    assert result["columns"][0] == "2026 사업 목록"
+    assert result["parser_config"]["header_row"] == 1
+    assert result["parser_config"]["start_col"] == 1
+    assert result["parser_config"]["end_col"] == 5
+    flattened_sample = [cell for row in result["sample"] for cell in row]
+    assert {"과제명", "담당자", "예산", "A", "Kim", "100"} <= set(flattened_sample)
 
 
-def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
+def test_excel_consistency_uses_cell_diffs_not_registered_keys(tmp_path):
     file_a = tmp_path / "a.xlsx"
     file_b = tmp_path / "b.xlsx"
     _write_dataframe_excel(file_a, {"과제명": ["A", "B"], "예산": ["100", "200"], "담당자": ["Kim", "Lee"]})
@@ -156,11 +154,13 @@ def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
 
     assert result["mode"] == "excel"
     issue_types = {issue["issue_type"] for issue in result["excel"]["issues"]}
-    assert {"missing_column", "missing_key", "value_conflict"} <= issue_types
+    assert {"value_conflict", "value_removed"} <= issue_types
+    assert "missing_column" not in issue_types
+    assert "missing_key" not in issue_types
 
     conflict = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
-    assert conflict["key"] == "a"
-    assert conflict["column"] == "예산"
+    assert conflict["key"] == "2"
+    assert conflict["column"] == "B"
     values_by_file = {entry["file_id"]: entry for entry in conflict["values"]}
     assert values_by_file[1]["row_numbers"] == [2]
     assert values_by_file[1]["column_letters"] == ["B"]
@@ -170,21 +170,6 @@ def test_excel_consistency_reports_missing_key_and_value_conflict(tmp_path):
     assert values_by_file[2]["column_letters"] == ["B"]
     assert values_by_file[2]["cell_refs"] == ["B2"]
     assert values_by_file[2]["row_count"] == 1
-
-    missing_column = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "missing_column")
-    assert missing_column["column"] == "담당자"
-    assert "관련 내용" in missing_column["message"]
-    column_rows = [entry for entry in missing_column["values"] if entry["row_values"]]
-    assert column_rows
-    assert column_rows[0]["columns"] == ["과제명", "담당자"]
-    assert column_rows[0]["values"] == ["삭제된 내용"]
-
-    missing_key = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "missing_key")
-    assert "관련 내용" in missing_key["message"]
-    present_rows = [entry for entry in missing_key["values"] if entry["row_values"]]
-    assert present_rows
-    assert present_rows[0]["columns"]
-    assert present_rows[0]["values"] == ["삭제된 내용"]
 
 
 def test_excel_consistency_reports_cell_value_added_and_removed(tmp_path):
@@ -224,15 +209,15 @@ def test_excel_consistency_reports_cell_value_added_and_removed(tmp_path):
     added = next(issue for issue in issues if issue["issue_type"] == "value_added")
     removed = next(issue for issue in issues if issue["issue_type"] == "value_removed")
 
-    assert added["key"] == "a"
-    assert added["column"] == "담당자"
-    assert added["message"] == "담당자 값이 추가되었습니다."
+    assert added["key"] == "2"
+    assert added["column"] == "B"
+    assert added["message"] == "2행 B열 값이 추가되었습니다."
     assert [entry["values"] for entry in added["values"]] == [["(빈 값)"], ["Lee"]]
     assert added["values"][1]["cell_refs"] == ["B2"]
 
-    assert removed["key"] == "b"
-    assert removed["column"] == "담당자"
-    assert removed["message"] == "담당자 값이 삭제되었습니다."
+    assert removed["key"] == "3"
+    assert removed["column"] == "B"
+    assert removed["message"] == "3행 B열 값이 삭제되었습니다."
     assert [entry["values"] for entry in removed["values"]] == [["Kim"], ["(빈 값)"]]
     assert removed["values"][0]["cell_refs"] == ["B3"]
 
@@ -272,8 +257,8 @@ def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
     )
 
     conflict = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
-    assert conflict["key"] == "a"
-    assert conflict["column"] == "예산"
+    assert conflict["key"] == "5"
+    assert conflict["column"] == "E"
     for entry in conflict["values"]:
         assert entry["row_numbers"] == [5]
         assert entry["column_letters"] == ["E"]
@@ -885,7 +870,7 @@ def test_check_api_reuses_comparison_cache_and_recomputes_on_file_change(tmp_pat
     assert calls == 2
 
 
-def test_check_api_cache_separates_scope_and_recovers_from_corrupt_entry(tmp_path, monkeypatch):
+def test_check_api_cache_normalizes_scope_and_recovers_from_corrupt_entry(tmp_path, monkeypatch):
     from backend.api.check import _comparison_cache_key
     from backend.database import init_db, register_file
 
@@ -917,7 +902,7 @@ def test_check_api_cache_separates_scope_and_recovers_from_corrupt_entry(tmp_pat
     consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="registered_table"))
     consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="version_history"))
 
-    assert calls == 2
+    assert calls == 1
 
     file_infos = [
         {
@@ -925,19 +910,15 @@ def test_check_api_cache_separates_scope_and_recovers_from_corrupt_entry(tmp_pat
             "path": str(left),
             "name": "left.xlsx",
             "file_type": "Excel",
-            "key_column": "id",
-            "parser_config": {},
         },
         {
             "id": right_id,
             "path": str(right),
             "name": "right.xlsx",
             "file_type": "Excel",
-            "key_column": "id",
-            "parser_config": {},
         },
     ]
-    cache_key = _comparison_cache_key(file_infos, "registered_table")
+    cache_key = _comparison_cache_key(file_infos, "version_history")
     import sqlite3
 
     conn = sqlite3.connect(tmp_path / "test.db")
@@ -947,4 +928,4 @@ def test_check_api_cache_separates_scope_and_recovers_from_corrupt_entry(tmp_pat
 
     consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="registered_table"))
 
-    assert calls == 3
+    assert calls == 2

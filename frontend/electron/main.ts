@@ -3,12 +3,20 @@ import { execFile, spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
+import https from 'node:https'
 import net from 'node:net'
 import path from 'node:path'
 
 const HOST = '127.0.0.1'
 const STARTUP_TIMEOUT_MS = 30_000
 const STARTUP_ATTEMPTS = 2
+const RELEASE_API_URL = 'https://api.github.com/repos/knowgyu/OfficeWhere/releases/latest'
+const RELEASE_PAGE_URL = 'https://github.com/knowgyu/OfficeWhere/releases/latest'
+const UPDATE_DOWNLOAD_HOSTS = new Set([
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+])
 
 const DATA_CLEANUP_RETRIES = 3
 const SAFE_RESET_CANDIDATE_IDS = new Set([
@@ -52,6 +60,27 @@ type AppResetState = {
   resetAt?: string
 }
 
+type UpdateAsset = {
+  name: string
+  url: string
+  sizeBytes?: number
+}
+
+type UpdateCheckResult = {
+  currentVersion: string
+  latestVersion: string
+  updateAvailable: boolean
+  releaseUrl: string
+  asset?: UpdateAsset
+}
+
+type UpdateDownloadResult = {
+  success: boolean
+  path: string
+  fileName: string
+  sizeBytes: number
+}
+
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -64,6 +93,7 @@ let isQuitting = false
 let appDataCleanupInProgress = false
 let closePromptInProgress = false
 let appShutdownInProgress = false
+let cachedUpdateCheck: UpdateCheckResult | null = null
 
 app.setName('OfficeWhere')
 
@@ -118,8 +148,238 @@ function registerIpcHandlers() {
   ipcMain.handle('app:get-close-behavior', () => readCloseBehavior())
   ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
   ipcMain.handle('app:get-example-library-path', () => getExampleLibraryPath())
+  ipcMain.handle('app:check-for-updates', () => checkForUpdates())
+  ipcMain.handle('app:download-update', () => downloadLatestUpdate())
+  ipcMain.handle('app:open-release-page', () => openLatestReleasePage())
   ipcMain.handle('dialog:pick-file', async () => pickFile())
   ipcMain.handle('dialog:pick-folder', async () => pickFolder())
+}
+
+type GitHubReleaseAsset = {
+  name?: unknown
+  browser_download_url?: unknown
+  size?: unknown
+}
+
+type GitHubRelease = {
+  tag_name?: unknown
+  html_url?: unknown
+  assets?: unknown
+}
+
+function normalizeVersion(version: string): number[] {
+  return version
+    .trim()
+    .replace(/^v/i, '')
+    .split(/[.-]/)
+    .slice(0, 3)
+    .map((part) => {
+      const value = Number.parseInt(part, 10)
+      return Number.isFinite(value) ? value : 0
+    })
+}
+
+function compareVersions(left: string, right: string): number {
+  const a = normalizeVersion(left)
+  const b = normalizeVersion(right)
+  for (let index = 0; index < 3; index += 1) {
+    const diff = (a[index] ?? 0) - (b[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+function isAllowedUpdateUrl(urlString: string): boolean {
+  try {
+    const url = new URL(urlString)
+    return url.protocol === 'https:' && UPDATE_DOWNLOAD_HOSTS.has(url.hostname)
+  } catch {
+    return false
+  }
+}
+
+function sanitizeUpdateFileName(name: string): string {
+  const baseName = path.basename(name).replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+  if (!baseName.toLowerCase().endsWith('.zip')) {
+    throw new Error('업데이트 파일은 zip 형식이어야 합니다.')
+  }
+  if (!baseName.toLowerCase().startsWith('officewhere')) {
+    throw new Error('OfficeWhere 릴리즈 파일만 다운로드할 수 있습니다.')
+  }
+  return baseName
+}
+
+function requestJson<T>(urlString: string, redirects = 3): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlString)
+    const protocol = url.protocol === 'https:' ? https : http
+    const request = protocol.request(
+      url,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': `OfficeWhere/${app.getVersion()}`,
+        },
+      },
+      (response) => {
+        const status = response.statusCode ?? 0
+        const location = response.headers.location
+        if (status >= 300 && status < 400 && location && redirects > 0) {
+          response.resume()
+          const redirected = new URL(location, url).toString()
+          requestJson<T>(redirected, redirects - 1).then(resolve, reject)
+          return
+        }
+        if (status < 200 || status >= 300) {
+          response.resume()
+          reject(new Error(`GitHub 릴리즈 정보를 확인하지 못했습니다. (${status})`))
+          return
+        }
+
+        const chunks: Buffer[] = []
+        response.on('data', (chunk: Buffer | string) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        })
+        response.on('end', () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T)
+          } catch (error) {
+            reject(error)
+          }
+        })
+      },
+    )
+    request.setTimeout(10_000, () => request.destroy(new Error('업데이트 확인 시간이 초과되었습니다.')))
+    request.on('error', reject)
+    request.end()
+  })
+}
+
+function findWindowsZipAsset(assets: unknown): UpdateAsset | undefined {
+  if (!Array.isArray(assets)) return undefined
+  for (const item of assets as GitHubReleaseAsset[]) {
+    const name = typeof item.name === 'string' ? item.name : ''
+    const url = typeof item.browser_download_url === 'string' ? item.browser_download_url : ''
+    const lowerName = name.toLowerCase()
+    if (!lowerName.endsWith('.zip')) continue
+    if (!lowerName.includes('windows') || !lowerName.includes('x64')) continue
+    if (!isAllowedUpdateUrl(url)) continue
+    return {
+      name,
+      url,
+      sizeBytes: typeof item.size === 'number' ? item.size : undefined,
+    }
+  }
+  return undefined
+}
+
+async function checkForUpdates(): Promise<UpdateCheckResult> {
+  const currentVersion = app.getVersion()
+  const release = await requestJson<GitHubRelease>(RELEASE_API_URL)
+  const latestVersion =
+    typeof release.tag_name === 'string' ? release.tag_name.replace(/^v/i, '') : currentVersion
+  const releaseUrl = typeof release.html_url === 'string' ? release.html_url : RELEASE_PAGE_URL
+  const result: UpdateCheckResult = {
+    currentVersion,
+    latestVersion,
+    updateAvailable: compareVersions(latestVersion, currentVersion) > 0,
+    releaseUrl,
+    asset: findWindowsZipAsset(release.assets),
+  }
+  cachedUpdateCheck = result
+  return result
+}
+
+function uniqueDownloadPath(fileName: string): string {
+  const downloadsDir = app.getPath('downloads')
+  const parsed = path.parse(fileName)
+  let candidate = path.join(downloadsDir, fileName)
+  let index = 1
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(downloadsDir, `${parsed.name} (${index})${parsed.ext}`)
+    index += 1
+  }
+  return candidate
+}
+
+function downloadToFile(urlString: string, destination: string, redirects = 5): Promise<number> {
+  return new Promise((resolve, reject) => {
+    if (!isAllowedUpdateUrl(urlString)) {
+      reject(new Error('허용되지 않은 업데이트 다운로드 주소입니다.'))
+      return
+    }
+
+    const url = new URL(urlString)
+    const protocol = url.protocol === 'https:' ? https : http
+    const request = protocol.get(
+      url,
+      {
+        headers: {
+          'User-Agent': `OfficeWhere/${app.getVersion()}`,
+        },
+      },
+      (response) => {
+        const status = response.statusCode ?? 0
+        const location = response.headers.location
+        if (status >= 300 && status < 400 && location && redirects > 0) {
+          response.resume()
+          const redirected = new URL(location, url).toString()
+          downloadToFile(redirected, destination, redirects - 1).then(resolve, reject)
+          return
+        }
+        if (status < 200 || status >= 300) {
+          response.resume()
+          reject(new Error(`업데이트 파일을 다운로드하지 못했습니다. (${status})`))
+          return
+        }
+
+        let bytes = 0
+        const output = fs.createWriteStream(destination, { flags: 'wx' })
+        response.on('data', (chunk: Buffer | string) => {
+          bytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
+        })
+        response.on('error', (error) => {
+          output.destroy()
+          fs.rm(destination, { force: true }, () => reject(error))
+        })
+        output.on('error', (error) => {
+          response.destroy()
+          fs.rm(destination, { force: true }, () => reject(error))
+        })
+        output.on('finish', () => {
+          output.close(() => resolve(bytes))
+        })
+        response.pipe(output)
+      },
+    )
+    request.setTimeout(60_000, () => request.destroy(new Error('업데이트 다운로드 시간이 초과되었습니다.')))
+    request.on('error', reject)
+  })
+}
+
+async function downloadLatestUpdate(): Promise<UpdateDownloadResult> {
+  const update = cachedUpdateCheck ?? (await checkForUpdates())
+  if (!update.updateAvailable || !update.asset) {
+    throw new Error('다운로드할 새 Windows zip 릴리즈가 없습니다.')
+  }
+  const fileName = sanitizeUpdateFileName(update.asset.name)
+  const destination = uniqueDownloadPath(fileName)
+  const sizeBytes = await downloadToFile(update.asset.url, destination)
+  return {
+    success: true,
+    path: destination,
+    fileName,
+    sizeBytes,
+  }
+}
+
+async function openLatestReleasePage(): Promise<void> {
+  const releaseUrl = cachedUpdateCheck?.releaseUrl ?? RELEASE_PAGE_URL
+  if (!releaseUrl.startsWith('https://github.com/knowgyu/OfficeWhere/releases/')) {
+    await shell.openExternal(RELEASE_PAGE_URL)
+    return
+  }
+  await shell.openExternal(releaseUrl)
 }
 
 async function createMainWindow() {

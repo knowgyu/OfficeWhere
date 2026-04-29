@@ -1327,7 +1327,7 @@ export default function ConsistencyCheck({
                             {unsupported
                               ? '검색 등록 가능 · 변경점 확인 제외'
                               : fileMode === 'excel'
-                                ? `행 기준 ${file.key_column || '미지정'} · 여러 파일 비교`
+                                ? '셀 좌표 기준 · 여러 파일 비교'
                                 : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
                           </p>
                         </div>

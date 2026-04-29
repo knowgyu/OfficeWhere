@@ -11,7 +11,6 @@ from ..core.file_access import inspect_file_path, pick_local_file, pick_local_fo
 from ..core.file_scope import SUPPORTED_EXTENSIONS, SUPPORTED_EXTENSIONS_LABEL
 from ..core.index_perf import elapsed_ms, log_index_perf, timed_ms
 from ..core.indexer import inspect_and_chunk
-from ..core.normalizer import suggest_key_column
 from ..core.parser import get_file_schema
 from ..database import (
     count_files,
@@ -50,28 +49,6 @@ DEFAULT_FILE_PAGE_LIMIT = 50
 MAX_FILE_PAGE_LIMIT = 100
 
 
-def _validate_registration_payload(
-    path: str,
-    file_type: str,
-    columns: List[str],
-    requested_key_column: str,
-) -> str:
-    if file_type == "Excel":
-        if not requested_key_column:
-            raise HTTPException(status_code=400, detail="Excel 등록에는 key_column 이 필요합니다.")
-        if requested_key_column not in columns:
-            suggested = suggest_key_column(columns)
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"key 컬럼 '{requested_key_column}'이(가) 파일에 없습니다. "
-                    f"사용 가능한 컬럼: {columns}. 추천 key 컬럼: {suggested}"
-                ),
-            )
-        return requested_key_column
-    return requested_key_column or ""
-
-
 def _normalize_file_page_limit(limit: int) -> int:
     if limit < 1:
         return DEFAULT_FILE_PAGE_LIMIT
@@ -84,7 +61,7 @@ def _file_info_from_row(row: dict) -> FileInfo:
         name=row["name"],
         path=row["path"],
         file_type=row["file_type"],
-        key_column=row["key_column"],
+        key_column=row.get("key_column", ""),
         column_count=row["column_count"],
         parser_config=row.get("parser_config", {}),
         created_at=row["created_at"],
@@ -169,7 +146,7 @@ def register(req: FileRegisterRequest):
     try:
         stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
         metrics["size_bytes"] = stat_result.st_size
-        info, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: inspect_and_chunk(path, parser_config=req.parser_config))
+        info, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: inspect_and_chunk(path))
     except FileNotFoundError as exc:
         log_index_perf(
             "file_done",
@@ -204,11 +181,6 @@ def register(req: FileRegisterRequest):
         )
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {exc}")
 
-    key_column = timed_ms(
-        metrics,
-        "validate_ms",
-        lambda: _validate_registration_payload(path, info["file_type"], info["columns"], req.key_column),
-    )
     file_id = timed_ms(
         metrics,
         "save_ms",
@@ -216,11 +188,11 @@ def register(req: FileRegisterRequest):
             path=path,
             name=info["name"],
             file_type=info["file_type"],
-            key_column=key_column,
+            key_column="",
             column_count=len(info["columns"]),
             chunks=chunks,
             file_mtime=stat_result.st_mtime,
-            parser_config=info["parser_config"],
+            parser_config=None,
         ),
     )
     log_index_perf(
@@ -240,7 +212,7 @@ def register(req: FileRegisterRequest):
         name=info["name"],
         file_type=info["file_type"],
         columns=info["columns"],
-        parser_config=info["parser_config"],
+        parser_config={},
     )
 
 
@@ -288,15 +260,11 @@ def get_schema(file_id: int):
         raise HTTPException(status_code=404, detail=f"파일이 삭제되었거나 경로가 변경되었습니다: {path}")
 
     try:
-        schema = get_file_schema(path, parser_config=file_row.get("parser_config"))
+        schema = get_file_schema(path)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {exc}")
 
-    return SchemaResponse(
-        columns=schema["columns"],
-        sample=schema["sample"],
-        parser_config=schema.get("parser_config", {}),
-    )
+    return SchemaResponse(columns=schema["columns"], sample=schema["sample"], parser_config={})
 
 
 @router.delete("/{file_id}")
@@ -347,13 +315,12 @@ def suggest_key(file_id: int):
         raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
 
     try:
-        schema = get_file_schema(file_row["path"], parser_config=file_row.get("parser_config"))
+        schema = get_file_schema(file_row["path"])
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {exc}")
 
     columns = schema["columns"]
-    suggested = suggest_key_column(columns) if file_row["file_type"] == "Excel" else None
-    return {"columns": columns, "suggested_key_column": suggested}
+    return {"columns": columns, "suggested_key_column": None}
 
 
 @router.post("/pick-folder", response_model=FolderPickResponse)
@@ -400,12 +367,7 @@ def bulk_register(req: BulkRegisterRequest):
         try:
             stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
             metrics["size_bytes"] = stat_result.st_size
-            info, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: inspect_and_chunk(path, parser_config=item.parser_config))
-            key_column = timed_ms(
-                metrics,
-                "validate_ms",
-                lambda: _validate_registration_payload(path, info["file_type"], info["columns"], item.key_column),
-            )
+            info, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: inspect_and_chunk(path))
             file_id = timed_ms(
                 metrics,
                 "save_ms",
@@ -413,11 +375,11 @@ def bulk_register(req: BulkRegisterRequest):
                     path=path,
                     name=info["name"],
                     file_type=info["file_type"],
-                    key_column=key_column,
+                    key_column="",
                     column_count=len(info["columns"]),
                     chunks=chunks,
                     file_mtime=stat_result.st_mtime,
-                    parser_config=info["parser_config"],
+                    parser_config=None,
                 ),
             )
             log_index_perf(
