@@ -128,3 +128,31 @@ def test_show_in_folder_uses_platform_reveal_command(tmp_path, monkeypatch):
 
     assert response["message"] == "폴더 열기 요청을 보냈습니다."
     assert commands == [["open", "-R", str(target)]]
+
+
+def test_show_in_folder_quotes_windows_select_command(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+    target = tmp_path / "My Documents" / "보고서 최종.docx"
+    target.parent.mkdir()
+    target.write_text("demo", encoding="utf-8")
+    file_id = register_file(
+        path=str(target),
+        name=target.name,
+        file_type="Word",
+        key_column="",
+        column_count=1,
+    )
+    commands: list[str] = []
+
+    class DummyProcess:
+        pass
+
+    monkeypatch.setattr("backend.api.files.sys.platform", "win32")
+    monkeypatch.setattr("backend.api.files.subprocess.Popen", lambda command: commands.append(command) or DummyProcess())
+
+    response = show_registered_file_in_folder(file_id)
+
+    assert response["message"] == "폴더 열기 요청을 보냈습니다."
+    assert commands == [f'explorer.exe /select,"{target}"']

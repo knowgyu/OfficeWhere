@@ -16,6 +16,7 @@ const officeWhereBridge = {
   checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
   openReleasePage: () => ipcRenderer.invoke('app:open-release-page'),
+  showItemInFolder: (filePath: string) => ipcRenderer.invoke('app:show-item-in-folder', { path: filePath }),
 }
 
 contextBridge.exposeInMainWorld('officeWhere', officeWhereBridge)

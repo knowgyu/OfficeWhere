@@ -503,9 +503,9 @@ export default function FileSearch({
     }
   }
 
-  const handleShowInFolder = async (fileId: number, fileName: string) => {
+  const handleShowInFolder = async (fileId: number, fileName: string, filePath: string) => {
     try {
-      await api.files.showInFolder(fileId)
+      await api.files.showInFolder(fileId, filePath)
       snackbar.info(`"${fileName}" 위치 열기 요청을 보냈습니다.`)
     } catch {
       snackbar.error('폴더를 열지 못했습니다. 파일 경로가 바뀌었는지 확인해 주세요.')
@@ -932,7 +932,7 @@ export default function FileSearch({
                       variant="text"
                       size="sm"
                       leadingIcon="folder_open"
-                      onClick={() => handleShowInFolder(items[0].file_id, fileName)}
+                      onClick={() => handleShowInFolder(items[0].file_id, fileName, items[0].path)}
                     >
                       폴더에서 보기
                     </Button>

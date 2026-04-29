@@ -81,6 +81,7 @@ declare global {
     checkForUpdates?: () => Promise<UpdateCheckResult>
     downloadUpdate?: () => Promise<UpdateDownloadResult>
     openReleasePage?: () => Promise<void>
+    showItemInFolder?: (filePath: string) => Promise<void>
   }
 
   interface Window {
@@ -1400,7 +1401,19 @@ export const api = {
     bulkRegister: (data: BulkRegisterRequest) =>
       apiPath('/api/files/bulk-register').then((url) => axios.post<BulkRegisterResponse>(url, data)),
     open: async (id: number) => axios.post(await apiPath(`/api/files/${id}/open`)),
-    showInFolder: async (id: number) => axios.post(await apiPath(`/api/files/${id}/show-in-folder`)),
+    showInFolder: async (id: number, filePath?: string) => {
+      const bridge = getOfficeWhereBridge()
+      if (filePath && bridge?.showItemInFolder) {
+        try {
+          await bridge.showItemInFolder(filePath)
+          return { data: { message: '폴더 열기 요청을 보냈습니다.' } }
+        } catch {
+          // Fall through to the backend reveal command for development builds or
+          // unexpected shell API failures.
+        }
+      }
+      return axios.post(await apiPath(`/api/files/${id}/show-in-folder`))
+    },
   },
   query: {
     join: (data: JoinRequest) =>

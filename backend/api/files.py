@@ -49,6 +49,20 @@ DEFAULT_FILE_PAGE_LIMIT = 50
 MAX_FILE_PAGE_LIMIT = 100
 
 
+def _show_item_in_folder(path: Path) -> None:
+    if sys.platform == "win32":
+        # Explorer is picky about /select with paths containing spaces or
+        # non-ASCII characters.  Passing ["/select,<path>"] lets Python quote
+        # the whole argument, which Explorer can misread and fall back to the
+        # default Documents folder.  Keep the documented explorer syntax:
+        # explorer.exe /select,"C:\path\file.ext"
+        subprocess.Popen(f'explorer.exe /select,"{path}"')
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path.parent)])
+
+
 def _normalize_file_page_limit(limit: int) -> int:
     if limit < 1:
         return DEFAULT_FILE_PAGE_LIMIT
@@ -343,12 +357,7 @@ def show_registered_file_in_folder(file_id: int):
         raise HTTPException(status_code=404, detail=f"파일이 삭제되었거나 경로가 변경되었습니다: {path}")
 
     try:
-        if sys.platform == "win32":
-            subprocess.Popen(["explorer", f"/select,{str(path)}"])
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", str(path)])
-        else:
-            subprocess.Popen(["xdg-open", str(path.parent)])
+        _show_item_in_folder(path)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"폴더를 열지 못했습니다: {exc}")
 

@@ -151,6 +151,7 @@ function registerIpcHandlers() {
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
   ipcMain.handle('app:download-update', () => downloadLatestUpdate())
   ipcMain.handle('app:open-release-page', () => openLatestReleasePage())
+  ipcMain.handle('app:show-item-in-folder', (_event, payload: unknown) => showItemInFolder(payload))
   ipcMain.handle('dialog:pick-file', async () => pickFile())
   ipcMain.handle('dialog:pick-folder', async () => pickFolder())
 }
@@ -1438,6 +1439,19 @@ async function pickFolder() {
     cancelled: result.canceled || !selected,
     folder_path: selected ? path.normalize(selected) : '',
   }
+}
+
+function showItemInFolder(payload: unknown) {
+  const requestedPath =
+    typeof payload === 'string'
+      ? payload
+      : payload && typeof payload === 'object' && typeof (payload as { path?: unknown }).path === 'string'
+        ? (payload as { path: string }).path
+        : ''
+  const filePath = path.normalize(requestedPath.trim())
+  if (!filePath) throw new Error('file path is required')
+  if (!fs.existsSync(filePath)) throw new Error(`file does not exist: ${filePath}`)
+  shell.showItemInFolder(filePath)
 }
 
 function delay(ms: number): Promise<void> {
