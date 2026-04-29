@@ -13,6 +13,11 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 ## Product / engineering follow-ups
 
+- [ ] Consider a local AI Agent integration surface after the 0.6.x release line stabilizes.
+  - Candidate shapes: loopback-only REST API for search/version/library state, or MCP server exposing read-only tools plus explicitly user-approved app actions.
+  - Constraints: source Office documents remain read-only; no broad filesystem mutation tools; any external agent access should be opt-in, local-only by default, and documented with clear trust boundaries.
+  - Do not implement in 0.6.4; revisit as a deliberate architecture/security task.
+
 - [ ] Revisit simple scheduling only if logs show a likely 10%+ wall-clock gain.
   - Candidate: Excel-first ordering with about half the worker slots reserved for Excel-heavy runs.
   - Avoid complex cost prediction until repeated traces justify it.

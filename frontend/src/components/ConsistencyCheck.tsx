@@ -2482,6 +2482,19 @@ function ExcelDiffGridModal({
   onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const [selectedCell, setSelectedCell] = useState<ExcelDiffGridCell | null>(null)
+  const sheetNames = useMemo(() => {
+    if (!modal.data) return []
+    const names = modal.data.sections
+      .map((section) => section.sheet_name || modal.data?.sheet_name || '')
+      .filter((name) => name && name !== '여러 시트')
+    return Array.from(new Set(names))
+  }, [modal.data])
+  const [selectedSheetName, setSelectedSheetName] = useState('')
+  const activeSheetName = selectedSheetName || sheetNames[0] || ''
+  const visibleSections = useMemo(() => {
+    if (!modal.data || !activeSheetName) return modal.data?.sections ?? []
+    return modal.data.sections.filter((section) => (section.sheet_name || modal.data?.sheet_name) === activeSheetName)
+  }, [modal.data, activeSheetName])
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -2490,6 +2503,18 @@ function ExcelDiffGridModal({
       document.body.style.overflow = previousOverflow
     }
   }, [])
+
+  useEffect(() => {
+    if (!modal.data || sheetNames.length === 0) {
+      setSelectedSheetName('')
+      setSelectedCell(null)
+      return
+    }
+    if (!selectedSheetName || !sheetNames.includes(selectedSheetName)) {
+      setSelectedSheetName(sheetNames[0])
+      setSelectedCell(null)
+    }
+  }, [modal.data, selectedSheetName, sheetNames])
 
   if (typeof document === 'undefined') return null
 
@@ -2551,8 +2576,16 @@ function ExcelDiffGridModal({
             </div>
           ) : modal.data ? (
             <>
-              <ExcelDiffGridSummary data={modal.data} />
-              {modal.data.sections.map((section, index) => (
+              <ExcelDiffGridSummary
+                data={modal.data}
+                sheetNames={sheetNames}
+                selectedSheetName={activeSheetName}
+                onSelectSheet={(sheetName) => {
+                  setSelectedSheetName(sheetName)
+                  setSelectedCell(null)
+                }}
+              />
+              {visibleSections.map((section, index) => (
                 <ExcelDiffGridSectionView
                   key={section.id}
                   section={section}
@@ -2573,15 +2606,59 @@ function ExcelDiffGridModal({
   )
 }
 
-function ExcelDiffGridSummary({ data }: { data: ExcelDiffGridResponse }) {
+function ExcelDiffGridSummary({
+  data,
+  sheetNames,
+  selectedSheetName,
+  onSelectSheet,
+}: {
+  data: ExcelDiffGridResponse
+  sheetNames: string[]
+  selectedSheetName: string
+  onSelectSheet: (sheetName: string) => void
+}) {
   return (
     <div className="space-y-3">
       <div className="flex gap-2 flex-wrap">
         <Chip label={`최신 파일 값 기준 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
-        <Chip label={`${data.sheet_name} 시트`} tone="neutral" as="span" />
+        <Chip label={`${selectedSheetName || data.sheet_name} 시트`} tone="neutral" as="span" />
         <Chip label={`${data.row_count}행 × ${data.column_count}열`} tone="neutral" as="span" />
         {data.key_column && <Chip label={`행 기준 · ${data.key_column}`} tone="secondary" as="span" />}
       </div>
+
+      {sheetNames.length > 1 && (
+        <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2 pt-2">
+          <div className="mb-1 flex items-center gap-1.5 px-1 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">
+            <Icon name="view_column" size={15} />
+            시트 선택
+          </div>
+          <div
+            role="tablist"
+            aria-label="Excel 시트 선택"
+            className="flex gap-1 overflow-x-auto pb-2"
+          >
+            {sheetNames.map((sheetName) => {
+              const selected = selectedSheetName === sheetName
+              return (
+                <button
+                  key={sheetName}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => onSelectSheet(sheetName)}
+                  className={`shrink-0 rounded-t-md border px-3 py-1.5 type-label-sm transition-colors ${
+                    selected
+                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
+                      : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-high)] hover:text-[var(--md-sys-color-on-surface)]'
+                  }`}
+                >
+                  {sheetName}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2 flex-wrap">
         <Badge tone="success">초록 · 최신본에 추가</Badge>
