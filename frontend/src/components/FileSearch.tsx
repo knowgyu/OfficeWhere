@@ -503,6 +503,15 @@ export default function FileSearch({
     }
   }
 
+  const handleShowInFolder = async (fileId: number, fileName: string) => {
+    try {
+      await api.files.showInFolder(fileId)
+      snackbar.info(`"${fileName}" 위치 열기 요청을 보냈습니다.`)
+    } catch {
+      snackbar.error('폴더를 열지 못했습니다. 파일 경로가 바뀌었는지 확인해 주세요.')
+    }
+  }
+
   const grouped = useMemo(() => {
     const map = new Map<string, { fileName: string; items: SearchResult[] }>()
     for (const result of results) {
@@ -918,6 +927,14 @@ export default function FileSearch({
                       onClick={() => handleOpenFile(items[0].file_id, fileName)}
                     >
                       열기
+                    </Button>
+                    <Button
+                      variant="text"
+                      size="sm"
+                      leadingIcon="folder_open"
+                      onClick={() => handleShowInFolder(items[0].file_id, fileName)}
+                    >
+                      폴더에서 보기
                     </Button>
                   </header>
                   <ul>

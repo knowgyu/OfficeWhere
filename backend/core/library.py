@@ -15,21 +15,37 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..database import (
     InitialIndexStagingDatabase,
+    LIBRARY_GROUP_INDEX_VERSION,
     PreparedIndexedFile,
     begin_initial_index_staging,
+    clear_library_group_index,
+    delete_library_group_index_files,
     delete_files_by_types,
     ensure_file_fingerprints,
     get_all_files,
-    get_registered_files_signature,
+    get_db_path,
+    get_file_by_id,
+    get_indexed_library_group,
+    get_library_group_index_file,
+    get_library_group_index_status,
     get_setting,
+    list_indexed_library_groups,
+    list_library_group_dirty_keys,
+    list_library_group_index_file_ids,
+    list_library_group_index_files_for_key,
+    mark_library_group_keys_dirty,
     prepare_indexed_file,
+    replace_library_group_index_for_keys,
+    replace_library_group_index_full,
     save_indexed_files_batch,
     save_prepared_indexed_file,
     set_setting,
+    set_library_group_index_state,
+    upsert_library_group_index_files,
 )
 from ..models.schemas import (
     FileInfo,
@@ -60,6 +76,14 @@ MANUAL_LATEST_SETTING_KEY = "library_manual_latest_files"
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[Dict[str, Any]], None]
 OFFICE_FILE_TYPES = {"Excel", "Word", "PowerPoint"}
+TARGETED_GROUP_INDEX_REPAIR_REASONS = {
+    "save_prepared_indexed_file",
+    "save_indexed_files_batch",
+    "delete_file",
+    "delete_files_by_types",
+    "save_file_chunks",
+    "update_file_mtime",
+}
 DEFAULT_GROUP_LIMIT = 50
 MAX_GROUP_LIMIT = 100
 MAX_GROUP_DETAIL_LIMIT = 200
@@ -73,9 +97,6 @@ _rescan_status_lock = threading.Lock()
 _rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
 _rescan_execution_lock = threading.Lock()
 _cancel_event = threading.Event()
-_group_cache_lock = threading.Lock()
-_group_cache_signature: Optional[str] = None
-_group_cache_details: Optional[List[LibraryGroupDetail]] = None
 
 
 @dataclass
@@ -627,10 +648,14 @@ def rescan_library(
         )
         return LibraryRescanResponse(registered=0, updated=0, skipped=0, failed=0, results=[])
 
+    response: Optional[LibraryRescanResponse] = None
     try:
-        return _rescan_library_impl(progress_callback=progress_callback, mode=mode)
+        response = _rescan_library_impl(progress_callback=progress_callback, mode=mode)
+        return response
     finally:
         _rescan_execution_lock.release()
+        if response is not None:
+            _schedule_group_refresh_after_rescan(response, reason="rescan_complete")
 
 
 def _rescan_library_impl(
@@ -1366,6 +1391,7 @@ def _rescan_library_impl(
 
 def _run_rescan_job(mode: str, owns_execution_lock: bool = False) -> None:
     mode = _normalize_rescan_mode(mode)
+    summary: Optional[LibraryRescanResponse] = None
     try:
         summary = _rescan_library_impl(progress_callback=_update_rescan_status, mode=mode)
         cancelled = _cancel_event.is_set()
@@ -1398,6 +1424,8 @@ def _run_rescan_job(mode: str, owns_execution_lock: bool = False) -> None:
     finally:
         if owns_execution_lock:
             _rescan_execution_lock.release()
+        if summary is not None:
+            _schedule_group_refresh_after_rescan(summary, reason="async_rescan_complete")
         _cancel_event.clear()
 
 
@@ -1655,61 +1683,160 @@ def _group_detail(
     )
 
 
-def _build_all_file_group_details() -> List[LibraryGroupDetail]:
-    exact_buckets: Dict[Tuple[str, str], List[FileInfo]] = {}
-    version_buckets: Dict[Tuple[str, str], List[Tuple[FileInfo, Dict[str, Any]]]] = {}
+GroupKey = Tuple[str, str, str]
+
+
+def _file_info_group_keys(file_info: FileInfo) -> set[GroupKey]:
+    if file_info.file_type not in OFFICE_FILE_TYPES:
+        return set()
+
+    keys: set[GroupKey] = {
+        ("exact_name_conflict", file_info.file_type, file_info.name.lower()),
+    }
+    identity = parse_document_identity(file_info.name)
+    if identity["tokens"]:
+        keys.add(("version_family", file_info.file_type, identity["base_name"]))
+    return keys
+
+
+def _file_row_group_keys(row: Dict[str, Any]) -> set[GroupKey]:
+    return _file_info_group_keys(file_info_from_row(row))
+
+
+def _group_key_from_fact(fact: Dict[str, Any]) -> set[GroupKey]:
+    keys: set[GroupKey] = set()
+    file_type = str(fact.get("file_type") or "")
+    exact_key = str(fact.get("exact_key") or "")
+    version_key = fact.get("version_key")
+    if file_type and exact_key:
+        keys.add(("exact_name_conflict", file_type, exact_key))
+    if file_type and version_key:
+        keys.add(("version_family", file_type, str(version_key)))
+    return keys
+
+
+def _file_fact_signature(file_info: FileInfo) -> str:
+    payload = {
+        "id": file_info.id,
+        "name": file_info.name,
+        "path": os.path.normpath(file_info.path),
+        "file_type": file_info.file_type,
+        "column_count": file_info.column_count,
+        "file_mtime": file_info.file_mtime,
+        "created_at": file_info.created_at,
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _file_fact_row(file_info: FileInfo) -> Dict[str, Any]:
+    identity = parse_document_identity(file_info.name)
+    return {
+        "file_id": file_info.id,
+        "file_type": file_info.file_type,
+        "name": file_info.name,
+        "path": file_info.path,
+        "exact_key": file_info.name.lower(),
+        "version_key": identity["base_name"] if identity["tokens"] else None,
+        "file_json": file_info.model_dump(),
+        "file_signature": _file_fact_signature(file_info),
+    }
+
+
+def _group_index_row(group: LibraryGroupDetail) -> Dict[str, Any]:
+    return {
+        "group_id": group.id,
+        "group_kind": group.group_kind,
+        "file_type": group.file_type,
+        "base_name": group.base_name,
+        "canonical_name": group.canonical_name,
+        "title": group.title,
+        "confidence": group.confidence,
+        "reason": group.reason,
+        "file_count": group.file_count,
+        "latest_file_id": group.latest_file.id if group.latest_file else None,
+        "previous_file_id": group.previous_file.id if group.previous_file else None,
+        "manual_latest_file_id": group.manual_latest_file_id,
+        "tokens_summary": group.tokens_summary,
+        "content_status": group.content_status,
+        "fingerprint_coverage": group.fingerprint_coverage,
+        "fingerprint_unique_count": group.fingerprint_unique_count,
+        "content_evidence": group.content_evidence,
+        "recommended_action": group.recommended_action,
+        "group_json": group.model_dump(),
+        "members": [file.id for file in group.files],
+    }
+
+
+def _group_detail_for_key(
+    key: GroupKey,
+    files: List[FileInfo],
+    *,
+    fingerprint_by_id: Optional[Dict[int, Dict[str, Any]]] = None,
+    manual_latest_by_group: Optional[Dict[str, int]] = None,
+) -> Optional[LibraryGroupDetail]:
+    group_kind, file_type, base_name = key
+    if file_type not in OFFICE_FILE_TYPES or len(files) < 2:
+        return None
+
+    if group_kind == "exact_name_conflict":
+        paths = {os.path.normpath(file.path) for file in files}
+        if len(paths) < 2:
+            return None
+        return _group_detail(
+            group_kind="exact_name_conflict",
+            file_type=file_type,
+            base_name=base_name,
+            files=files,
+            confidence="exact_filename",
+            reason="같은 파일명이 여러 위치에 있습니다. 내용을 확인해 보세요.",
+            fingerprint_by_id=fingerprint_by_id,
+            manual_latest_by_group=manual_latest_by_group,
+        )
+
+    if group_kind == "version_family":
+        identities = [(file, parse_document_identity(file.name)) for file in files]
+        token_signatures = {
+            tuple((token["kind"], str(token["value"])) for token in identity["tokens"])
+            for _file, identity in identities
+        }
+        if len(token_signatures) < 2:
+            return None
+        return _group_detail(
+            group_kind="version_family",
+            file_type=file_type,
+            base_name=base_name,
+            files=[file for file, _identity in identities],
+            confidence="filename_tokens",
+            reason="파일명에서 버전/날짜/상태 표시를 감지했습니다. 같은 문서 계열 후보로 확인해 보세요.",
+            tokens_summary=_tokens_summary([identity for _file, identity in identities]),
+            fingerprint_by_id=fingerprint_by_id,
+            manual_latest_by_group=manual_latest_by_group,
+        )
+
+    return None
+
+
+def _build_file_group_details_from_rows(rows: Sequence[Dict[str, Any]]) -> List[LibraryGroupDetail]:
+    exact_buckets: Dict[GroupKey, List[FileInfo]] = {}
+    version_buckets: Dict[GroupKey, List[FileInfo]] = {}
     manual_latest_by_group = _load_manual_latest_map()
 
-    for row in get_all_files():
+    for row in rows:
         file_info = file_info_from_row(row)
         if file_info.file_type not in OFFICE_FILE_TYPES:
             continue
 
-        exact_buckets.setdefault((file_info.file_type, file_info.name.lower()), []).append(file_info)
+        exact_buckets.setdefault(("exact_name_conflict", file_info.file_type, file_info.name.lower()), []).append(file_info)
 
         identity = parse_document_identity(file_info.name)
         if identity["tokens"]:
-            version_buckets.setdefault((file_info.file_type, identity["base_name"]), []).append((file_info, identity))
+            version_buckets.setdefault(("version_family", file_info.file_type, identity["base_name"]), []).append(file_info)
 
     groups: List[LibraryGroupDetail] = []
-    for (file_type, _name_key), files in exact_buckets.items():
-        paths = {os.path.normpath(file.path) for file in files}
-        if len(files) < 2 or len(paths) < 2:
-            continue
-        groups.append(
-            _group_detail(
-                group_kind="exact_name_conflict",
-                file_type=file_type,
-                base_name=files[0].name.lower(),
-                files=files,
-                confidence="exact_filename",
-                reason="같은 파일명이 여러 위치에 있습니다. 내용을 확인해 보세요.",
-                manual_latest_by_group=manual_latest_by_group,
-            )
-        )
-
-    for (file_type, base_name), items in version_buckets.items():
-        files = [file for file, _identity in items]
-        if len(files) < 2:
-            continue
-        token_signatures = {
-            tuple((token["kind"], str(token["value"])) for token in identity["tokens"])
-            for _file, identity in items
-        }
-        if len(token_signatures) < 2:
-            continue
-        groups.append(
-            _group_detail(
-                group_kind="version_family",
-                file_type=file_type,
-                base_name=base_name,
-                files=files,
-                confidence="filename_tokens",
-                reason="파일명에서 버전/날짜/상태 표시를 감지했습니다. 같은 문서 계열 후보로 확인해 보세요.",
-                tokens_summary=_tokens_summary([identity for _file, identity in items]),
-                manual_latest_by_group=manual_latest_by_group,
-            )
-        )
+    for key, files in [*exact_buckets.items(), *version_buckets.items()]:
+        group = _group_detail_for_key(key, files, manual_latest_by_group=manual_latest_by_group)
+        if group:
+            groups.append(group)
 
     groups.sort(
         key=lambda group: (
@@ -1722,33 +1849,321 @@ def _build_all_file_group_details() -> List[LibraryGroupDetail]:
     return groups
 
 
-def _group_cache_key() -> str:
-    payload = {
-        "files": get_registered_files_signature(),
-        "manual_latest": get_setting(MANUAL_LATEST_SETTING_KEY, "{}"),
-    }
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+def _build_all_file_group_details() -> List[LibraryGroupDetail]:
+    return _build_file_group_details_from_rows(get_all_files())
 
 
 def clear_group_cache() -> None:
-    global _group_cache_signature, _group_cache_details
-    with _group_cache_lock:
-        _group_cache_signature = None
-        _group_cache_details = None
+    clear_library_group_index(state="repair_needed", error="manual cache clear")
 
 
-def _all_file_group_details() -> List[LibraryGroupDetail]:
-    global _group_cache_signature, _group_cache_details
-    signature = _group_cache_key()
-    with _group_cache_lock:
-        if _group_cache_signature == signature and _group_cache_details is not None:
-            return list(_group_cache_details)
+def _build_group_index_full_payload() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    file_rows: List[Dict[str, Any]] = []
+    rows = get_all_files()
+    groups = _enrich_exact_name_group_content(_build_file_group_details_from_rows(rows))
+    for row in rows:
+        file_info = file_info_from_row(row)
+        if file_info.file_type in OFFICE_FILE_TYPES:
+            file_rows.append(_file_fact_row(file_info))
+    return file_rows, [_group_index_row(group) for group in groups]
 
-    groups = _build_all_file_group_details()
-    with _group_cache_lock:
-        _group_cache_signature = signature
-        _group_cache_details = list(groups)
+
+def _build_group_index_rows_for_keys(keys: Sequence[GroupKey]) -> List[Dict[str, Any]]:
+    manual_latest_by_group = _load_manual_latest_map()
+    group_rows: List[Dict[str, Any]] = []
+    for key in sorted({(str(k), str(t), str(b)) for k, t, b in keys}):
+        facts = list_library_group_index_files_for_key(*key)
+        files = [FileInfo(**fact["file"]) for fact in facts]
+        fingerprint_by_id = ensure_file_fingerprints([file.id for file in files]) if files else {}
+        group = _group_detail_for_key(
+            key,
+            files,
+            fingerprint_by_id=fingerprint_by_id,
+            manual_latest_by_group=manual_latest_by_group,
+        )
+        if group:
+            group_rows.append(_group_index_row(group))
+    return group_rows
+
+
+def _load_indexed_group_details() -> List[LibraryGroupDetail]:
+    groups: List[LibraryGroupDetail] = []
+    for row in list_indexed_library_groups():
+        try:
+            groups.append(LibraryGroupDetail(**row["group"]))
+        except Exception:
+            set_library_group_index_state("repair_needed", error="invalid group payload")
+            return []
     return groups
+
+
+def _group_index_needs_repair(status: Dict[str, str]) -> bool:
+    return status.get("state") in {"missing", "repair_needed", "error"} or status.get("version") != LIBRARY_GROUP_INDEX_VERSION
+
+
+def _all_file_group_details(*, cache_only: bool = False) -> List[LibraryGroupDetail]:
+    status = get_library_group_index_status()
+    if _group_index_needs_repair(status):
+        if cache_only or _is_library_rescan_active():
+            schedule_group_index_refresh(reason="request_repair", full=True)
+        else:
+            refresh_group_index_now(reason="request_repair", full=True)
+    elif status.get("state") == "stale":
+        if cache_only or _is_library_rescan_active():
+            schedule_group_index_refresh(reason="request_stale_refresh")
+        else:
+            refresh_group_index_now(reason="request_stale_refresh")
+    return _load_indexed_group_details()
+
+
+_group_refresh_thread_lock = threading.Lock()
+_group_refresh_execution_lock = threading.Lock()
+_group_refresh_thread: Optional[threading.Thread] = None
+_group_refresh_thread_db_path: Optional[str] = None
+_group_refresh_pending_full = False
+
+
+def _is_library_rescan_active() -> bool:
+    with _rescan_status_lock:
+        if bool(_rescan_status.get("running")):
+            return True
+    return _rescan_execution_lock.locked()
+
+
+def _mark_dirty_for_file_changes(
+    *,
+    changed_file_ids: Optional[Sequence[int]] = None,
+    deleted_file_rows: Optional[Sequence[Dict[str, Any]]] = None,
+) -> set[GroupKey]:
+    keys: set[GroupKey] = set()
+    for file_id in sorted({int(value) for value in (changed_file_ids or []) if int(value) > 0}):
+        old_fact = get_library_group_index_file(file_id)
+        if old_fact:
+            keys.update(_group_key_from_fact(old_fact))
+        row = get_file_by_id(file_id)
+        if row:
+            keys.update(_file_row_group_keys(row))
+
+    for row in deleted_file_rows or []:
+        try:
+            keys.update(_file_row_group_keys(row))
+        except Exception:
+            set_library_group_index_state("repair_needed", error="deleted file row cannot be keyed")
+
+    if keys:
+        mark_library_group_keys_dirty(sorted(keys))
+    return keys
+
+
+def _refresh_group_index_incremental(
+    *,
+    changed_file_ids: Optional[Sequence[int]] = None,
+    deleted_file_rows: Optional[Sequence[Dict[str, Any]]] = None,
+) -> None:
+    dirty_keys = set(list_library_group_dirty_keys())
+    dirty_keys.update(_mark_dirty_for_file_changes(changed_file_ids=changed_file_ids, deleted_file_rows=deleted_file_rows))
+
+    file_fact_rows: List[Dict[str, Any]] = []
+    deleted_ids: List[int] = []
+    for file_id in sorted({int(value) for value in (changed_file_ids or []) if int(value) > 0}):
+        row = get_file_by_id(file_id)
+        if row and row.get("file_type") in OFFICE_FILE_TYPES:
+            file_fact_rows.append(_file_fact_row(file_info_from_row(row)))
+        else:
+            deleted_ids.append(file_id)
+
+    for row in deleted_file_rows or []:
+        file_id = row.get("id")
+        if file_id is not None:
+            deleted_ids.append(int(file_id))
+
+    if file_fact_rows:
+        upsert_library_group_index_files(file_fact_rows)
+    if deleted_ids:
+        delete_library_group_index_files(deleted_ids)
+
+    if not dirty_keys:
+        remaining_dirty = list_library_group_dirty_keys()
+        set_library_group_index_state("stale" if remaining_dirty else "ready")
+        return
+
+    group_rows = _build_group_index_rows_for_keys(sorted(dirty_keys))
+    replace_library_group_index_for_keys(sorted(dirty_keys), group_rows, index_version=LIBRARY_GROUP_INDEX_VERSION)
+    if list_library_group_dirty_keys():
+        set_library_group_index_state("stale")
+
+
+def refresh_group_index_now(
+    *,
+    reason: str = "manual",
+    full: bool = False,
+    changed_file_ids: Optional[Sequence[int]] = None,
+    deleted_file_rows: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, str]:
+    if _is_library_rescan_active():
+        if full:
+            set_library_group_index_state("repair_needed", error=reason)
+        else:
+            _mark_dirty_for_file_changes(changed_file_ids=changed_file_ids, deleted_file_rows=deleted_file_rows)
+        return get_library_group_index_status()
+
+    acquired_refresh_lock = _group_refresh_execution_lock.acquire(blocking=False)
+    if not acquired_refresh_lock:
+        acquired_refresh_lock = _group_refresh_execution_lock.acquire(timeout=5.0)
+
+    if not acquired_refresh_lock:
+        if full:
+            set_library_group_index_state("repair_needed", error=reason)
+        else:
+            _mark_dirty_for_file_changes(changed_file_ids=changed_file_ids, deleted_file_rows=deleted_file_rows)
+        return get_library_group_index_status()
+
+    try:
+        status = get_library_group_index_status()
+        force_full = full or _group_index_needs_repair(status)
+        index_file_ids = list_library_group_index_file_ids()
+        targeted_change = bool(changed_file_ids or deleted_file_rows or list_library_group_dirty_keys())
+        if (
+            force_full
+            and targeted_change
+            and status.get("state") == "repair_needed"
+            and status.get("error") in TARGETED_GROUP_INDEX_REPAIR_REASONS
+            and index_file_ids
+        ):
+            force_full = False
+        if not force_full and not index_file_ids and get_all_files():
+            force_full = True
+
+        set_library_group_index_state("refreshing")
+        started = time.perf_counter()
+        if force_full:
+            file_rows, group_rows = _build_group_index_full_payload()
+            replace_library_group_index_full(file_rows, group_rows, index_version=LIBRARY_GROUP_INDEX_VERSION)
+            log_index_perf(
+                "library_group_index_refresh_done",
+                reason=reason,
+                mode="full",
+                file_count=len(file_rows),
+                group_count=len(group_rows),
+                duration_ms=elapsed_ms(started),
+            )
+        else:
+            _refresh_group_index_incremental(changed_file_ids=changed_file_ids, deleted_file_rows=deleted_file_rows)
+            log_index_perf(
+                "library_group_index_refresh_done",
+                reason=reason,
+                mode="incremental",
+                dirty_count=len(list_library_group_dirty_keys()),
+                duration_ms=elapsed_ms(started),
+            )
+    except Exception as exc:
+        logger.exception("library group index refresh failed")
+        set_library_group_index_state("error", error=f"{reason}: {exc}")
+    finally:
+        _group_refresh_execution_lock.release()
+    return get_library_group_index_status()
+
+
+def _group_refresh_worker(
+    *,
+    reason: str,
+    full: bool,
+    db_path: str,
+    changed_file_ids: Optional[List[int]] = None,
+    deleted_file_rows: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    global _group_refresh_pending_full
+    try:
+        try:
+            if get_db_path() != db_path:
+                return
+            refresh_group_index_now(
+                reason=reason,
+                full=full,
+                changed_file_ids=changed_file_ids,
+                deleted_file_rows=deleted_file_rows,
+            )
+        except Exception:
+            # Tests and app-data reset paths may swap/remove DB files while a
+            # daemon refresh from the previous DB is winding down.  The next
+            # initialized DB will repair its own derived index.
+            logger.debug("library group index refresh worker stopped during DB transition", exc_info=True)
+    finally:
+        with _group_refresh_thread_lock:
+            pending_full = _group_refresh_pending_full
+            _group_refresh_pending_full = False
+        if get_db_path() != db_path:
+            return
+        try:
+            has_dirty = bool(list_library_group_dirty_keys())
+        except Exception:
+            has_dirty = False
+        if (pending_full or has_dirty) and not _is_library_rescan_active():
+            schedule_group_index_refresh(reason="pending_group_index_refresh", full=pending_full)
+
+
+def schedule_group_index_refresh(
+    *,
+    reason: str = "background",
+    full: bool = False,
+    changed_file_ids: Optional[Sequence[int]] = None,
+    deleted_file_rows: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, str]:
+    global _group_refresh_thread, _group_refresh_thread_db_path, _group_refresh_pending_full
+    changed_ids = sorted({int(value) for value in (changed_file_ids or []) if int(value) > 0})
+    deleted_rows = [dict(row) for row in (deleted_file_rows or [])]
+    db_path = get_db_path()
+
+    if full:
+        set_library_group_index_state("repair_needed", error=reason)
+    else:
+        _mark_dirty_for_file_changes(changed_file_ids=changed_ids, deleted_file_rows=deleted_rows)
+
+    if _is_library_rescan_active():
+        return get_library_group_index_status()
+
+    with _group_refresh_thread_lock:
+        if _group_refresh_thread and _group_refresh_thread.is_alive() and _group_refresh_thread_db_path == db_path:
+            _group_refresh_pending_full = _group_refresh_pending_full or full
+            return get_library_group_index_status()
+        if _group_refresh_thread and not _group_refresh_thread.is_alive():
+            _group_refresh_thread = None
+            _group_refresh_thread_db_path = None
+        _group_refresh_thread = threading.Thread(
+            target=_group_refresh_worker,
+            kwargs={
+                "reason": reason,
+                "full": full,
+                "db_path": db_path,
+                "changed_file_ids": changed_ids,
+                "deleted_file_rows": deleted_rows,
+            },
+            daemon=True,
+            name="library-group-index-refresh",
+        )
+        _group_refresh_thread_db_path = db_path
+        _group_refresh_thread.start()
+    return get_library_group_index_status()
+
+
+def _changed_file_ids_from_rescan_response(response: LibraryRescanResponse) -> List[int]:
+    return [
+        int(result.file_id)
+        for result in response.results
+        if result.success and result.file_id is not None and result.action in {"registered", "updated"}
+    ]
+
+
+def _schedule_group_refresh_after_rescan(response: LibraryRescanResponse, *, reason: str) -> None:
+    if _cancel_event.is_set():
+        return
+    changed_ids = _changed_file_ids_from_rescan_response(response)
+    if changed_ids:
+        schedule_group_index_refresh(reason=reason, changed_file_ids=changed_ids)
+        return
+    status = get_library_group_index_status()
+    if status.get("state") in {"missing", "repair_needed", "stale", "error"}:
+        schedule_group_index_refresh(reason=reason, full=_group_index_needs_repair(status))
 
 
 def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
@@ -1783,10 +2198,11 @@ def list_file_groups(
     limit: int = DEFAULT_GROUP_LIMIT,
     offset: int = 0,
     include_duplicate_content: bool = False,
+    cache_only: bool = False,
 ) -> LibraryGroupsResponse:
     safe_limit = _bounded_limit(limit)
     safe_offset = max(0, offset)
-    groups = _all_file_group_details()
+    groups = _all_file_group_details(cache_only=cache_only)
     if kind:
         groups = [group for group in groups if group.group_kind == kind]
     if file_type:
@@ -1810,7 +2226,6 @@ def list_file_groups(
         ]
 
     if not include_duplicate_content:
-        groups = _enrich_exact_name_group_content(groups)
         groups = [
             group
             for group in groups
@@ -1835,28 +2250,46 @@ def list_file_groups(
     for group in groups:
         counts_by_kind[group.group_kind] = counts_by_kind.get(group.group_kind, 0) + 1
 
-    page = [
-        _with_content_evidence(
-            group,
-            group.files[:MAX_GROUP_SUMMARY_FINGERPRINT_FILES],
-        )
-        for group in groups[safe_offset : safe_offset + safe_limit]
-    ]
+    page = groups[safe_offset : safe_offset + safe_limit]
+    status = get_library_group_index_status()
     return LibraryGroupsResponse(
         total=len(groups),
         groups=[_group_summary(group) for group in page],
         limit=safe_limit,
         offset=safe_offset,
         counts_by_kind=counts_by_kind,
+        derived_index_state=status.get("state", "missing"),
+        derived_index_stale=status.get("state") in {"missing", "stale", "repair_needed", "error", "refreshing"},
+        derived_index_updated_at=status.get("updated_at") or None,
+        derived_index_error=status.get("error") or None,
     )
 
 
-def get_file_group_detail(group_id: str, *, limit: int = MAX_GROUP_DETAIL_LIMIT) -> Optional[LibraryGroupDetail]:
+def get_file_group_detail(
+    group_id: str,
+    *,
+    limit: int = MAX_GROUP_DETAIL_LIMIT,
+    cache_only: bool = False,
+) -> Optional[LibraryGroupDetail]:
     safe_limit = _bounded_limit(limit, default=MAX_GROUP_DETAIL_LIMIT, maximum=MAX_GROUP_DETAIL_LIMIT)
-    for group in _all_file_group_details():
-        if group.id != group_id:
-            continue
-        return _paged_group_detail(group, safe_limit)
+    status = get_library_group_index_status()
+    if _group_index_needs_repair(status):
+        if cache_only or _is_library_rescan_active():
+            schedule_group_index_refresh(reason="detail_request_repair", full=True)
+        else:
+            refresh_group_index_now(reason="detail_request_repair", full=True)
+    elif status.get("state") == "stale":
+        if cache_only or _is_library_rescan_active():
+            schedule_group_index_refresh(reason="detail_request_stale_refresh")
+        else:
+            refresh_group_index_now(reason="detail_request_stale_refresh")
+    row = get_indexed_library_group(group_id)
+    if row:
+        try:
+            return _paged_group_detail(LibraryGroupDetail(**row["group"]), safe_limit)
+        except Exception:
+            set_library_group_index_state("repair_needed", error="invalid group detail payload")
+            return None
     return None
 
 
@@ -1873,7 +2306,7 @@ def _paged_group_detail(group: LibraryGroupDetail, limit: int = MAX_GROUP_DETAIL
 
 
 def set_group_latest_file(group_id: str, file_id: int) -> Optional[LibraryGroupDetail]:
-    target_group = next((group for group in _all_file_group_details() if group.id == group_id), None)
+    target_group = get_file_group_detail(group_id)
     if not target_group:
         return None
 
@@ -1889,11 +2322,17 @@ def set_group_latest_file(group_id: str, file_id: int) -> Optional[LibraryGroupD
     manual_latest[group_id] = safe_file_id
     _save_manual_latest_map(manual_latest)
 
-    return _paged_group_detail(_with_manual_latest_file(target_group, safe_file_id))
+    key = (target_group.group_kind, target_group.file_type, target_group.base_name)
+    mark_library_group_keys_dirty([key])
+    if _is_library_rescan_active():
+        schedule_group_index_refresh(reason="manual_latest_file", changed_file_ids=[])
+        return _paged_group_detail(_with_manual_latest_file(target_group, safe_file_id))
+    refresh_group_index_now(reason="manual_latest_file")
+    return get_file_group_detail(group_id) or _paged_group_detail(_with_manual_latest_file(target_group, safe_file_id))
 
 
 def clear_group_latest_file(group_id: str) -> Optional[LibraryGroupDetail]:
-    target_group = next((group for group in _all_file_group_details() if group.id == group_id), None)
+    target_group = get_file_group_detail(group_id)
     if not target_group:
         return None
 
@@ -1902,7 +2341,13 @@ def clear_group_latest_file(group_id: str) -> Optional[LibraryGroupDetail]:
         manual_latest.pop(group_id, None)
         _save_manual_latest_map(manual_latest)
 
-    return _paged_group_detail(_with_manual_latest_file(target_group, None))
+    key = (target_group.group_kind, target_group.file_type, target_group.base_name)
+    mark_library_group_keys_dirty([key])
+    if _is_library_rescan_active():
+        schedule_group_index_refresh(reason="manual_latest_clear", changed_file_ids=[])
+        return _paged_group_detail(_with_manual_latest_file(target_group, None))
+    refresh_group_index_now(reason="manual_latest_clear")
+    return get_file_group_detail(group_id) or _paged_group_detail(_with_manual_latest_file(target_group, None))
 
 
 def build_file_groups() -> List[LibraryFileGroup]:

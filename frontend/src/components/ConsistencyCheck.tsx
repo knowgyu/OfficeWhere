@@ -314,6 +314,12 @@ export default function ConsistencyCheck({
   const [showDuplicateGroups, setShowDuplicateGroups] = useState(false)
   const [groupFilterOpen, setGroupFilterOpen] = useState(false)
   const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupIndexState, setGroupIndexState] = useState<{
+    state: string
+    stale: boolean
+    updatedAt?: string | null
+    error?: string | null
+  }>({ state: 'missing', stale: false })
   const [groupLoadingId, setGroupLoadingId] = useState<string | null>(null)
   const [activeGroupDetail, setActiveGroupDetail] = useState<LibraryGroupDetail | null>(null)
   const [groupDetailFiles, setGroupDetailFiles] = useState<FileInfo[]>([])
@@ -327,6 +333,7 @@ export default function ConsistencyCheck({
   const [excelGridModal, setExcelGridModal] = useState<ExcelGridModalState | null>(null)
   const historyRunRef = useRef(0)
   const tutorialAppliedGroupFiltersRef = useRef(false)
+  const groupRefreshTimerRef = useRef<number | null>(null)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setFilesLoading(true)
@@ -366,9 +373,23 @@ export default function ConsistencyCheck({
         fileType: nextFileType === 'all' ? undefined : nextFileType,
         sort: nextSort,
         includeDuplicates: nextShowDuplicates,
+        cacheOnly: true,
       })
       setGroups(response.data.groups)
       setGroupTotal(response.data.total)
+      setGroupIndexState({
+        state: response.data.derived_index_state ?? 'ready',
+        stale: Boolean(response.data.derived_index_stale),
+        updatedAt: response.data.derived_index_updated_at,
+        error: response.data.derived_index_error,
+      })
+      if (response.data.derived_index_stale) {
+        if (groupRefreshTimerRef.current !== null) window.clearTimeout(groupRefreshTimerRef.current)
+        groupRefreshTimerRef.current = window.setTimeout(() => {
+          groupRefreshTimerRef.current = null
+          void fetchGroups(nextOffset, nextFilter, nextQuery, nextFileType, nextSort, nextShowDuplicates)
+        }, 1600)
+      }
       setGroupOffset(response.data.offset)
       setGroupFilter(nextFilter)
       setGroupQuery(nextQuery)
@@ -385,6 +406,9 @@ export default function ConsistencyCheck({
   useEffect(() => {
     void fetchFiles(0, '')
     void fetchGroups(0, 'all')
+    return () => {
+      if (groupRefreshTimerRef.current !== null) window.clearTimeout(groupRefreshTimerRef.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -1124,6 +1148,15 @@ export default function ConsistencyCheck({
               </div>
             )}
           </div>
+
+          {groupIndexState.stale && (
+            <div className="mx-5 rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-secondary-container)]/45 px-4 py-3 type-body-sm text-[var(--md-sys-color-on-secondary-container)]">
+              <span className="font-medium">문서 묶음 정보를 백그라운드에서 준비 중입니다.</span>
+              <span className="ml-2 text-[var(--md-sys-color-on-surface-variant)]">
+                준비된 결과를 먼저 보여주고, 완료되면 자동으로 새로고침합니다.
+              </span>
+            </div>
+          )}
 
           {groupsLoading ? (
             <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">

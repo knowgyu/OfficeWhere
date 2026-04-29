@@ -28,6 +28,11 @@ DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
 SEARCH_INDEX_VERSION = "6"
 COMPARISON_CACHE_VERSION = 2
+LIBRARY_GROUP_INDEX_VERSION = "1"
+LIBRARY_GROUP_INDEX_VERSION_KEY = "library_group_index_version"
+LIBRARY_GROUP_INDEX_STATE_KEY = "library_group_index_state"
+LIBRARY_GROUP_INDEX_UPDATED_AT_KEY = "library_group_index_updated_at"
+LIBRARY_GROUP_INDEX_ERROR_KEY = "library_group_index_error"
 COMPARISON_CACHE_MAX_BYTES = 100 * 1024 * 1024
 COMPARISON_CACHE_MAX_AGE_DAYS = 90
 COMPARISON_CACHE_MIN_KEEP_ROWS = 300
@@ -301,6 +306,20 @@ def _set_setting_with_cursor(cursor: sqlite3.Cursor, key: str, value: str):
         """,
         (key, value),
     )
+
+
+def _set_library_group_index_state_with_cursor(
+    cursor: sqlite3.Cursor,
+    state: str,
+    *,
+    error: str = "",
+    updated_at: Optional[str] = None,
+) -> None:
+    now = updated_at or datetime.now().isoformat()
+    _set_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_VERSION_KEY, LIBRARY_GROUP_INDEX_VERSION)
+    _set_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_STATE_KEY, state)
+    _set_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_UPDATED_AT_KEY, now)
+    _set_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_ERROR_KEY, error)
 
 
 def _normalize_file_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -707,6 +726,103 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS library_group_index_files (
+            file_id INTEGER PRIMARY KEY,
+            file_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            exact_key TEXT NOT NULL,
+            version_key TEXT,
+            file_json TEXT NOT NULL,
+            file_signature TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_library_group_index_files_exact
+        ON library_group_index_files(file_type, exact_key)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_library_group_index_files_version
+        ON library_group_index_files(file_type, version_key)
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS library_group_index (
+            group_id TEXT PRIMARY KEY,
+            group_kind TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            base_name TEXT NOT NULL,
+            canonical_name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            file_count INTEGER NOT NULL,
+            latest_file_id INTEGER,
+            previous_file_id INTEGER,
+            manual_latest_file_id INTEGER,
+            tokens_summary_json TEXT NOT NULL,
+            content_status TEXT NOT NULL,
+            fingerprint_coverage INTEGER NOT NULL,
+            fingerprint_unique_count INTEGER NOT NULL,
+            content_evidence TEXT NOT NULL,
+            recommended_action TEXT NOT NULL,
+            group_json TEXT NOT NULL,
+            index_version TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_library_group_index_lookup
+        ON library_group_index(group_kind, file_type, base_name)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_library_group_index_recent
+        ON library_group_index(updated_at DESC)
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS library_group_members (
+            group_id TEXT NOT NULL,
+            file_id INTEGER NOT NULL,
+            rank INTEGER NOT NULL,
+            PRIMARY KEY (group_id, file_id)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_library_group_members_file
+        ON library_group_members(file_id)
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS library_group_dirty_keys (
+            group_kind TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            base_name TEXT NOT NULL,
+            marked_at TEXT NOT NULL,
+            PRIMARY KEY (group_kind, file_type, base_name)
+        )
+        """
+    )
+
 
 def init_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -736,6 +852,441 @@ def init_db():
             _rebuild_search_indexes(cursor, optimize=True)
 
         conn.commit()
+
+
+def get_library_group_index_status() -> Dict[str, str]:
+    conn = _connect()
+    cursor = conn.cursor()
+    status = {
+        "version": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_VERSION_KEY, ""),
+        "state": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_STATE_KEY, "missing"),
+        "updated_at": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_UPDATED_AT_KEY, ""),
+        "error": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_ERROR_KEY, ""),
+    }
+    conn.close()
+    if status["version"] and status["version"] != LIBRARY_GROUP_INDEX_VERSION:
+        status["state"] = "repair_needed"
+        status["error"] = "derived index version mismatch"
+    return status
+
+
+def set_library_group_index_state(state: str, *, error: str = "") -> Dict[str, str]:
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        _set_library_group_index_state_with_cursor(cursor, state, error=error)
+        conn.commit()
+    return get_library_group_index_status()
+
+
+def mark_library_group_keys_dirty(keys: Sequence[Tuple[str, str, str]]) -> int:
+    unique_keys = sorted({(str(kind), str(file_type), str(base_name)) for kind, file_type, base_name in keys})
+    if not unique_keys:
+        return 0
+
+    now = datetime.now().isoformat()
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.executemany(
+            """
+            INSERT INTO library_group_dirty_keys (group_kind, file_type, base_name, marked_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(group_kind, file_type, base_name) DO UPDATE SET
+                marked_at=excluded.marked_at
+            """,
+            [(kind, file_type, base_name, now) for kind, file_type, base_name in unique_keys],
+        )
+        _set_library_group_index_state_with_cursor(cursor, "stale", updated_at=now)
+        conn.commit()
+    return len(unique_keys)
+
+
+def list_library_group_dirty_keys() -> List[Tuple[str, str, str]]:
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT group_kind, file_type, base_name
+        FROM library_group_dirty_keys
+        ORDER BY marked_at ASC
+        """
+    )
+    rows = [(str(row[0]), str(row[1]), str(row[2])) for row in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def clear_library_group_dirty_keys(keys: Optional[Sequence[Tuple[str, str, str]]] = None) -> None:
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        if keys is None:
+            cursor.execute("DELETE FROM library_group_dirty_keys")
+        else:
+            for kind, file_type, base_name in sorted({(str(k), str(t), str(b)) for k, t, b in keys}):
+                cursor.execute(
+                    """
+                    DELETE FROM library_group_dirty_keys
+                    WHERE group_kind=? AND file_type=? AND base_name=?
+                    """,
+                    (kind, file_type, base_name),
+                )
+        conn.commit()
+
+
+def _library_group_index_file_values(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    updated_at: str,
+) -> List[Tuple[int, str, str, str, str, Optional[str], str, str, str]]:
+    values: List[Tuple[int, str, str, str, str, Optional[str], str, str, str]] = []
+    for row in rows:
+        file_json = row["file_json"]
+        if not isinstance(file_json, str):
+            file_json = json.dumps(file_json, ensure_ascii=False, sort_keys=True)
+        values.append(
+            (
+                int(row["file_id"]),
+                str(row["file_type"]),
+                str(row["name"]),
+                str(row["path"]),
+                str(row["exact_key"]),
+                str(row["version_key"]) if row.get("version_key") else None,
+                file_json,
+                str(row["file_signature"]),
+                updated_at,
+            )
+        )
+    return values
+
+
+def _upsert_library_group_index_files_with_cursor(
+    cursor: sqlite3.Cursor,
+    rows: Sequence[Dict[str, Any]],
+    *,
+    updated_at: str,
+) -> None:
+    values = _library_group_index_file_values(rows, updated_at=updated_at)
+    if not values:
+        return
+    cursor.executemany(
+        """
+        INSERT INTO library_group_index_files (
+            file_id, file_type, name, path, exact_key, version_key,
+            file_json, file_signature, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(file_id) DO UPDATE SET
+            file_type=excluded.file_type,
+            name=excluded.name,
+            path=excluded.path,
+            exact_key=excluded.exact_key,
+            version_key=excluded.version_key,
+            file_json=excluded.file_json,
+            file_signature=excluded.file_signature,
+            updated_at=excluded.updated_at
+        """,
+        values,
+    )
+
+
+def upsert_library_group_index_files(rows: Sequence[Dict[str, Any]]) -> None:
+    if not rows:
+        return
+    now = datetime.now().isoformat()
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        _upsert_library_group_index_files_with_cursor(cursor, rows, updated_at=now)
+        conn.commit()
+
+
+def delete_library_group_index_files(file_ids: Sequence[int]) -> None:
+    ids = sorted({int(file_id) for file_id in file_ids if int(file_id) > 0})
+    if not ids:
+        return
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        for batch in _batched_values(ids):
+            placeholders = ",".join("?" for _ in batch)
+            cursor.execute(f"DELETE FROM library_group_index_files WHERE file_id IN ({placeholders})", batch)
+            cursor.execute(f"DELETE FROM library_group_members WHERE file_id IN ({placeholders})", batch)
+        conn.commit()
+
+
+def get_library_group_index_file(file_id: int) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM library_group_index_files WHERE file_id=?", (int(file_id),))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    data = dict(row)
+    try:
+        data["file"] = json.loads(data["file_json"])
+    except (TypeError, json.JSONDecodeError):
+        set_library_group_index_state("repair_needed", error="corrupt file fact JSON")
+        return None
+    return data
+
+
+def list_library_group_index_files_for_key(group_kind: str, file_type: str, base_name: str) -> List[Dict[str, Any]]:
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if group_kind == "exact_name_conflict":
+        cursor.execute(
+            """
+            SELECT * FROM library_group_index_files
+            WHERE file_type=? AND exact_key=?
+            ORDER BY name COLLATE NOCASE ASC, file_id ASC
+            """,
+            (file_type, base_name),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT * FROM library_group_index_files
+            WHERE file_type=? AND version_key=?
+            ORDER BY name COLLATE NOCASE ASC, file_id ASC
+            """,
+            (file_type, base_name),
+        )
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    parsed: List[Dict[str, Any]] = []
+    for row in rows:
+        try:
+            row["file"] = json.loads(row["file_json"])
+        except (TypeError, json.JSONDecodeError):
+            set_library_group_index_state("repair_needed", error="corrupt file fact JSON")
+            return []
+        parsed.append(row)
+    return parsed
+
+
+def list_library_group_index_file_ids() -> List[int]:
+    conn = _connect()
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_id FROM library_group_index_files")
+    ids = [int(row[0]) for row in cursor.fetchall()]
+    conn.close()
+    return ids
+
+
+def _delete_group_index_rows_for_keys(cursor: sqlite3.Cursor, keys: Sequence[Tuple[str, str, str]]) -> None:
+    for group_kind, file_type, base_name in sorted({(str(k), str(t), str(b)) for k, t, b in keys}):
+        cursor.execute(
+            """
+            SELECT group_id FROM library_group_index
+            WHERE group_kind=? AND file_type=? AND base_name=?
+            """,
+            (group_kind, file_type, base_name),
+        )
+        group_ids = [str(row[0]) for row in cursor.fetchall()]
+        for group_id in group_ids:
+            cursor.execute("DELETE FROM library_group_members WHERE group_id=?", (group_id,))
+        cursor.execute(
+            """
+            DELETE FROM library_group_index
+            WHERE group_kind=? AND file_type=? AND base_name=?
+            """,
+            (group_kind, file_type, base_name),
+        )
+
+
+def _insert_group_index_rows(
+    cursor: sqlite3.Cursor,
+    groups: Sequence[Dict[str, Any]],
+    *,
+    index_version: str,
+    updated_at: str,
+) -> None:
+    for group in groups:
+        group_json = group["group_json"]
+        if not isinstance(group_json, str):
+            group_json = json.dumps(group_json, ensure_ascii=False, sort_keys=True)
+        tokens_summary = group.get("tokens_summary", [])
+        tokens_json = (
+            tokens_summary
+            if isinstance(tokens_summary, str)
+            else json.dumps(tokens_summary, ensure_ascii=False, sort_keys=True)
+        )
+        cursor.execute(
+            """
+            INSERT INTO library_group_index (
+                group_id, group_kind, file_type, base_name, canonical_name, title,
+                confidence, reason, file_count, latest_file_id, previous_file_id,
+                manual_latest_file_id, tokens_summary_json, content_status,
+                fingerprint_coverage, fingerprint_unique_count, content_evidence,
+                recommended_action, group_json, index_version, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(group_id) DO UPDATE SET
+                group_kind=excluded.group_kind,
+                file_type=excluded.file_type,
+                base_name=excluded.base_name,
+                canonical_name=excluded.canonical_name,
+                title=excluded.title,
+                confidence=excluded.confidence,
+                reason=excluded.reason,
+                file_count=excluded.file_count,
+                latest_file_id=excluded.latest_file_id,
+                previous_file_id=excluded.previous_file_id,
+                manual_latest_file_id=excluded.manual_latest_file_id,
+                tokens_summary_json=excluded.tokens_summary_json,
+                content_status=excluded.content_status,
+                fingerprint_coverage=excluded.fingerprint_coverage,
+                fingerprint_unique_count=excluded.fingerprint_unique_count,
+                content_evidence=excluded.content_evidence,
+                recommended_action=excluded.recommended_action,
+                group_json=excluded.group_json,
+                index_version=excluded.index_version,
+                updated_at=excluded.updated_at
+            """,
+            (
+                str(group["group_id"]),
+                str(group["group_kind"]),
+                str(group["file_type"]),
+                str(group["base_name"]),
+                str(group["canonical_name"]),
+                str(group["title"]),
+                str(group["confidence"]),
+                str(group["reason"]),
+                int(group["file_count"]),
+                group.get("latest_file_id"),
+                group.get("previous_file_id"),
+                group.get("manual_latest_file_id"),
+                tokens_json,
+                str(group["content_status"]),
+                int(group["fingerprint_coverage"]),
+                int(group["fingerprint_unique_count"]),
+                str(group["content_evidence"]),
+                str(group["recommended_action"]),
+                group_json,
+                index_version,
+                updated_at,
+            ),
+        )
+        members = group.get("members", [])
+        cursor.executemany(
+            """
+            INSERT INTO library_group_members (group_id, file_id, rank)
+            VALUES (?, ?, ?)
+            ON CONFLICT(group_id, file_id) DO UPDATE SET rank=excluded.rank
+            """,
+            [(str(group["group_id"]), int(file_id), rank) for rank, file_id in enumerate(members)],
+        )
+
+
+def replace_library_group_index_full(
+    file_rows: Sequence[Dict[str, Any]],
+    group_rows: Sequence[Dict[str, Any]],
+    *,
+    index_version: str = LIBRARY_GROUP_INDEX_VERSION,
+) -> None:
+    now = datetime.now().isoformat()
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM library_group_members")
+        cursor.execute("DELETE FROM library_group_index")
+        cursor.execute("DELETE FROM library_group_index_files")
+        cursor.execute("DELETE FROM library_group_dirty_keys")
+        _upsert_library_group_index_files_with_cursor(cursor, file_rows, updated_at=now)
+        _insert_group_index_rows(cursor, group_rows, index_version=index_version, updated_at=now)
+        _set_library_group_index_state_with_cursor(cursor, "ready", updated_at=now)
+        conn.commit()
+
+
+def replace_library_group_index_for_keys(
+    keys: Sequence[Tuple[str, str, str]],
+    group_rows: Sequence[Dict[str, Any]],
+    *,
+    index_version: str = LIBRARY_GROUP_INDEX_VERSION,
+) -> None:
+    if not keys:
+        return
+    now = datetime.now().isoformat()
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        _delete_group_index_rows_for_keys(cursor, keys)
+        _insert_group_index_rows(cursor, group_rows, index_version=index_version, updated_at=now)
+        for group_kind, file_type, base_name in sorted({(str(k), str(t), str(b)) for k, t, b in keys}):
+            cursor.execute(
+                """
+                DELETE FROM library_group_dirty_keys
+                WHERE group_kind=? AND file_type=? AND base_name=?
+                """,
+                (group_kind, file_type, base_name),
+            )
+        _set_library_group_index_state_with_cursor(cursor, "ready", updated_at=now)
+        conn.commit()
+
+
+def clear_library_group_index(*, state: str = "ready", error: str = "") -> None:
+    now = datetime.now().isoformat()
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM library_group_members")
+        cursor.execute("DELETE FROM library_group_index")
+        cursor.execute("DELETE FROM library_group_index_files")
+        cursor.execute("DELETE FROM library_group_dirty_keys")
+        _set_library_group_index_state_with_cursor(cursor, state, error=error, updated_at=now)
+        conn.commit()
+
+
+def list_indexed_library_groups() -> List[Dict[str, Any]]:
+    status = get_library_group_index_status()
+    if status.get("version") and status.get("version") != LIBRARY_GROUP_INDEX_VERSION:
+        set_library_group_index_state("repair_needed", error="derived index version mismatch")
+        return []
+
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT *
+        FROM library_group_index
+        WHERE index_version=?
+        ORDER BY updated_at DESC
+        """,
+        (LIBRARY_GROUP_INDEX_VERSION,),
+    )
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    for row in rows:
+        try:
+            row["group"] = json.loads(row["group_json"])
+        except (TypeError, json.JSONDecodeError):
+            set_library_group_index_state("repair_needed", error="corrupt group JSON")
+            return []
+    return rows
+
+
+def get_indexed_library_group(group_id: str) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT *
+        FROM library_group_index
+        WHERE group_id=? AND index_version=?
+        """,
+        (group_id, LIBRARY_GROUP_INDEX_VERSION),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    data = dict(row)
+    try:
+        data["group"] = json.loads(data["group_json"])
+    except (TypeError, json.JSONDecodeError):
+        set_library_group_index_state("repair_needed", error="corrupt group JSON")
+        return None
+    return data
 
 
 def begin_initial_index_staging() -> InitialIndexStagingDatabase:
@@ -782,6 +1333,17 @@ def begin_initial_index_staging() -> InitialIndexStagingDatabase:
     return InitialIndexStagingDatabase(path=temp_path, conn=conn)
 
 
+def _mark_group_index_repair_needed_for_legacy_write(reason: str) -> None:
+    """Mark derived groups stale for low-level helpers that cannot compute keys."""
+    try:
+        set_library_group_index_state("repair_needed", error=reason)
+    except sqlite3.Error:
+        # Some tests create partial legacy schemas before init_db(); callers should
+        # not fail just because the optional derived-index tables/settings do not
+        # exist yet.
+        return
+
+
 def register_file(
     path: str,
     name: str,
@@ -805,6 +1367,7 @@ def register_file(
                 (path, name, file_type, column_count, now),
             )
             conn.commit()
+            _mark_group_index_repair_needed_for_legacy_write("register_file")
             return cursor.lastrowid
         except sqlite3.IntegrityError:
             cursor.execute(
@@ -818,6 +1381,7 @@ def register_file(
             conn.commit()
             cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
             row = cursor.fetchone()
+            _mark_group_index_repair_needed_for_legacy_write("register_file")
             return row[0] if row else -1
 
 
@@ -849,7 +1413,9 @@ def save_prepared_indexed_file(payload: PreparedIndexedFile) -> int:
     """Save one already-prepared indexed file payload."""
     with _write_connection() as conn:
         try:
-            file_id = _save_prepared_indexed_file(conn.cursor(), payload, datetime.now().isoformat())
+            cursor = conn.cursor()
+            file_id = _save_prepared_indexed_file(cursor, payload, datetime.now().isoformat())
+            _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="save_prepared_indexed_file")
             conn.commit()
             return file_id
         except Exception:
@@ -879,6 +1445,7 @@ def _save_indexed_files_batch_on_connection(
         cursor = conn.cursor()
         now = datetime.now().isoformat()
         file_ids = [_save_prepared_indexed_file(cursor, payload, now, metrics) for payload in payloads]
+        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="save_indexed_files_batch")
         commit_started = perf_counter()
         conn.commit()
         metrics["commit_ms"] = elapsed_ms(commit_started)
@@ -1100,10 +1667,13 @@ def delete_file(file_id: int) -> bool:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM file_chunks WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
+        cursor.execute("DELETE FROM library_group_index_files WHERE file_id=?", (file_id,))
+        cursor.execute("DELETE FROM library_group_members WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
         affected = cursor.rowcount
         if affected:
             cursor.execute("DELETE FROM comparison_cache")
+            _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="delete_file")
         conn.commit()
         return affected > 0
 
@@ -1125,8 +1695,11 @@ def delete_files_by_types(file_types: Sequence[str]) -> int:
         id_placeholders = ",".join("?" for _ in file_ids)
         cursor.execute(f"DELETE FROM file_chunks WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM document_fingerprints WHERE file_id IN ({id_placeholders})", file_ids)
+        cursor.execute(f"DELETE FROM library_group_index_files WHERE file_id IN ({id_placeholders})", file_ids)
+        cursor.execute(f"DELETE FROM library_group_members WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM registered_files WHERE id IN ({id_placeholders})", file_ids)
         cursor.execute("DELETE FROM comparison_cache")
+        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="delete_files_by_types")
         conn.commit()
         return len(file_ids)
 
@@ -1141,6 +1714,11 @@ def delete_all_files() -> int:
         cursor.execute("DELETE FROM document_fingerprints")
         cursor.execute("DELETE FROM comparison_cache")
         cursor.execute("DELETE FROM registered_files")
+        cursor.execute("DELETE FROM library_group_members")
+        cursor.execute("DELETE FROM library_group_index")
+        cursor.execute("DELETE FROM library_group_index_files")
+        cursor.execute("DELETE FROM library_group_dirty_keys")
+        _set_library_group_index_state_with_cursor(cursor, "ready")
         conn.commit()
         return count
 
@@ -1162,6 +1740,7 @@ def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
             ],
         )
         _upsert_document_fingerprint(cursor, file_id, chunks, source_mtime=source_mtime)
+        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="save_file_chunks")
         conn.commit()
 
 
@@ -1170,6 +1749,7 @@ def update_file_mtime(file_id: int, mtime: float):
         cursor = conn.cursor()
         cursor.execute("UPDATE registered_files SET file_mtime = ? WHERE id = ?", (mtime, file_id))
         cursor.execute("UPDATE document_fingerprints SET source_mtime = ? WHERE file_id = ?", (mtime, file_id))
+        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="update_file_mtime")
         conn.commit()
 
 

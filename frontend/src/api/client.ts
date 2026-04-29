@@ -620,6 +620,10 @@ export interface LibraryGroupsResponse {
   limit: number
   offset: number
   counts_by_kind: Partial<Record<LibraryGroupKind, number>>
+  derived_index_state?: 'missing' | 'ready' | 'stale' | 'refreshing' | 'repair_needed' | 'error'
+  derived_index_stale?: boolean
+  derived_index_updated_at?: string | null
+  derived_index_error?: string | null
 }
 
 export interface LibraryGroupsParams {
@@ -630,6 +634,7 @@ export interface LibraryGroupsParams {
   limit?: number
   offset?: number
   includeDuplicates?: boolean
+  cacheOnly?: boolean
 }
 
 const electronApi = () => getOfficeWhereBridge()
@@ -690,6 +695,7 @@ async function getLibraryGroups(params: LibraryGroupsParams = {}) {
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
   if (params.includeDuplicates) searchParams.set('include_duplicates', 'true')
+  if (params.cacheOnly) searchParams.set('cache_only', 'true')
 
   const url = await apiPath('/api/library/groups')
   const suffix = searchParams.toString()
@@ -1394,6 +1400,7 @@ export const api = {
     bulkRegister: (data: BulkRegisterRequest) =>
       apiPath('/api/files/bulk-register').then((url) => axios.post<BulkRegisterResponse>(url, data)),
     open: async (id: number) => axios.post(await apiPath(`/api/files/${id}/open`)),
+    showInFolder: async (id: number) => axios.post(await apiPath(`/api/files/${id}/show-in-folder`)),
   },
   query: {
     join: (data: JoinRequest) =>

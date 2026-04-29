@@ -1,4 +1,8 @@
-from backend.api.files import list_files_bounded, remove_all_files
+import pytest
+
+from fastapi import HTTPException
+
+from backend.api.files import list_files_bounded, remove_all_files, show_registered_file_in_folder
 from backend.database import init_db, register_file
 
 
@@ -74,3 +78,53 @@ def test_remove_all_files_returns_deleted_count(tmp_path, monkeypatch):
 
     assert response["deleted"] == 3
     assert list_files_bounded(limit=10).total == 0
+
+
+def test_show_in_folder_rejects_unknown_or_missing_path(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    with pytest.raises(HTTPException) as unknown:
+        show_registered_file_in_folder(999)
+    assert unknown.value.status_code == 404
+
+    file_id = register_file(
+        path=str(tmp_path / "missing.docx"),
+        name="missing.docx",
+        file_type="Word",
+        key_column="",
+        column_count=1,
+    )
+
+    with pytest.raises(HTTPException) as missing:
+        show_registered_file_in_folder(file_id)
+    assert missing.value.status_code == 404
+
+
+def test_show_in_folder_uses_platform_reveal_command(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+    target = tmp_path / "docs" / "보고서.docx"
+    target.parent.mkdir()
+    target.write_text("demo", encoding="utf-8")
+    file_id = register_file(
+        path=str(target),
+        name=target.name,
+        file_type="Word",
+        key_column="",
+        column_count=1,
+    )
+    commands: list[list[str]] = []
+
+    class DummyProcess:
+        pass
+
+    monkeypatch.setattr("backend.api.files.sys.platform", "darwin")
+    monkeypatch.setattr("backend.api.files.subprocess.Popen", lambda command: commands.append(command) or DummyProcess())
+
+    response = show_registered_file_in_folder(file_id)
+
+    assert response["message"] == "폴더 열기 요청을 보냈습니다."
+    assert commands == [["open", "-R", str(target)]]

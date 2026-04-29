@@ -69,6 +69,23 @@ def _file_info_from_row(row: dict) -> FileInfo:
     )
 
 
+def _schedule_group_refresh_for_file_ids(reason: str, file_ids: List[int]) -> None:
+    if not file_ids:
+        return
+    # Imported lazily to keep the API router independent from library startup.
+    from ..core.library import schedule_group_index_refresh
+
+    schedule_group_index_refresh(reason=reason, changed_file_ids=file_ids)
+
+
+def _schedule_group_refresh_for_deleted_rows(reason: str, rows: List[dict]) -> None:
+    if not rows:
+        return
+    from ..core.library import schedule_group_index_refresh
+
+    schedule_group_index_refresh(reason=reason, deleted_file_rows=rows)
+
+
 @router.post("/inspect", response_model=FileInspectResponse)
 def inspect_file(req: FileInspectRequest):
     try:
@@ -206,6 +223,7 @@ def register(req: FileRegisterRequest):
         column_count=len(info["columns"]),
         total_ms=elapsed_ms(started),
     )
+    _schedule_group_refresh_for_file_ids("file_register", [file_id])
 
     return FileRegisterResponse(
         id=file_id,
@@ -269,9 +287,11 @@ def get_schema(file_id: int):
 
 @router.delete("/{file_id}")
 def remove_file(file_id: int):
-    if not get_file_by_id(file_id):
+    file_row = get_file_by_id(file_id)
+    if not file_row:
         raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
     delete_file(file_id)
+    _schedule_group_refresh_for_deleted_rows("file_delete", [file_row])
     return {"message": "파일 등록이 해제되었습니다."}
 
 
@@ -279,6 +299,10 @@ def remove_file(file_id: int):
 @router.delete("/", response_model=FilesDeleteAllResponse)
 def remove_all_files():
     deleted = delete_all_files()
+    if deleted:
+        from ..core.library import schedule_group_index_refresh
+
+        schedule_group_index_refresh(reason="files_delete_all", full=True)
     return {
         "deleted": deleted,
         "message": "전체 파일 등록이 해제되었습니다.",
@@ -306,6 +330,29 @@ def open_registered_file(file_id: int):
         raise HTTPException(status_code=500, detail=f"파일을 열지 못했습니다: {exc}")
 
     return {"message": "파일 열기 요청을 보냈습니다."}
+
+
+@router.post("/{file_id}/show-in-folder")
+def show_registered_file_in_folder(file_id: int):
+    file_row = get_file_by_id(file_id)
+    if not file_row:
+        raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
+
+    path = Path(file_row["path"])
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"파일이 삭제되었거나 경로가 변경되었습니다: {path}")
+
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", f"/select,{str(path)}"])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path.parent)])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"폴더를 열지 못했습니다: {exc}")
+
+    return {"message": "폴더 열기 요청을 보냈습니다."}
 
 
 @router.get("/{file_id}/suggest-key")
@@ -410,4 +457,8 @@ def bulk_register(req: BulkRegisterRequest):
         results = list(executor.map(_register_one, req.files))
 
     registered = sum(1 for result in results if result.success)
+    _schedule_group_refresh_for_file_ids(
+        "bulk_register",
+        [int(result.file_id) for result in results if result.success and result.file_id is not None],
+    )
     return BulkRegisterResponse(registered=registered, failed=len(results) - registered, results=results)

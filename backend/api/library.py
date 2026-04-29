@@ -66,6 +66,7 @@ def get_library_groups(
     limit: int = 50,
     offset: int = 0,
     include_duplicates: bool = False,
+    cache_only: bool = False,
 ):
     return list_file_groups(
         kind=kind,
@@ -75,12 +76,13 @@ def get_library_groups(
         limit=limit,
         offset=offset,
         include_duplicate_content=include_duplicates,
+        cache_only=cache_only,
     )
 
 
 @router.get("/groups/{group_id}", response_model=LibraryGroupDetail)
-def get_library_group(group_id: str, limit: int = 200):
-    group = get_file_group_detail(group_id, limit=limit)
+def get_library_group(group_id: str, limit: int = 200, cache_only: bool = False):
+    group = get_file_group_detail(group_id, limit=limit, cache_only=cache_only)
     if not group:
         raise HTTPException(status_code=404, detail="문서 묶음을 찾을 수 없습니다.")
     return group

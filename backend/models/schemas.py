@@ -468,3 +468,7 @@ class LibraryGroupsResponse(BaseModel):
     limit: int = 50
     offset: int = 0
     counts_by_kind: Dict[str, int] = Field(default_factory=dict)
+    derived_index_state: str = "ready"
+    derived_index_stale: bool = False
+    derived_index_updated_at: Optional[str] = None
+    derived_index_error: Optional[str] = None

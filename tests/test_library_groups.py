@@ -133,6 +133,69 @@ def test_library_group_cache_reuses_full_group_build_and_invalidates(tmp_path, m
     assert calls == 2
 
 
+def test_library_groups_cache_only_does_not_rebuild_on_request_path(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.core.library import list_file_groups
+
+    _setup_db(tmp_path, monkeypatch)
+    _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
+    _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
+
+    def fail_full_scan():
+        raise AssertionError("cache-only group request must not scan all files")
+
+    monkeypatch.setattr(library, "get_all_files", fail_full_scan)
+
+    response = list_file_groups(kind="version_family", limit=10, cache_only=True)
+
+    assert response.groups == []
+    assert response.derived_index_stale is True
+
+
+def test_library_group_incremental_refresh_updates_only_affected_key(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.core.library import list_file_groups, refresh_group_index_now
+    from backend.database import save_indexed_file
+
+    _setup_db(tmp_path, monkeypatch)
+    _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
+    _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
+    _register("/tmp/a/다른문서_v1.docx", "다른문서_v1.docx", "Word")
+    _register("/tmp/a/다른문서_v2.docx", "다른문서_v2.docx", "Word")
+
+    assert list_file_groups(kind="version_family", limit=10).total == 2
+    new_id = save_indexed_file(
+        path="/tmp/a/다른문서_v3.docx",
+        name="다른문서_v3.docx",
+        file_type="Word",
+        key_column="",
+        column_count=0,
+        chunks=[],
+        file_mtime=3.0,
+    )
+
+    calls = 0
+    real_build_for_keys = library._build_group_index_rows_for_keys
+
+    def counted_build_for_keys(keys):
+        nonlocal calls
+        calls += 1
+        assert ("version_family", "Word", "다른문서") in set(keys)
+        assert ("version_family", "Word", "보고서") not in set(keys)
+        return real_build_for_keys(keys)
+
+    monkeypatch.setattr(library, "_build_group_index_rows_for_keys", counted_build_for_keys)
+
+    refresh_group_index_now(reason="test_incremental_sync", changed_file_ids=[new_id])
+
+    groups = list_file_groups(kind="version_family", limit=10).groups
+    updated = next(group for group in groups if group.base_name == "다른문서")
+    untouched = next(group for group in groups if group.base_name == "보고서")
+    assert updated.file_count == 3
+    assert untouched.file_count == 2
+    assert calls >= 1
+
+
 def test_library_groups_searches_names_paths_and_sorts(tmp_path, monkeypatch):
     from backend.api.library import get_library_groups
 
@@ -197,7 +260,7 @@ def test_set_group_latest_file_persists_manual_order(tmp_path, monkeypatch):
     assert [file.id for file in cleared.files] == [v3_id, v2_id, v1_id]
 
 
-def test_set_group_latest_file_responds_from_warm_group_cache(tmp_path, monkeypatch):
+def test_set_group_latest_file_responds_from_index_without_full_rebuild(tmp_path, monkeypatch):
     from backend.core import library
     from backend.core.library import get_file_group_detail, list_file_groups, set_group_latest_file
 
@@ -227,7 +290,7 @@ def test_set_group_latest_file_responds_from_warm_group_cache(tmp_path, monkeypa
 
     assert reloaded is not None
     assert reloaded.latest_file.id == v1_id
-    assert calls == 1
+    assert calls == 0
 
 
 def test_set_group_latest_file_rejects_file_outside_group(tmp_path, monkeypatch):

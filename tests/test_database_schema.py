@@ -84,3 +84,31 @@ def test_comparison_cache_prune_keeps_newest_floor(tmp_path, monkeypatch):
 
     assert result["deleted_age"] == 3
     assert remaining == ["cache-3", "cache-4"]
+
+
+def test_init_db_creates_library_group_index_tables(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr("backend.database.DB_PATH", db_path)
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+
+    init_db()
+
+    conn = sqlite3.connect(db_path)
+    tables = {
+        row[0]
+        for row in conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+            """
+        ).fetchall()
+    }
+    conn.close()
+
+    assert {
+        "library_group_index_files",
+        "library_group_index",
+        "library_group_members",
+        "library_group_dirty_keys",
+    }.issubset(tables)
