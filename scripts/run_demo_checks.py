@@ -8,7 +8,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.core.checker import run_consistency_check
-from backend.core.joiner import join_files
 from scripts.generate_demo_cases import OUTPUT_DIR, build_excel_cases, build_ppt_cases, build_word_cases
 
 
@@ -22,42 +21,6 @@ def ensure_demo_cases() -> None:
 def run_excel_demo() -> None:
     file_v1 = OUTPUT_DIR / "excel_budget_v1.xlsx"
     file_v2 = OUTPUT_DIR / "excel_budget_v2.xlsx"
-    parser_config_v1 = {
-        "sheet_name": "사업현황",
-        "header_row": 3,
-        "start_col": 3,
-        "end_col": 6,
-        "end_row": 6,
-    }
-    parser_config_v2 = {
-        "sheet_name": "사업현황",
-        "header_row": 3,
-        "start_col": 3,
-        "end_col": 7,
-        "end_row": 6,
-    }
-    join_result = join_files(
-        [
-            {
-                "file_id": 1,
-                "file_name": file_v1.name,
-                "file_type": "Excel",
-                "path": str(file_v1),
-                "key_column": "과제명",
-                "parser_config": parser_config_v1,
-                "columns": ["담당자", "예산", "상태"],
-            },
-            {
-                "file_id": 2,
-                "file_name": file_v2.name,
-                "file_type": "Excel",
-                "path": str(file_v2),
-                "key_column": "과제명",
-                "parser_config": parser_config_v2,
-                "columns": ["담당자", "예산", "상태", "리스크"],
-            },
-        ]
-    )
     compare_result = run_consistency_check(
         [
             {
@@ -65,20 +28,19 @@ def run_excel_demo() -> None:
                 "path": str(file_v1),
                 "name": file_v1.name,
                 "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": parser_config_v1,
+                "key_column": "",
+                "parser_config": {},
             },
             {
                 "id": 2,
                 "path": str(file_v2),
                 "name": file_v2.name,
                 "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": parser_config_v2,
+                "key_column": "",
+                "parser_config": {},
             },
         ]
     )
-    print("[excel] join rows:", len(join_result))
     print("[excel] compare issues:", len(compare_result["excel"]["issues"]))
 
 
