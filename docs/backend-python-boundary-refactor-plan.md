@@ -5,6 +5,9 @@
 상태: **0.6 구조 정리 반영 중**. 2026-04-29 작업에서 검색/버전 관리 중심으로
 Excel Join 메타데이터 의존성을 제거하는 1차 구조 변경을 적용했다.
 
+검색/버전관리 hot path의 후속 성능 결정은
+`docs/search-version-performance-roadmap.md`에 모아 둔다.
+
 ## 목적
 
 OfficeWhere의 현재 Python backend는 기능적으로 잘 동작하지만, 시간이 지나며 다음 책임이 `backend/database.py`, `backend/core/indexer.py`, `backend/core/library.py`, 일부 `backend/api/*`에 함께 쌓였다.

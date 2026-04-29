@@ -207,6 +207,34 @@ class ExcelCheckResult(BaseModel):
     issues: List[ExcelCheckIssue]
 
 
+class CompareWarning(BaseModel):
+    type: Literal[
+        "truncated",
+        "high_change_ratio",
+        "source_may_be_newer",
+        "simplified_comparison",
+        "artifact_missing",
+        "artifact_version_mismatch",
+        "artifact_rebuilt_or_refresh_needed",
+    ]
+    severity: Literal["info", "warning"] = "warning"
+    message: str
+    file_ids: List[int] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CompareMetadata(BaseModel):
+    warnings: List[CompareWarning] = Field(default_factory=list)
+    used_last_index_snapshot: bool = True
+    source_stat_checked: bool = False
+    source_stat_error_count: int = 0
+    compared_cell_count: Optional[int] = None
+    changed_cell_count: Optional[int] = None
+    total_candidate_cell_count: Optional[int] = None
+    simplified: bool = False
+    artifact_status: Optional[str] = None
+
+
 class DiffBlock(BaseModel):
     block_type: Optional[str] = None
     item_type: Optional[str] = None
@@ -248,6 +276,7 @@ class PptCheckResult(BaseModel):
 
 class CheckResponse(BaseModel):
     mode: str
+    metadata: CompareMetadata = Field(default_factory=CompareMetadata)
     excel: Optional[ExcelCheckResult] = None
     word: Optional[WordCheckResult] = None
     ppt: Optional[PptCheckResult] = None

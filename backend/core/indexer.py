@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..database import (
+    COMPARISON_ARTIFACT_VERSION,
+    PPT_COMPARISON_ARTIFACT_KIND,
+    PPT_COMPARISON_PARSER_VERSION,
+    WORD_COMPARISON_ARTIFACT_KIND,
+    WORD_COMPARISON_PARSER_VERSION,
     delete_files_by_types,
     get_all_files,
     get_setting,
@@ -29,6 +34,26 @@ logger = logging.getLogger(__name__)
 
 _scheduler_thread: threading.Thread | None = None
 _MAX_WORKERS = get_worker_count()
+
+
+def _word_comparison_artifact(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "artifact_kind": WORD_COMPARISON_ARTIFACT_KIND,
+        "file_type": "Word",
+        "artifact_version": COMPARISON_ARTIFACT_VERSION,
+        "parser_version": WORD_COMPARISON_PARSER_VERSION,
+        "payload": {"blocks": blocks},
+    }
+
+
+def _ppt_comparison_artifact(slides: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "artifact_kind": PPT_COMPARISON_ARTIFACT_KIND,
+        "file_type": "PowerPoint",
+        "artifact_version": COMPARISON_ARTIFACT_VERSION,
+        "parser_version": PPT_COMPARISON_PARSER_VERSION,
+        "payload": {"slides": slides},
+    }
 
 
 def _excel_preview_text(value: Any) -> str:
@@ -175,6 +200,7 @@ def _inspect_and_chunk_word(path: str) -> Tuple[Dict[str, Any], List[Dict[str, s
     try:
         blocks = extract_word_blocks(path)
         inspection = inspect_word_blocks(blocks)
+        inspection["comparison_artifacts"] = [_word_comparison_artifact(blocks)]
         chunks = [
             {"location": f"쪽 {int(block.get('page_number') or 1)}", "content": block["text"]}
             for block in blocks
@@ -211,6 +237,7 @@ def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, s
     try:
         slides = extract_ppt_slides(path)
         inspection = inspect_ppt_slides(slides)
+        inspection["comparison_artifacts"] = [_ppt_comparison_artifact(slides)]
         chunks: List[Dict[str, str]] = []
         for slide in slides:
             slide_location = f"슬라이드 {slide['slide_number']}"
@@ -264,6 +291,7 @@ def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None)
         "sample": inspection["sample"],
         "excel_sheets": inspection.get("excel_sheets", []),
         "excel_cells": inspection.get("excel_cells", []),
+        "comparison_artifacts": inspection.get("comparison_artifacts", []),
     }, chunks
 
 
@@ -288,9 +316,15 @@ def index_file(file_id: int, path: str, parser_config: Optional[Dict[str, Any]] 
                 "excel_cells": inspection.get("excel_cells", []),
             }
         elif ext == ".docx":
-            _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_word(path))
+            inspection, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_word(path))
+            excel_index_payload = {
+                "comparison_artifacts": inspection.get("comparison_artifacts", []),
+            }
         elif ext == ".pptx":
-            _, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_pptx(path))
+            inspection, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_pptx(path))
+            excel_index_payload = {
+                "comparison_artifacts": inspection.get("comparison_artifacts", []),
+            }
         else:
             log_index_perf(
                 "file_done",

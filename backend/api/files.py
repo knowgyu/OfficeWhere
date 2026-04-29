@@ -226,6 +226,7 @@ def register(req: FileRegisterRequest):
             parser_config=None,
             excel_sheets=info.get("excel_sheets"),
             excel_cells=info.get("excel_cells"),
+            comparison_artifacts=info.get("comparison_artifacts"),
         ),
     )
     log_index_perf(
@@ -440,6 +441,7 @@ def bulk_register(req: BulkRegisterRequest):
                     parser_config=None,
                     excel_sheets=info.get("excel_sheets"),
                     excel_cells=info.get("excel_cells"),
+                    comparison_artifacts=info.get("comparison_artifacts"),
                 ),
             )
             log_index_perf(

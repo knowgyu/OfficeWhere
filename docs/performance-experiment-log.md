@@ -4,6 +4,7 @@
 
 This is a narrative experiment log for later debugging, release notes, or a blog post. It is intentionally less formal than the decision record in `docs/indexing-performance-fast-mode.md` and captures the reasoning journey: symptoms, hypotheses, experiments, what was ruled out, and what changed.
 For the architecture plan that preserves these performance decisions while separating backend responsibilities, see `docs/backend-python-boundary-refactor-plan.md`.
+For the follow-up search/version hot-path roadmap produced after external review and architect/critic discussion, see `docs/search-version-performance-roadmap.md`.
 
 ## Starting symptoms
 
@@ -128,7 +129,7 @@ Why it mattered: large Excel/PPT tails should be visible without mixing them int
 ## What was intentionally not done
 
 - Did not parse embedded videos/audio/images. OfficeWhere indexes text/table content only.
-- Did not store extra Word/PPT comparison summaries for version management. That would grow the DB and risk stale derived data.
+- Did not store extra Word/PPT comparison summaries for version-list acceleration in this pass. A later compressed comparison artifact is now documented separately as an on-demand compare optimization in `docs/search-version-performance-roadmap.md`; it must remain a rebuildable last-index cache, not source of truth.
 - Did not add chunk-level fingerprints yet. File-level fingerprints are enough to suppress same-name/same-content duplicate groups.
 - Did not use GPU. The workload is ZIP/XML/filesystem/SQLite bound.
 - Did not make a complex scheduler. Excel-first / half-worker reservation is documented as a future simple step, not implemented yet.
@@ -139,7 +140,7 @@ Why it mattered: large Excel/PPT tails should be visible without mixing them int
 2. On corporate PCs, how much time is invisible security/EDR file inspection versus Office XML parsing?
 3. Should initial staging also use more aggressive SQLite pragmas only while building the temporary DB?
 4. Would process-based parsing outperform threads enough to justify packaging/cancellation/memory complexity?
-5. Does version-tab first-load need materialized group summaries, or is current caching sufficient after duplicate filtering?
+5. Version-tab first-load has since moved to a persistent derived group index; the remaining follow-up is SQL-backed list filtering/sorting/paging from that index.
 6. Is a user-facing “slow files” report useful, listing files whose parser time dominates the run?
 
 ## Useful log bundle for future diagnosis

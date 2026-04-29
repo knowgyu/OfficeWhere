@@ -6,6 +6,8 @@ Implement **file-level content fingerprints only**.
 
 The app already stores extracted search chunks in `file_chunks`. Phase 4 adds a compact `document_fingerprints` table that stores hashes and counts derived from those chunks. It does **not** store a second copy of the document body.
 
+Related follow-up: `docs/search-version-performance-roadmap.md` discusses possible Word/PPT compressed comparison artifacts. Those artifacts are different from this fingerprint roadmap: they would retain ordered extracted text structure for selected compare/detail paths, while fingerprints are compact evidence/hash records.
+
 Expected additional DB size for 10,000 documents is roughly **5-20 MB** including the hash index, depending on SQLite page overhead and metadata sizes.
 
 ## Why file-level first

@@ -14,6 +14,8 @@ from .normalizer import normalize_key, values_equal
 EXCEL_PREVIEW_ROW_LIMIT = 25
 EMPTY_VALUE_LABEL = "(빈 값)"
 EXCEL_VERSION_CELL_ISSUE_LIMIT = 500
+EXCEL_HIGH_CHANGE_MIN_COUNT = 100
+EXCEL_HIGH_CHANGE_RATIO = 0.35
 
 
 def _is_missing(value: Any) -> bool:
@@ -49,6 +51,55 @@ def _public_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         {key: value for key, value in entry.items() if not key.startswith("_")}
         for entry in entries
     ]
+
+
+def _default_compare_metadata() -> Dict[str, Any]:
+    return {
+        "warnings": [],
+        "used_last_index_snapshot": True,
+        "source_stat_checked": False,
+        "source_stat_error_count": 0,
+        "compared_cell_count": None,
+        "changed_cell_count": None,
+        "total_candidate_cell_count": None,
+        "simplified": False,
+        "artifact_status": None,
+    }
+
+
+def _compare_warning(
+    warning_type: str,
+    message: str,
+    *,
+    severity: str = "warning",
+    file_ids: List[int] | None = None,
+    details: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    return {
+        "type": warning_type,
+        "severity": severity,
+        "message": message,
+        "file_ids": file_ids or [],
+        "details": details or {},
+    }
+
+
+def _merge_compare_metadata(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    warnings = target.setdefault("warnings", [])
+    incoming = source.get("warnings")
+    if isinstance(incoming, list):
+        warnings.extend(incoming)
+
+    for key, value in source.items():
+        if key == "warnings" or value is None:
+            continue
+        if key == "source_stat_checked":
+            target[key] = bool(target.get(key)) or bool(value)
+        elif key == "source_stat_error_count":
+            target[key] = int(target.get(key) or 0) + int(value or 0)
+        else:
+            target[key] = value
+    return target
 
 
 def _presence_status_by_file(
@@ -298,25 +349,39 @@ def _source_excel_payload(file_info: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _indexed_excel_payloads(file_infos: List[Dict[str, Any]]) -> List[Dict[str, Any]] | None:
+def _indexed_excel_payloads(file_infos: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]] | None, Dict[str, Any]]:
+    metadata = _default_compare_metadata()
     file_ids = [int(info["id"]) for info in file_infos]
-    if not all("file_mtime" in info for info in file_infos):
-        return None
 
+    newer_file_ids: List[int] = []
     for info in file_infos:
         try:
             current_mtime = os.path.getmtime(info["path"])
         except OSError:
-            return None
+            metadata["source_stat_checked"] = True
+            metadata["source_stat_error_count"] = int(metadata["source_stat_error_count"] or 0) + 1
+            continue
+        metadata["source_stat_checked"] = True
         stored_mtime = info.get("file_mtime")
-        if stored_mtime is None or abs(float(current_mtime) - float(stored_mtime)) >= 1.0:
-            return None
+        if stored_mtime is None:
+            continue
+        try:
+            if float(current_mtime) > float(stored_mtime) + 1.0:
+                newer_file_ids.append(int(info["id"]))
+        except (TypeError, ValueError):
+            continue
 
-    sheet_rows = get_excel_sheet_index(file_ids)
+    try:
+        sheet_rows = get_excel_sheet_index(file_ids)
+    except Exception:
+        return None, metadata
     if not all(sheet_rows.get(file_id) for file_id in file_ids):
-        return None
+        return None, metadata
 
-    cell_rows = get_excel_cell_index(file_ids)
+    try:
+        cell_rows = get_excel_cell_index(file_ids)
+    except Exception:
+        return None, metadata
     payloads: List[Dict[str, Any]] = []
     for info in file_infos:
         file_id = int(info["id"])
@@ -325,14 +390,23 @@ def _indexed_excel_payloads(file_infos: List[Dict[str, Any]]) -> List[Dict[str, 
         for row in cell_rows.get(file_id, []):
             cells[(str(row["sheet_name"]), int(row["row_number"]), int(row["column_index"]))] = str(row["content"])
         payloads.append({"info": info, "sheets": sheets, "cells": cells})
-    return payloads
+    if newer_file_ids:
+        metadata["warnings"].append(
+            _compare_warning(
+                "source_may_be_newer",
+                "원본 파일이 마지막 색인 이후 수정된 것으로 보입니다. 현재 Excel 비교는 마지막 색인 기준입니다.",
+                file_ids=newer_file_ids,
+                details={"source": "excel_indexed_payload"},
+            )
+        )
+    return payloads, metadata
 
 
-def _excel_payloads(file_infos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    indexed = _indexed_excel_payloads(file_infos)
+def _excel_payloads(file_infos: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    indexed, metadata = _indexed_excel_payloads(file_infos)
     if indexed is not None:
-        return indexed
-    return [_source_excel_payload(info) for info in file_infos]
+        return indexed, metadata
+    return [_source_excel_payload(info) for info in file_infos], metadata
 
 
 def _ordered_sheet_names(payloads: List[Dict[str, Any]]) -> List[str]:
@@ -349,40 +423,38 @@ def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[st
     if len(file_infos) != 2:
         raise ValueError("Excel 버전 관리는 두 버전씩 순서대로 비교합니다.")
 
-    payloads = _excel_payloads(file_infos)
+    payloads, metadata = _excel_payloads(file_infos)
     before_payload, after_payload = payloads
     before_info = before_payload["info"]
     after_info = after_payload["info"]
     sheet_names = _ordered_sheet_names(payloads)
     include_sheet_in_ref = len(sheet_names) > 1
-    total_rows = 0
     issues: List[Dict[str, Any]] = []
     changed_rows: set[tuple[str, int]] = set()
-    truncated = False
+    candidate_rows: set[tuple[str, int]] = set()
+    compared_cell_count = 0
+    changed_cell_count = 0
 
     for sheet_name in sheet_names:
-        before_sheet = before_payload["sheets"].get(sheet_name, {})
-        after_sheet = after_payload["sheets"].get(sheet_name, {})
-        row_count = max(int(before_sheet.get("row_count") or 0), int(after_sheet.get("row_count") or 0))
-        column_count = max(int(before_sheet.get("column_count") or 0), int(after_sheet.get("column_count") or 0))
-        total_rows += row_count
         sheet_label = sheet_name if include_sheet_in_ref else ""
-        for row_index in range(row_count):
-            for column_index in range(column_count):
-                row_number = row_index + 1
-                column_number = column_index + 1
-                column_letter = _column_letter(column_number)
-                before = before_payload["cells"].get((sheet_name, row_number, column_number), "")
-                after = after_payload["cells"].get((sheet_name, row_number, column_number), "")
-                if values_equal(before, after):
-                    continue
+        before_keys = {key for key in before_payload["cells"] if key[0] == sheet_name}
+        after_keys = {key for key in after_payload["cells"] if key[0] == sheet_name}
+        candidate_keys = sorted(before_keys | after_keys, key=lambda key: (key[1], key[2]))
+        compared_cell_count += len(candidate_keys)
+        candidate_rows.update((key[0], key[1]) for key in candidate_keys)
 
-                if len(issues) >= EXCEL_VERSION_CELL_ISSUE_LIMIT:
-                    truncated = True
-                    break
+        for _sheet_name, row_number, column_number in candidate_keys:
+            column_letter = _column_letter(column_number)
+            before = before_payload["cells"].get((sheet_name, row_number, column_number), "")
+            after = after_payload["cells"].get((sheet_name, row_number, column_number), "")
+            if values_equal(before, after):
+                continue
 
+            changed_cell_count += 1
+            changed_rows.add((sheet_name, row_number))
+
+            if len(issues) < EXCEL_VERSION_CELL_ISSUE_LIMIT:
                 issue_type = _version_cell_issue_type(before, after)
-                changed_rows.add((sheet_name, row_number))
                 issues.append(
                     {
                         "issue_type": issue_type,
@@ -411,27 +483,44 @@ def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[st
                         ],
                     }
                 )
-            if truncated:
-                break
-        if truncated:
-            break
 
-    if truncated:
-        issues.append(
-            {
-                "issue_type": "missing_key",
-                "severity": "warning",
-                "key": "truncated",
-                "column": "",
-                "message": f"변경점이 많아 처음 {EXCEL_VERSION_CELL_ISSUE_LIMIT}개 셀만 표시했습니다.",
-                "values": [],
-            }
+    total_rows = len(candidate_rows)
+    metadata["compared_cell_count"] = compared_cell_count
+    metadata["changed_cell_count"] = changed_cell_count
+    metadata["total_candidate_cell_count"] = compared_cell_count
+    if changed_cell_count > EXCEL_VERSION_CELL_ISSUE_LIMIT:
+        metadata["warnings"].append(
+            _compare_warning(
+                "truncated",
+                f"변경점이 많아 처음 {EXCEL_VERSION_CELL_ISSUE_LIMIT}개 셀만 표시했습니다.",
+                file_ids=[int(info["id"]) for info in file_infos],
+                details={
+                    "displayed_issue_count": len(issues),
+                    "changed_cell_count": changed_cell_count,
+                    "limit": EXCEL_VERSION_CELL_ISSUE_LIMIT,
+                },
+            )
+        )
+    change_ratio = changed_cell_count / max(compared_cell_count, 1)
+    if changed_cell_count >= EXCEL_HIGH_CHANGE_MIN_COUNT and change_ratio >= EXCEL_HIGH_CHANGE_RATIO:
+        metadata["warnings"].append(
+            _compare_warning(
+                "high_change_ratio",
+                "변경된 셀이 많아 같은 버전의 문서가 아닐 수도 있습니다. 비교 대상이 맞는지 확인해 주세요.",
+                file_ids=[int(info["id"]) for info in file_infos],
+                details={
+                    "changed_cell_count": changed_cell_count,
+                    "compared_cell_count": compared_cell_count,
+                    "change_ratio": change_ratio,
+                },
+            )
         )
 
     return {
         "total_keys": total_rows,
         "matched_keys": max(total_rows - len(changed_rows), 0),
         "issues": issues,
+        "metadata": metadata,
     }
 
 

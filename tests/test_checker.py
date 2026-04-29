@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -317,6 +318,136 @@ def test_excel_consistency_uses_fresh_indexed_sheet_cache(tmp_path, monkeypatch)
     issue = result["excel"]["issues"][0]
     assert issue["sheet_name"] == "세부"
     assert [entry["values"][0] for entry in issue["values"]] == ["캐시전", "캐시후"]
+    assert result["metadata"]["warnings"] == []
+
+
+def test_excel_indexed_payload_used_when_source_mtime_newer_with_warning(tmp_path, monkeypatch):
+    from backend.core.indexer import inspect_and_chunk
+    from backend.database import get_file_by_id, init_db, save_indexed_file
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    file_a = tmp_path / "indexed-stale-a.xlsx"
+    file_b = tmp_path / "indexed-stale-b.xlsx"
+    _write_multisheet_excel(file_a, "색인전")
+    _write_multisheet_excel(file_b, "색인후")
+
+    file_ids = []
+    for file_path in (file_a, file_b):
+        info, chunks = inspect_and_chunk(str(file_path))
+        file_id = save_indexed_file(
+            path=str(file_path),
+            name=info["name"],
+            file_type=info["file_type"],
+            key_column="",
+            column_count=len(info["columns"]),
+            chunks=chunks,
+            file_mtime=file_path.stat().st_mtime,
+            parser_config=None,
+            excel_sheets=info["excel_sheets"],
+            excel_cells=info["excel_cells"],
+        )
+        file_ids.append(file_id)
+
+    newer_mtime = file_b.stat().st_mtime + 5
+    os.utime(file_b, (newer_mtime, newer_mtime))
+
+    def fail_source_parse(_path):
+        raise AssertionError("newer source mtime should warn, not force source parse")
+
+    monkeypatch.setattr("backend.core.excel_compare.extract_excel_used_ranges", fail_source_parse)
+    file_infos = [
+        {
+            "id": file_id,
+            "path": get_file_by_id(file_id)["path"],
+            "name": get_file_by_id(file_id)["name"],
+            "file_type": get_file_by_id(file_id)["file_type"],
+            "file_mtime": get_file_by_id(file_id)["file_mtime"],
+        }
+        for file_id in file_ids
+    ]
+
+    result = run_consistency_check(file_infos)
+
+    issue = result["excel"]["issues"][0]
+    assert [entry["values"][0] for entry in issue["values"]] == ["색인전", "색인후"]
+    assert any(warning["type"] == "source_may_be_newer" for warning in result["metadata"]["warnings"])
+
+
+def test_excel_sparse_diff_uses_coordinate_union_not_rectangle(monkeypatch):
+    from backend.core import excel_compare
+
+    lookup_count = 0
+
+    class CountingCells(dict):
+        def get(self, key, default=None):
+            nonlocal lookup_count
+            lookup_count += 1
+            return super().get(key, default)
+
+    file_infos = [
+        {"id": 1, "path": "/tmp/before.xlsx", "name": "before.xlsx", "file_type": "Excel"},
+        {"id": 2, "path": "/tmp/after.xlsx", "name": "after.xlsx", "file_type": "Excel"},
+    ]
+    payloads = [
+        {
+            "info": file_infos[0],
+            "sheets": {"Sheet1": {"sheet_index": 1, "row_count": 10_000, "column_count": 26}},
+            "cells": CountingCells({("Sheet1", 1, 1): "공통", ("Sheet1", 10_000, 26): "이전"}),
+        },
+        {
+            "info": file_infos[1],
+            "sheets": {"Sheet1": {"sheet_index": 1, "row_count": 10_000, "column_count": 26}},
+            "cells": CountingCells({("Sheet1", 1, 1): "공통", ("Sheet1", 10_000, 26): "이후"}),
+        },
+    ]
+
+    monkeypatch.setattr(excel_compare, "_excel_payloads", lambda _infos: (payloads, excel_compare._default_compare_metadata()))
+
+    result = excel_compare.compare_excel_versions_by_cells(file_infos)
+
+    assert lookup_count == 4
+    assert result["total_keys"] == 2
+    assert result["metadata"]["compared_cell_count"] == 2
+    assert result["metadata"]["changed_cell_count"] == 1
+    assert result["issues"][0]["key"] == "10000"
+    assert result["issues"][0]["column"] == "Z"
+
+
+def test_excel_sparse_metadata_warnings_are_not_fake_issues(monkeypatch):
+    from backend.core import excel_compare
+
+    file_infos = [
+        {"id": 1, "path": "/tmp/before.xlsx", "name": "before.xlsx", "file_type": "Excel"},
+        {"id": 2, "path": "/tmp/after.xlsx", "name": "after.xlsx", "file_type": "Excel"},
+    ]
+    before_cells = {("Sheet1", row, 1): f"이전-{row}" for row in range(1, 502)}
+    after_cells = {("Sheet1", row, 1): f"이후-{row}" for row in range(1, 502)}
+    payloads = [
+        {
+            "info": file_infos[0],
+            "sheets": {"Sheet1": {"sheet_index": 1, "row_count": 501, "column_count": 1}},
+            "cells": before_cells,
+        },
+        {
+            "info": file_infos[1],
+            "sheets": {"Sheet1": {"sheet_index": 1, "row_count": 501, "column_count": 1}},
+            "cells": after_cells,
+        },
+    ]
+
+    monkeypatch.setattr(excel_compare, "_excel_payloads", lambda _infos: (payloads, excel_compare._default_compare_metadata()))
+
+    result = excel_compare.compare_excel_versions_by_cells(file_infos)
+
+    warning_types = {warning["type"] for warning in result["metadata"]["warnings"]}
+    assert {"truncated", "high_change_ratio"} <= warning_types
+    assert len(result["issues"]) == excel_compare.EXCEL_VERSION_CELL_ISSUE_LIMIT
+    assert all(issue["key"] != "truncated" for issue in result["issues"])
+    assert result["metadata"]["compared_cell_count"] == 501
+    assert result["metadata"]["changed_cell_count"] == 501
 
 
 def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
@@ -920,8 +1051,8 @@ def test_check_api_rejects_mixed_file_types(monkeypatch):
     assert exc_info.value.status_code == 400
 
 
-def test_check_api_reuses_comparison_cache_and_recomputes_on_file_change(tmp_path, monkeypatch):
-    from backend.database import init_db, register_file
+def test_check_api_reuses_comparison_cache_until_index_mtime_changes(tmp_path, monkeypatch):
+    from backend.database import init_db, register_file, update_file_mtime
 
     monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
@@ -933,6 +1064,8 @@ def test_check_api_reuses_comparison_cache_and_recomputes_on_file_change(tmp_pat
     right.write_text("right", encoding="utf-8")
     left_id = register_file(str(left), "left.docx", "Word", "", 0)
     right_id = register_file(str(right), "right.docx", "Word", "", 0)
+    update_file_mtime(left_id, left.stat().st_mtime)
+    update_file_mtime(right_id, right.stat().st_mtime)
 
     calls = 0
 
@@ -961,9 +1094,18 @@ def test_check_api_reuses_comparison_cache_and_recomputes_on_file_change(tmp_pat
     assert calls == 1
 
     right.write_text("right changed", encoding="utf-8")
+    newer_mtime = right.stat().st_mtime + 5
+    os.utime(right, (newer_mtime, newer_mtime))
     third = consistency_check(CheckRequest(file_ids=[left_id, right_id]))
 
     assert third.mode == "word"
+    assert calls == 1
+    assert any(warning.type == "source_may_be_newer" for warning in third.metadata.warnings)
+
+    update_file_mtime(right_id, right.stat().st_mtime)
+    fourth = consistency_check(CheckRequest(file_ids=[left_id, right_id]))
+
+    assert fourth.mode == "word"
     assert calls == 2
 
 

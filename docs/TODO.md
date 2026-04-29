@@ -13,6 +13,11 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 ## Product / engineering follow-ups
 
+- [ ] Follow the consolidated search/version performance roadmap when reopening performance work.
+  - Durable decision record: `docs/search-version-performance-roadmap.md`.
+  - Current priority order: Excel sparse diff + warnings, SQL-backed group list filtering/paging, PPT similarity guard, Word/PPT compressed comparison artifacts, optional Everything/ES discovery.
+  - Treat this as the source of truth instead of duplicating the same performance notes across `.omx/context`, `.omx/wiki`, or session notes.
+
 - [ ] Consider a local AI Agent integration surface after the 0.6.x release line stabilizes.
   - Candidate shapes: loopback-only REST API for search/version/library state, or MCP server exposing read-only tools plus explicitly user-approved app actions.
   - Constraints: source Office documents remain read-only; no broad filesystem mutation tools; any external agent access should be opt-in, local-only by default, and documented with clear trust boundaries.

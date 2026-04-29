@@ -5,6 +5,7 @@ import re
 import sqlite3
 import threading
 import uuid
+import zlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -29,6 +30,11 @@ FINGERPRINT_VERSION = 1
 SEARCH_INDEX_VERSION = "6"
 COMPARISON_CACHE_VERSION = 3
 EXCEL_INDEX_VERSION = "2"
+COMPARISON_ARTIFACT_VERSION = "1"
+WORD_COMPARISON_ARTIFACT_KIND = "word_ordered_text"
+PPT_COMPARISON_ARTIFACT_KIND = "ppt_ordered_text"
+WORD_COMPARISON_PARSER_VERSION = "word-blocks-v1"
+PPT_COMPARISON_PARSER_VERSION = "ppt-slides-v1"
 EXCEL_INDEX_VERSION_KEY = "excel_index_version"
 LIBRARY_GROUP_INDEX_VERSION = "1"
 LIBRARY_GROUP_INDEX_VERSION_KEY = "library_group_index_version"
@@ -56,6 +62,7 @@ class PreparedIndexedFile:
     chunk_count: int
     excel_sheets: List[Dict[str, Any]]
     excel_cells: List[Dict[str, Any]]
+    comparison_artifacts: List[Dict[str, Any]]
 
 
 @dataclass
@@ -245,6 +252,7 @@ def _reset_legacy_join_schema_if_needed(cursor: sqlite3.Cursor) -> bool:
     cursor.execute("DROP TABLE IF EXISTS excel_sheet_index")
     cursor.execute("DROP TABLE IF EXISTS excel_cell_index")
     cursor.execute("DROP TABLE IF EXISTS comparison_cache")
+    cursor.execute("DROP TABLE IF EXISTS comparison_artifacts")
     cursor.execute("DROP TABLE IF EXISTS registered_files")
     log_index_perf(
         "db_schema_reset",
@@ -436,6 +444,27 @@ def _normalize_excel_cell_rows(cells: Optional[Sequence[Dict[str, Any]]]) -> Lis
     return normalized
 
 
+def _normalize_comparison_artifacts(artifacts: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for artifact in artifacts or []:
+        artifact_kind = str(artifact.get("artifact_kind") or artifact.get("kind") or "").strip()
+        file_type = str(artifact.get("file_type") or "").strip()
+        payload = artifact.get("payload")
+        if not artifact_kind or not file_type or not isinstance(payload, dict):
+            continue
+        normalized.append(
+            {
+                "artifact_kind": artifact_kind,
+                "file_type": file_type,
+                "artifact_version": str(artifact.get("artifact_version") or COMPARISON_ARTIFACT_VERSION),
+                "parser_version": str(artifact.get("parser_version") or ""),
+                "payload": payload,
+                "source_mtime": artifact.get("source_mtime"),
+            }
+        )
+    return normalized
+
+
 def _column_letter_for_index(index: int) -> str:
     if index < 1:
         return ""
@@ -457,6 +486,7 @@ def prepare_indexed_file(
     parser_config: Optional[Dict[str, Any]] = None,
     excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
     excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
+    comparison_artifacts: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> PreparedIndexedFile:
     """Build CPU/string-heavy index fields before entering the DB writer."""
     return PreparedIndexedFile(
@@ -470,6 +500,7 @@ def prepare_indexed_file(
         chunk_count=len(chunks),
         excel_sheets=_normalize_excel_sheet_rows(excel_sheets),
         excel_cells=_normalize_excel_cell_rows(excel_cells),
+        comparison_artifacts=_normalize_comparison_artifacts(comparison_artifacts),
     )
 
 
@@ -569,6 +600,72 @@ def _replace_excel_index(
         )
 
 
+def _artifact_payload_bytes(payload: Dict[str, Any]) -> Tuple[bytes, bytes]:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return raw, zlib.compress(raw)
+
+
+def _replace_comparison_artifacts(
+    cursor: sqlite3.Cursor,
+    file_id: int,
+    artifacts: Sequence[Dict[str, Any]],
+    *,
+    source_mtime: Optional[float],
+    updated_at: str,
+) -> None:
+    cursor.execute("DELETE FROM comparison_artifacts WHERE file_id = ?", (file_id,))
+    if not artifacts:
+        return
+
+    rows = []
+    for artifact in artifacts:
+        payload = artifact.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        raw, compressed = _artifact_payload_bytes(payload)
+        artifact_source_mtime = artifact.get("source_mtime")
+        if artifact_source_mtime is None:
+            artifact_source_mtime = source_mtime
+        rows.append(
+            (
+                file_id,
+                str(artifact["artifact_kind"]),
+                str(artifact["file_type"]),
+                str(artifact.get("artifact_version") or COMPARISON_ARTIFACT_VERSION),
+                str(artifact.get("parser_version") or ""),
+                artifact_source_mtime,
+                compressed,
+                len(raw),
+                len(compressed),
+                updated_at,
+                updated_at,
+            )
+        )
+
+    if not rows:
+        return
+    cursor.executemany(
+        """
+        INSERT INTO comparison_artifacts (
+            file_id, artifact_kind, file_type, artifact_version, parser_version,
+            source_mtime, payload_compressed, raw_size_bytes, compressed_size_bytes,
+            created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(file_id, artifact_kind) DO UPDATE SET
+            file_type=excluded.file_type,
+            artifact_version=excluded.artifact_version,
+            parser_version=excluded.parser_version,
+            source_mtime=excluded.source_mtime,
+            payload_compressed=excluded.payload_compressed,
+            raw_size_bytes=excluded.raw_size_bytes,
+            compressed_size_bytes=excluded.compressed_size_bytes,
+            updated_at=excluded.updated_at
+        """,
+        rows,
+    )
+
+
 def _add_elapsed_metric(metrics: Optional[Dict[str, Any]], key: str, started: float) -> None:
     if metrics is None:
         return
@@ -660,6 +757,15 @@ def _save_prepared_indexed_file(
     else:
         _replace_excel_index(cursor, file_id, [], [], updated_at=now)
     _add_elapsed_metric(metrics, "excel_index_replace_ms", excel_index_started)
+    artifact_started = perf_counter()
+    _replace_comparison_artifacts(
+        cursor,
+        file_id,
+        payload.comparison_artifacts,
+        source_mtime=payload.file_mtime,
+        updated_at=now,
+    )
+    _add_elapsed_metric(metrics, "comparison_artifact_replace_ms", artifact_started)
     return file_id
 
 
@@ -898,6 +1004,31 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
         """
         CREATE INDEX IF NOT EXISTS idx_comparison_cache_created_at
         ON comparison_cache(created_at DESC)
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS comparison_artifacts (
+            file_id INTEGER NOT NULL,
+            artifact_kind TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            artifact_version TEXT NOT NULL,
+            parser_version TEXT NOT NULL,
+            source_mtime REAL,
+            payload_compressed BLOB NOT NULL,
+            raw_size_bytes INTEGER NOT NULL,
+            compressed_size_bytes INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (file_id, artifact_kind)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_comparison_artifacts_kind
+        ON comparison_artifacts(artifact_kind, file_type)
         """
     )
 
@@ -1478,6 +1609,189 @@ def list_indexed_library_groups() -> List[Dict[str, Any]]:
     return rows
 
 
+def _library_group_summary_filters(
+    *,
+    kind: Optional[str],
+    file_type: Optional[str],
+    query: Optional[str],
+    include_duplicate_content: bool,
+) -> Tuple[str, List[Any]]:
+    clauses = ["gi.index_version=?"]
+    params: List[Any] = [LIBRARY_GROUP_INDEX_VERSION]
+    if kind:
+        clauses.append("gi.group_kind=?")
+        params.append(str(kind))
+    if file_type:
+        clauses.append("gi.file_type=?")
+        params.append(str(file_type))
+    if not include_duplicate_content:
+        clauses.append("NOT (gi.group_kind='exact_name_conflict' AND gi.content_status='same_content')")
+
+    normalized_query = (query or "").strip().lower()
+    if normalized_query:
+        like = f"%{normalized_query}%"
+        clauses.append(
+            """
+            (
+                lower(gi.base_name) LIKE ?
+                OR lower(gi.canonical_name) LIKE ?
+                OR lower(gi.title) LIKE ?
+                OR lower(gi.file_type) LIKE ?
+                OR lower(gi.group_kind) LIKE ?
+                OR lower(gi.tokens_summary_json) LIKE ?
+                OR lower(gi.content_evidence) LIKE ?
+                OR lower(gi.recommended_action) LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM library_group_members gm
+                    JOIN library_group_index_files gf ON gf.file_id = gm.file_id
+                    WHERE gm.group_id = gi.group_id
+                      AND (lower(gf.name) LIKE ? OR lower(gf.path) LIKE ?)
+                )
+            )
+            """
+        )
+        params.extend([like, like, like, like, like, like, like, like, like, like])
+    return " AND ".join(clauses), params
+
+
+def _library_group_sort_sql(sort: str) -> str:
+    if sort == "name":
+        return "lower(gi.base_name) ASC, gi.file_type ASC, gi.group_kind ASC"
+    if sort == "count":
+        return "gi.file_count DESC, lower(gi.base_name) ASC, gi.file_type ASC, gi.group_kind ASC"
+    if sort == "content":
+        return """
+            CASE gi.content_status
+                WHEN 'content_differs' THEN 4
+                WHEN 'partial' THEN 3
+                WHEN 'pending' THEN 2
+                WHEN 'not_enough_content' THEN 1
+                WHEN 'same_content' THEN 0
+                ELSE 0
+            END DESC,
+            gi.file_count DESC,
+            lower(gi.base_name) ASC
+        """
+    return "gi.updated_at DESC, gi.file_count DESC, lower(gi.base_name) ASC"
+
+
+def _safe_json_list(value: Any) -> List[str]:
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item)]
+
+
+def _safe_json_dict(value: Any) -> Optional[Dict[str, Any]]:
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def list_library_group_summaries(
+    *,
+    kind: Optional[str] = None,
+    file_type: Optional[str] = None,
+    query: Optional[str] = None,
+    sort: str = "recent",
+    limit: int = 50,
+    offset: int = 0,
+    include_duplicate_content: bool = False,
+) -> Dict[str, Any]:
+    status = get_library_group_index_status()
+    if status.get("version") and status.get("version") != LIBRARY_GROUP_INDEX_VERSION:
+        set_library_group_index_state("repair_needed", error="derived index version mismatch")
+        return {"total": 0, "counts_by_kind": {}, "rows": []}
+
+    safe_limit = max(0, min(int(limit), 500))
+    safe_offset = max(0, int(offset))
+    where_sql, params = _library_group_summary_filters(
+        kind=kind,
+        file_type=file_type,
+        query=query,
+        include_duplicate_content=include_duplicate_content,
+    )
+    order_sql = _library_group_sort_sql(sort)
+
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM library_group_index gi
+        WHERE {where_sql}
+        """,
+        params,
+    )
+    total = int(cursor.fetchone()[0] or 0)
+
+    cursor.execute(
+        f"""
+        SELECT gi.group_kind, COUNT(*) AS count
+        FROM library_group_index gi
+        WHERE {where_sql}
+        GROUP BY gi.group_kind
+        """,
+        params,
+    )
+    counts_by_kind = {str(row["group_kind"]): int(row["count"] or 0) for row in cursor.fetchall()}
+
+    cursor.execute(
+        f"""
+        SELECT
+            gi.group_id,
+            gi.group_kind,
+            gi.file_type,
+            gi.base_name,
+            gi.canonical_name,
+            gi.title,
+            gi.confidence,
+            gi.reason,
+            gi.file_count,
+            gi.latest_file_id,
+            gi.previous_file_id,
+            gi.manual_latest_file_id,
+            gi.tokens_summary_json,
+            gi.content_status,
+            gi.fingerprint_coverage,
+            gi.fingerprint_unique_count,
+            gi.content_evidence,
+            gi.recommended_action,
+            gi.updated_at,
+            latest.file_json AS latest_file_json,
+            previous.file_json AS previous_file_json
+        FROM library_group_index gi
+        LEFT JOIN library_group_index_files latest ON latest.file_id = gi.latest_file_id
+        LEFT JOIN library_group_index_files previous ON previous.file_id = gi.previous_file_id
+        WHERE {where_sql}
+        ORDER BY {order_sql}
+        LIMIT ? OFFSET ?
+        """,
+        [*params, safe_limit, safe_offset],
+    )
+    rows = []
+    for row in cursor.fetchall():
+        data = dict(row)
+        data["tokens_summary"] = _safe_json_list(data.pop("tokens_summary_json", "[]"))
+        data["latest_file"] = _safe_json_dict(data.pop("latest_file_json", None))
+        data["previous_file"] = _safe_json_dict(data.pop("previous_file_json", None))
+        rows.append(data)
+    conn.close()
+
+    return {
+        "total": total,
+        "counts_by_kind": counts_by_kind,
+        "rows": rows,
+    }
+
+
 def get_indexed_library_group(group_id: str) -> Optional[Dict[str, Any]]:
     conn = _connect()
     conn.row_factory = sqlite3.Row
@@ -1611,6 +1925,7 @@ def save_indexed_file(
     parser_config: Optional[Dict[str, Any]] = None,
     excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
     excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
+    comparison_artifacts: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> int:
     """Upsert file metadata, chunks, fingerprint, and mtime in one write turn."""
     payload = prepare_indexed_file(
@@ -1624,6 +1939,7 @@ def save_indexed_file(
         parser_config=parser_config,
         excel_sheets=excel_sheets,
         excel_cells=excel_cells,
+        comparison_artifacts=comparison_artifacts,
     )
     return save_prepared_indexed_file(payload)
 
@@ -1892,6 +2208,87 @@ def get_excel_cell_index(file_ids: Sequence[int]) -> Dict[int, List[Dict[str, An
     return result
 
 
+def get_comparison_artifact(
+    file_id: int,
+    artifact_kind: str,
+    *,
+    expected_artifact_version: str = COMPARISON_ARTIFACT_VERSION,
+    expected_parser_version: str = "",
+) -> Dict[str, Any]:
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT *
+            FROM comparison_artifacts
+            WHERE file_id=? AND artifact_kind=?
+            """,
+            (int(file_id), str(artifact_kind)),
+        )
+    except sqlite3.OperationalError:
+        conn.close()
+        return {"status": "unavailable", "payload": None}
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return {"status": "missing", "payload": None}
+
+    data = dict(row)
+    if data.get("artifact_version") != expected_artifact_version:
+        return {"status": "artifact_version_mismatch", "payload": None, **data}
+    if expected_parser_version and data.get("parser_version") != expected_parser_version:
+        return {"status": "parser_version_mismatch", "payload": None, **data}
+
+    try:
+        raw = zlib.decompress(data["payload_compressed"])
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        with _write_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM comparison_artifacts WHERE file_id=? AND artifact_kind=?",
+                (int(file_id), str(artifact_kind)),
+            )
+            conn.commit()
+        return {"status": "corrupt", "payload": None, **data}
+
+    if not isinstance(payload, dict):
+        return {"status": "corrupt", "payload": None, **data}
+    return {"status": "ok", "payload": payload, **data}
+
+
+def save_comparison_artifact(
+    file_id: int,
+    *,
+    file_type: str,
+    artifact_kind: str,
+    payload: Dict[str, Any],
+    artifact_version: str = COMPARISON_ARTIFACT_VERSION,
+    parser_version: str = "",
+    source_mtime: Optional[float] = None,
+) -> None:
+    artifact = {
+        "file_type": file_type,
+        "artifact_kind": artifact_kind,
+        "artifact_version": artifact_version,
+        "parser_version": parser_version,
+        "source_mtime": source_mtime,
+        "payload": payload,
+    }
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        _replace_comparison_artifacts(
+            cursor,
+            int(file_id),
+            _normalize_comparison_artifacts([artifact]),
+            source_mtime=source_mtime,
+            updated_at=datetime.now().isoformat(),
+        )
+        conn.commit()
+
+
 def search_file_names(
     query: str,
     *,
@@ -1946,6 +2343,7 @@ def delete_file(file_id: int) -> bool:
         cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM excel_cell_index WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM excel_sheet_index WHERE file_id=?", (file_id,))
+        cursor.execute("DELETE FROM comparison_artifacts WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM library_group_index_files WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM library_group_members WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
@@ -1976,6 +2374,7 @@ def delete_files_by_types(file_types: Sequence[str]) -> int:
         cursor.execute(f"DELETE FROM document_fingerprints WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM excel_cell_index WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM excel_sheet_index WHERE file_id IN ({id_placeholders})", file_ids)
+        cursor.execute(f"DELETE FROM comparison_artifacts WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM library_group_index_files WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM library_group_members WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM registered_files WHERE id IN ({id_placeholders})", file_ids)
@@ -1995,6 +2394,7 @@ def delete_all_files() -> int:
         cursor.execute("DELETE FROM document_fingerprints")
         cursor.execute("DELETE FROM excel_cell_index")
         cursor.execute("DELETE FROM excel_sheet_index")
+        cursor.execute("DELETE FROM comparison_artifacts")
         cursor.execute("DELETE FROM comparison_cache")
         cursor.execute("DELETE FROM registered_files")
         cursor.execute("DELETE FROM library_group_members")
@@ -2012,10 +2412,12 @@ def save_file_chunks(
     *,
     excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
     excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
+    comparison_artifacts: Optional[Sequence[Dict[str, Any]]] = None,
 ):
     chunk_values = _chunk_insert_values(chunks)
     normalized_excel_sheets = _normalize_excel_sheet_rows(excel_sheets)
     normalized_excel_cells = _normalize_excel_cell_rows(excel_cells)
+    normalized_comparison_artifacts = _normalize_comparison_artifacts(comparison_artifacts)
 
     with _write_connection() as conn:
         cursor = conn.cursor()
@@ -2042,6 +2444,13 @@ def save_file_chunks(
             )
         else:
             _replace_excel_index(cursor, file_id, [], [], updated_at=datetime.now().isoformat())
+        _replace_comparison_artifacts(
+            cursor,
+            file_id,
+            normalized_comparison_artifacts,
+            source_mtime=source_mtime,
+            updated_at=datetime.now().isoformat(),
+        )
         _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="save_file_chunks")
         conn.commit()
 

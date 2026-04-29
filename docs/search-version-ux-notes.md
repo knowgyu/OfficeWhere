@@ -7,6 +7,7 @@ OfficeWhere search and version management are user-facing review surfaces. They 
 This file is the durable decision record for the search/version-management UX choices made after the performance pass. Local `.omx/plans/*` files can be regenerated, so product-facing behavior decisions should be kept here before release.
 
 Related performance narrative: `docs/performance-experiment-log.md`. Backend indexing/search tradeoffs: `docs/indexing-performance-fast-mode.md`.
+Follow-up hot-path roadmap: `docs/search-version-performance-roadmap.md`.
 
 ## Decisions
 
@@ -26,7 +27,7 @@ Related performance narrative: `docs/performance-experiment-log.md`. Backend ind
 ## Non-goals
 
 - Do not add semantic ranking or BM25 scoring back into the search UI.
-- Do not store extra Word/PPT comparison summaries just to make the version list faster; load detailed diffs lazily.
+- Do not store extra Word/PPT comparison summaries just to make the version list faster; load detailed diffs lazily. This does not block a future compressed Word/PPT comparison artifact for the selected compare/detail path, as long as it remains a rebuildable last-index cache.
 - Do not expose parser implementation labels (`paragraph`, `shape`, `row`) in normal search results.
 - Do not modify or normalize user source documents.
 

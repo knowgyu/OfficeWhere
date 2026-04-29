@@ -34,6 +34,7 @@ from ..database import (
     get_library_group_index_status,
     get_setting,
     list_indexed_library_groups,
+    list_library_group_summaries,
     list_library_group_dirty_keys,
     list_library_group_index_file_ids,
     list_library_group_index_files_for_key,
@@ -914,6 +915,7 @@ def _rescan_library_impl(
                     parser_config=None,
                     excel_sheets=info.get("excel_sheets"),
                     excel_cells=info.get("excel_cells"),
+                    comparison_artifacts=info.get("comparison_artifacts"),
                 ),
             )
             metrics.update(
@@ -1904,6 +1906,11 @@ def _group_index_needs_repair(status: Dict[str, str]) -> bool:
 
 
 def _all_file_group_details(*, cache_only: bool = False) -> List[LibraryGroupDetail]:
+    _ensure_group_index_available(cache_only=cache_only)
+    return _load_indexed_group_details()
+
+
+def _ensure_group_index_available(*, cache_only: bool = False) -> Dict[str, str]:
     status = get_library_group_index_status()
     if _group_index_needs_repair(status):
         if cache_only or _is_library_rescan_active():
@@ -1915,7 +1922,7 @@ def _all_file_group_details(*, cache_only: bool = False) -> List[LibraryGroupDet
             schedule_group_index_refresh(reason="request_stale_refresh")
         else:
             refresh_group_index_now(reason="request_stale_refresh")
-    return _load_indexed_group_details()
+    return get_library_group_index_status()
 
 
 _group_refresh_thread_lock = threading.Lock()
@@ -2191,6 +2198,39 @@ def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
     )
 
 
+def _file_info_from_group_summary_row(value: Any) -> Optional[FileInfo]:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return FileInfo(**value)
+    except Exception:
+        set_library_group_index_state("repair_needed", error="invalid group summary file payload")
+        return None
+
+
+def _group_summary_from_index_row(row: Dict[str, Any]) -> LibraryGroupSummary:
+    return LibraryGroupSummary(
+        id=str(row["group_id"]),
+        group_kind=str(row["group_kind"]),
+        file_type=str(row["file_type"]),
+        base_name=str(row["base_name"]),
+        canonical_name=str(row["canonical_name"]),
+        title=str(row["title"]),
+        file_count=int(row["file_count"] or 0),
+        confidence=str(row["confidence"]),
+        reason=str(row["reason"]),
+        latest_file=_file_info_from_group_summary_row(row.get("latest_file")),
+        previous_file=_file_info_from_group_summary_row(row.get("previous_file")),
+        manual_latest_file_id=row.get("manual_latest_file_id"),
+        tokens_summary=[str(item) for item in row.get("tokens_summary", [])],
+        content_status=str(row.get("content_status") or "pending"),
+        fingerprint_coverage=int(row.get("fingerprint_coverage") or 0),
+        fingerprint_unique_count=int(row.get("fingerprint_unique_count") or 0),
+        content_evidence=str(row.get("content_evidence") or ""),
+        recommended_action=str(row.get("recommended_action") or ""),
+    )
+
+
 def list_file_groups(
     *,
     kind: Optional[str] = None,
@@ -2204,62 +2244,23 @@ def list_file_groups(
 ) -> LibraryGroupsResponse:
     safe_limit = _bounded_limit(limit)
     safe_offset = max(0, offset)
-    groups = _all_file_group_details(cache_only=cache_only)
-    if kind:
-        groups = [group for group in groups if group.group_kind == kind]
-    if file_type:
-        groups = [group for group in groups if group.file_type == file_type]
-    normalized_query = (query or "").strip().lower()
-    if normalized_query:
-        groups = [
-            group
-            for group in groups
-            if normalized_query in " ".join(
-                [
-                    group.base_name,
-                    group.title,
-                    group.file_type,
-                    group.group_kind,
-                    *(group.tokens_summary or []),
-                    *(file.name for file in group.files),
-                    *(file.path for file in group.files),
-                ]
-            ).lower()
-        ]
-
-    if not include_duplicate_content:
-        groups = [
-            group
-            for group in groups
-            if group.group_kind != "exact_name_conflict" or group.content_status != "same_content"
-        ]
-
-    if sort == "name":
-        groups.sort(key=lambda group: (group.base_name.lower(), group.file_type, group.group_kind))
-    elif sort == "count":
-        groups.sort(key=lambda group: (-group.file_count, group.base_name.lower(), group.file_type, group.group_kind))
-    elif sort == "content":
-        content_rank = {
-            "content_differs": 4,
-            "partial": 3,
-            "pending": 2,
-            "not_enough_content": 1,
-            "same_content": 0,
-        }
-        groups.sort(key=lambda group: (content_rank.get(group.content_status, 0), group.file_count), reverse=True)
-
-    counts_by_kind: Dict[str, int] = {}
-    for group in groups:
-        counts_by_kind[group.group_kind] = counts_by_kind.get(group.group_kind, 0) + 1
-
-    page = groups[safe_offset : safe_offset + safe_limit]
-    status = get_library_group_index_status()
-    return LibraryGroupsResponse(
-        total=len(groups),
-        groups=[_group_summary(group) for group in page],
+    _ensure_group_index_available(cache_only=cache_only)
+    page_data = list_library_group_summaries(
+        kind=kind,
+        file_type=file_type,
+        query=query,
+        sort=sort,
         limit=safe_limit,
         offset=safe_offset,
-        counts_by_kind=counts_by_kind,
+        include_duplicate_content=include_duplicate_content,
+    )
+    status = get_library_group_index_status()
+    return LibraryGroupsResponse(
+        total=int(page_data.get("total") or 0),
+        groups=[_group_summary_from_index_row(row) for row in page_data.get("rows", [])],
+        limit=safe_limit,
+        offset=safe_offset,
+        counts_by_kind={str(key): int(value) for key, value in dict(page_data.get("counts_by_kind", {})).items()},
         derived_index_state=status.get("state", "missing"),
         derived_index_stale=status.get("state") in {"missing", "stale", "repair_needed", "error", "refreshing"},
         derived_index_updated_at=status.get("updated_at") or None,

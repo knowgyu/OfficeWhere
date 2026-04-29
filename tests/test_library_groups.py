@@ -21,6 +21,63 @@ def _register(path: str, name: str, file_type: str):
     )
 
 
+def _indexed_file_row(file_id: int, name: str, *, path: str | None = None, file_type: str = "Word"):
+    path = path or f"/tmp/{name}"
+    return {
+        "file_id": file_id,
+        "file_type": file_type,
+        "name": name,
+        "path": path,
+        "exact_key": name.lower(),
+        "version_key": name.rsplit(".", 1)[0],
+        "file_json": {
+            "id": file_id,
+            "name": name,
+            "path": path,
+            "file_type": file_type,
+            "key_column": "",
+            "column_count": 0,
+            "parser_config": {},
+            "created_at": "2026-04-30T00:00:00",
+            "file_mtime": 1000 + file_id,
+        },
+        "file_signature": f"sig-{file_id}",
+    }
+
+
+def _indexed_group_row(
+    group_id: str,
+    base_name: str,
+    file_ids: list[int],
+    *,
+    group_json: str | dict | None = None,
+    file_type: str = "Word",
+    content_status: str = "pending",
+):
+    return {
+        "group_id": group_id,
+        "group_kind": "version_family",
+        "file_type": file_type,
+        "base_name": base_name,
+        "canonical_name": base_name,
+        "title": f"{base_name} 버전 후보",
+        "confidence": "filename_tokens",
+        "reason": "파일명에서 버전 표시를 감지했습니다.",
+        "file_count": len(file_ids),
+        "latest_file_id": file_ids[-1],
+        "previous_file_id": file_ids[0],
+        "manual_latest_file_id": None,
+        "tokens_summary": ["v1", "v2"],
+        "content_status": content_status,
+        "fingerprint_coverage": 0,
+        "fingerprint_unique_count": 0,
+        "content_evidence": "",
+        "recommended_action": "변경점을 확인하세요.",
+        "group_json": group_json if group_json is not None else {"id": group_id},
+        "members": file_ids,
+    }
+
+
 def test_parse_document_identity_extracts_versions_dates_and_status():
     from backend.core.library import canonical_name, parse_document_identity
 
@@ -99,6 +156,62 @@ def test_library_groups_type_filter_and_limit_cap(tmp_path, monkeypatch):
     assert response.limit == 100
     assert len(response.groups) == 100
     assert {group.file_type for group in response.groups} == {"Excel"}
+
+
+def test_library_groups_sql_list_does_not_hydrate_off_page_group_json(tmp_path, monkeypatch):
+    from backend.core.library import list_file_groups
+    from backend.database import replace_library_group_index_full
+
+    _setup_db(tmp_path, monkeypatch)
+    file_rows = [
+        _indexed_file_row(1, "alpha_v1.docx"),
+        _indexed_file_row(2, "alpha_v2.docx"),
+        _indexed_file_row(3, "bravo_v1.docx"),
+        _indexed_file_row(4, "bravo_v2.docx"),
+        _indexed_file_row(5, "charlie_v1.docx"),
+        _indexed_file_row(6, "charlie_v2.docx"),
+    ]
+    replace_library_group_index_full(
+        file_rows,
+        [
+            _indexed_group_row("g-alpha", "alpha", [1, 2], group_json="{bad json"),
+            _indexed_group_row("g-bravo", "bravo", [3, 4], group_json={"id": "g-bravo"}),
+            _indexed_group_row("g-charlie", "charlie", [5, 6], group_json="{bad json"),
+        ],
+    )
+
+    response = list_file_groups(kind="version_family", sort="name", limit=1, offset=1, cache_only=True)
+
+    assert response.total == 3
+    assert [group.base_name for group in response.groups] == ["bravo"]
+    assert response.groups[0].latest_file is not None
+    assert response.groups[0].latest_file.name == "bravo_v2.docx"
+
+
+def test_library_groups_sql_filters_file_paths_before_pagination(tmp_path, monkeypatch):
+    from backend.core.library import list_file_groups
+    from backend.database import replace_library_group_index_full
+
+    _setup_db(tmp_path, monkeypatch)
+    file_rows = [
+        _indexed_file_row(1, "alpha_v1.docx", path="/tmp/general/alpha_v1.docx"),
+        _indexed_file_row(2, "alpha_v2.docx", path="/tmp/general/alpha_v2.docx"),
+        _indexed_file_row(3, "bravo_v1.docx", path="/tmp/research/bravo_v1.docx"),
+        _indexed_file_row(4, "bravo_v2.docx", path="/tmp/research/bravo_v2.docx"),
+    ]
+    replace_library_group_index_full(
+        file_rows,
+        [
+            _indexed_group_row("g-alpha", "alpha", [1, 2]),
+            _indexed_group_row("g-bravo", "bravo", [3, 4]),
+        ],
+    )
+
+    response = list_file_groups(query="research", sort="name", limit=10, cache_only=True)
+
+    assert response.total == 1
+    assert response.counts_by_kind == {"version_family": 1}
+    assert [group.base_name for group in response.groups] == ["bravo"]
 
 
 def test_library_group_cache_reuses_full_group_build_and_invalidates(tmp_path, monkeypatch):

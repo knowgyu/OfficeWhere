@@ -3,6 +3,8 @@
 Date: 2026-04-29
 Status: implemented as a DB-backed derived index.
 
+Follow-up performance roadmap: `docs/search-version-performance-roadmap.md`.
+
 ## Final direction
 
 The initial warmup-only plan was superseded after reviewing the real performance requirement: the expensive operation should be the first target-add/indexing pass, and normal version-management use should read prepared app-owned data.

@@ -423,19 +423,51 @@ export interface PptSlideCard {
   description: string
 }
 
+export type CompareWarningType =
+  | 'truncated'
+  | 'high_change_ratio'
+  | 'source_may_be_newer'
+  | 'simplified_comparison'
+  | 'artifact_missing'
+  | 'artifact_version_mismatch'
+  | 'artifact_rebuilt_or_refresh_needed'
+
+export interface CompareWarning {
+  type: CompareWarningType
+  severity: 'info' | 'warning'
+  message: string
+  fileIds: number[]
+  details: Record<string, unknown>
+}
+
+export interface CompareMetadata {
+  warnings: CompareWarning[]
+  usedLastIndexSnapshot: boolean
+  sourceStatChecked: boolean
+  sourceStatErrorCount: number
+  comparedCellCount: number | null
+  changedCellCount: number | null
+  totalCandidateCellCount: number | null
+  simplified: boolean
+  artifactStatus: string | null
+}
+
 export type CheckResponse =
   | {
       mode: 'excel'
+      metadata: CompareMetadata
       totalKeys: number
       matchedKeys: number
       issues: ExcelCheckIssue[]
     }
   | {
       mode: 'word'
+      metadata: CompareMetadata
       diffs: WordDiffCard[]
     }
   | {
       mode: 'ppt'
+      metadata: CompareMetadata
       slides: PptSlideCard[]
     }
 
@@ -1359,29 +1391,103 @@ function normalizePptSlides(payload: Record<string, unknown>): PptSlideCard[] {
   return [...insertedCards, ...removedCards, ...changedCards]
 }
 
+function normalizeCompareWarningType(value: unknown): CompareWarningType {
+  const raw = toStringValue(value).trim().toLowerCase()
+  if (
+    raw === 'truncated' ||
+    raw === 'high_change_ratio' ||
+    raw === 'source_may_be_newer' ||
+    raw === 'simplified_comparison' ||
+    raw === 'artifact_missing' ||
+    raw === 'artifact_version_mismatch' ||
+    raw === 'artifact_rebuilt_or_refresh_needed'
+  ) {
+    return raw
+  }
+  return 'source_may_be_newer'
+}
+
+function normalizeCompareWarnings(value: unknown): CompareWarning[] {
+  if (!Array.isArray(value)) return []
+
+  return value.map((entry): CompareWarning => {
+    const record = isRecord(entry) ? entry : {}
+    const details = isRecord(record.details) ? record.details : {}
+    const severity: CompareWarning['severity'] =
+      toStringValue(record.severity) === 'info' ? 'info' : 'warning'
+    return {
+      type: normalizeCompareWarningType(record.type ?? record.warning_type ?? record.warningType),
+      severity,
+      message:
+        toStringValue(record.message) ||
+        (severity === 'info'
+          ? '비교 참고 정보가 있습니다.'
+          : '비교 결과를 확인할 때 참고할 사항이 있습니다.'),
+      fileIds: toNumberArray(record.file_ids ?? record.fileIds),
+      details,
+    }
+  })
+}
+
+function normalizeCompareMetadata(value: unknown): CompareMetadata {
+  const record = isRecord(value) ? value : {}
+  const comparedCellCount = record.compared_cell_count ?? record.comparedCellCount
+  const changedCellCount = record.changed_cell_count ?? record.changedCellCount
+  const totalCandidateCellCount = record.total_candidate_cell_count ?? record.totalCandidateCellCount
+  return {
+    warnings: normalizeCompareWarnings(record.warnings),
+    usedLastIndexSnapshot: Boolean(record.used_last_index_snapshot ?? record.usedLastIndexSnapshot ?? true),
+    sourceStatChecked: Boolean(record.source_stat_checked ?? record.sourceStatChecked ?? false),
+    sourceStatErrorCount: toNumberValue(record.source_stat_error_count ?? record.sourceStatErrorCount, 0),
+    comparedCellCount:
+      comparedCellCount === null || comparedCellCount === undefined
+        ? null
+        : toNumberValue(comparedCellCount, 0),
+    changedCellCount:
+      changedCellCount === null || changedCellCount === undefined
+        ? null
+        : toNumberValue(changedCellCount, 0),
+    totalCandidateCellCount:
+      totalCandidateCellCount === null || totalCandidateCellCount === undefined
+        ? null
+        : toNumberValue(totalCandidateCellCount, 0),
+    simplified: Boolean(record.simplified ?? false),
+    artifactStatus:
+      record.artifact_status === null || record.artifactStatus === null
+        ? null
+        : toStringValue(record.artifact_status ?? record.artifactStatus) || null,
+  }
+}
+
 export function normalizeCheckResponse(payload: unknown): CheckResponse {
   const record = isRecord(payload) ? payload : {}
   const mode = getCompareMode(record.mode, record.file_type)
 
   if (mode === 'word') {
     const source = isRecord(record.word) ? record.word : record
+    const metadata = normalizeCompareMetadata(record.metadata ?? source.metadata)
     return {
       mode: 'word',
+      metadata,
       diffs: normalizeWordDiffs(source.changes ?? source.diffs ?? source.issues ?? source.cards),
     }
   }
 
   if (mode === 'ppt') {
     const source = isRecord(record.ppt) ? record.ppt : record
+    const metadata = normalizeCompareMetadata(record.metadata ?? source.metadata)
     return {
       mode: 'ppt',
+      metadata,
       slides: normalizePptSlides(source),
     }
   }
 
   const source = isRecord(record.excel) ? record.excel : record
+  const metadata = normalizeCompareMetadata(record.metadata ?? source.metadata)
   return {
     mode: 'excel',
+    metadata,
     totalKeys: toNumberValue(source.total_keys ?? source.totalKeys, 0),
     matchedKeys: toNumberValue(source.matched_keys ?? source.matchedKeys, 0),
     issues: normalizeExcelIssues(source.issues),
