@@ -55,6 +55,15 @@ def _write_dataframe_excel(path: Path, data: dict):
     pd.DataFrame(data).to_excel(path, index=False)
 
 
+def _write_multisheet_excel(path: Path, detail_value: str):
+    workbook = Workbook()
+    workbook.active.title = "요약"
+    workbook.active["A1"] = "공통요약"
+    detail = workbook.create_sheet("세부")
+    detail["B2"] = detail_value
+    workbook.save(path)
+
+
 def _make_parser_config(columns: int, rows: int) -> dict:
     return {
         "sheet_name": "Sheet1",
@@ -220,6 +229,94 @@ def test_excel_consistency_reports_cell_value_added_and_removed(tmp_path):
     assert removed["message"] == "3행 B열 값이 삭제되었습니다."
     assert [entry["values"] for entry in removed["values"]] == [["Kim"], ["(빈 값)"]]
     assert removed["values"][0]["cell_refs"] == ["B3"]
+
+
+def test_excel_consistency_compares_all_visible_sheets(tmp_path):
+    file_a = tmp_path / "multi-a.xlsx"
+    file_b = tmp_path / "multi-b.xlsx"
+    _write_multisheet_excel(file_a, "기존상세")
+    _write_multisheet_excel(file_b, "변경상세")
+
+    result = run_consistency_check(
+        [
+            {
+                "id": 1,
+                "path": str(file_a),
+                "name": "multi-a.xlsx",
+                "file_type": "Excel",
+                "key_column": "",
+                "parser_config": {},
+            },
+            {
+                "id": 2,
+                "path": str(file_b),
+                "name": "multi-b.xlsx",
+                "file_type": "Excel",
+                "key_column": "",
+                "parser_config": {},
+            },
+        ]
+    )
+
+    issue = result["excel"]["issues"][0]
+    assert issue["sheet_name"] == "세부"
+    assert issue["key"] == "세부!2"
+    assert issue["column"] == "B"
+    assert issue["message"] == "세부 시트 | 2행 B열 값이 변경되었습니다."
+    assert issue["values"][0]["cell_refs"] == ["세부!B2"]
+    assert issue["values"][0]["sheet_name"] == "세부"
+
+
+def test_excel_consistency_uses_fresh_indexed_sheet_cache(tmp_path, monkeypatch):
+    from backend.core.indexer import inspect_and_chunk
+    from backend.database import get_file_by_id, init_db, save_indexed_file
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    file_a = tmp_path / "indexed-a.xlsx"
+    file_b = tmp_path / "indexed-b.xlsx"
+    _write_multisheet_excel(file_a, "캐시전")
+    _write_multisheet_excel(file_b, "캐시후")
+
+    file_ids = []
+    for file_path in (file_a, file_b):
+        info, chunks = inspect_and_chunk(str(file_path))
+        file_id = save_indexed_file(
+            path=str(file_path),
+            name=info["name"],
+            file_type=info["file_type"],
+            key_column="",
+            column_count=len(info["columns"]),
+            chunks=chunks,
+            file_mtime=file_path.stat().st_mtime,
+            parser_config=None,
+            excel_sheets=info["excel_sheets"],
+            excel_cells=info["excel_cells"],
+        )
+        file_ids.append(file_id)
+
+    def fail_source_parse(_path):
+        raise AssertionError("fresh indexed Excel comparison should not parse source sheets")
+
+    monkeypatch.setattr("backend.core.excel_compare.extract_excel_used_ranges", fail_source_parse)
+    file_infos = [
+        {
+            "id": file_id,
+            "path": get_file_by_id(file_id)["path"],
+            "name": get_file_by_id(file_id)["name"],
+            "file_type": get_file_by_id(file_id)["file_type"],
+            "file_mtime": get_file_by_id(file_id)["file_mtime"],
+        }
+        for file_id in file_ids
+    ]
+
+    result = run_consistency_check(file_infos)
+
+    issue = result["excel"]["issues"][0]
+    assert issue["sheet_name"] == "세부"
+    assert [entry["values"][0] for entry in issue["values"]] == ["캐시전", "캐시후"]
 
 
 def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):

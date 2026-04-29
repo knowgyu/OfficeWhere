@@ -81,6 +81,41 @@ def test_excel_inspect_preserves_formatted_date_text(tmp_path):
     assert result["sample"][0][0] != "46140"
 
 
+def test_excel_inspect_uses_first_non_empty_visible_sheet(tmp_path):
+    path = tmp_path / "non-empty-second-sheet.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "빈시트"
+    data_sheet = workbook.create_sheet("데이터")
+    data_sheet.append(["항목", "값"])
+    data_sheet.append(["중요", "세컨드시트"])
+    workbook.save(path)
+
+    result = inspect_file_path(str(path))
+
+    assert result["parser_config"]["sheet_name"] == "데이터"
+    assert result["columns"] == ["항목", "값"]
+    assert result["sample"][0] == ["중요", "세컨드시트"]
+
+
+def test_extract_excel_used_ranges_reads_all_visible_sheets_and_skips_hidden(tmp_path):
+    path = tmp_path / "all-visible-sheets.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "요약"
+    workbook.active["A1"] = "요약키워드"
+    detail = workbook.create_sheet("세부")
+    detail["B2"] = "세부키워드"
+    hidden = workbook.create_sheet("숨김")
+    hidden.sheet_state = "hidden"
+    hidden["A1"] = "숨겨진키워드"
+    workbook.save(path)
+
+    ranges = excel_analysis.extract_excel_used_ranges(str(path))
+
+    assert [item.sheet_name for item in ranges] == ["요약", "세부"]
+    assert ranges[1].dataframe.iat[1, 1] == "세부키워드"
+    assert ranges[1].non_empty_cell_count == 1
+
+
 def test_excel_discovery_keeps_full_end_row_when_scan_is_bounded(tmp_path):
     path = tmp_path / "large.xlsx"
     workbook = Workbook()

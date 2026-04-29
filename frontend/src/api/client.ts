@@ -301,6 +301,7 @@ export interface ExcelDiffFocusHistory {
 }
 
 export interface ExcelDiffGridFocus {
+  sheet_name?: string
   key: string
   column: string
   change_type: ExcelDiffHighlight
@@ -320,6 +321,7 @@ export interface ExcelDiffGridColumn {
 }
 
 export interface ExcelDiffGridCell {
+  sheet_name?: string
   row_index: number
   row_number: number
   column_index: number
@@ -331,6 +333,7 @@ export interface ExcelDiffGridCell {
 }
 
 export interface ExcelDiffGridRow {
+  sheet_name?: string
   row_index: number
   row_number: number
   key_value: string
@@ -339,6 +342,7 @@ export interface ExcelDiffGridRow {
 
 export interface ExcelDiffGridSection {
   id: string
+  sheet_name?: string
   title: string
   description: string
   partial: boolean
@@ -367,6 +371,7 @@ export interface ExcelDiffGridResponse {
 export interface ExcelConflictEntry {
   fileId: number
   fileName: string
+  sheetName: string
   columns: string[]
   values: string[]
   rowNumbers: number[]
@@ -388,6 +393,7 @@ export interface ExcelCheckIssue {
   id: string
   type: ExcelIssueType
   severity: 'conflict' | 'warning'
+  sheetName: string
   key: string
   keyVariants: string[]
   columnGroup: string
@@ -1046,6 +1052,7 @@ function normalizeExcelConflictEntries(value: unknown): ExcelConflictEntry[] {
     return {
       fileId: toNumberValue(record.file_id ?? record.fileId, index),
       fileName: toStringValue(record.file_name ?? record.fileName) || `파일 ${index + 1}`,
+      sheetName: toStringValue(record.sheet_name ?? record.sheetName),
       columns: toStringArray(record.columns ?? record.column_names),
       values: toStringArray(record.values ?? record.value),
       rowNumbers: toNumberArray(record.row_numbers ?? record.rowNumbers ?? record.row_number ?? record.rowNumber),
@@ -1067,6 +1074,7 @@ function normalizeExcelFileRefs(value: unknown, column: string, fallbackValue: s
     return {
       fileId: toNumberValue(record.file_id ?? record.fileId, index),
       fileName: toStringValue(record.file_name ?? record.fileName) || `파일 ${index + 1}`,
+      sheetName: toStringValue(record.sheet_name ?? record.sheetName),
       columns: column ? [column] : [],
       values: fallbackValue ? [fallbackValue] : [],
       rowNumbers: [],
@@ -1108,6 +1116,7 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
       id: toStringValue(record.id) || `excel-issue-${index}`,
       type,
       severity: toStringValue(record.severity) === 'warning' ? 'warning' : 'conflict',
+      sheetName: toStringValue(record.sheet_name ?? record.sheetName),
       key,
       keyVariants: uniqueStrings(toStringArray(record.key_variants ?? record.keyVariants)),
       columnGroup,

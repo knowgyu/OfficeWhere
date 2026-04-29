@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import hashlib
 from pathlib import Path
 import posixpath
 import re
@@ -56,6 +57,28 @@ class ExcelTableCandidate:
             "end_col": self.end_col,
             "end_row": self.end_row,
             "score": round(self.score, 3),
+        }
+
+
+@dataclass(frozen=True)
+class ExcelUsedRange:
+    sheet_name: str
+    sheet_index: int
+    dataframe: Any
+    parser_config: ParserConfig
+    row_count: int
+    column_count: int
+    non_empty_cell_count: int
+    content_hash: str
+
+    def sheet_summary(self) -> Dict[str, Any]:
+        return {
+            "sheet_name": self.sheet_name,
+            "sheet_index": self.sheet_index,
+            "row_count": self.row_count,
+            "column_count": self.column_count,
+            "non_empty_cell_count": self.non_empty_cell_count,
+            "content_hash": self.content_hash,
         }
 
 
@@ -141,18 +164,29 @@ def _xlsx_relationship_targets(archive: zipfile.ZipFile) -> Dict[str, str]:
     return targets
 
 
-def _xlsx_sheet_refs(path: str) -> List[Tuple[str, str]]:
+def _xlsx_sheet_refs_from_archive(
+    archive: zipfile.ZipFile,
+    *,
+    visible_only: bool = True,
+) -> List[Tuple[str, str]]:
+    rel_targets = _xlsx_relationship_targets(archive)
+    root = ET.fromstring(archive.read("xl/workbook.xml"))
+    refs: List[Tuple[str, str]] = []
+    for sheet in root.findall(f".//{SHEET_TAG}sheet"):
+        state = sheet.get("state", "visible")
+        if visible_only and state not in ("", "visible"):
+            continue
+        name = sheet.get("name")
+        rel_id = sheet.get(REL_ID)
+        target = rel_targets.get(rel_id or "")
+        if name and target:
+            refs.append((name, target))
+    return refs
+
+
+def _xlsx_sheet_refs(path: str, *, visible_only: bool = True) -> List[Tuple[str, str]]:
     with zipfile.ZipFile(path) as archive:
-        rel_targets = _xlsx_relationship_targets(archive)
-        root = ET.fromstring(archive.read("xl/workbook.xml"))
-        refs: List[Tuple[str, str]] = []
-        for sheet in root.findall(f".//{SHEET_TAG}sheet"):
-            name = sheet.get("name")
-            rel_id = sheet.get(REL_ID)
-            target = rel_targets.get(rel_id or "")
-            if name and target:
-                refs.append((name, target))
-        return refs
+        return _xlsx_sheet_refs_from_archive(archive, visible_only=visible_only)
 
 
 def _xlsx_sheet_path(path: str, sheet_name: str) -> str:
@@ -306,9 +340,12 @@ def _xlsx_sheet_bounds(path: str, sheet_name: str) -> Tuple[int, int]:
             return max_row, max_col
 
 
-def _xlsx_read_sheet(
-    path: str,
-    sheet_name: str,
+def _xlsx_read_sheet_from_archive(
+    archive: zipfile.ZipFile,
+    sheet_path: str,
+    shared_strings: List[str],
+    date_style_ids: set[int],
+    date_system: str,
     max_rows: Optional[int] = None,
     min_row: int = 1,
     max_row: Optional[int] = None,
@@ -316,10 +353,6 @@ def _xlsx_read_sheet(
     max_col: Optional[int] = None,
 ) -> "pd.DataFrame":
     pd = _get_pandas()
-    try:
-        sheet_path = _xlsx_sheet_path(path, sheet_name)
-    except ValueError:
-        return pd.DataFrame()
 
     bounded_max_row = max_row
     if max_rows is not None:
@@ -330,34 +363,30 @@ def _xlsx_read_sheet(
     max_seen_row = min_row - 1
     max_seen_col = min_col - 1
 
-    with zipfile.ZipFile(path) as archive:
-        shared_strings = _xlsx_shared_strings(archive)
-        date_style_ids = _xlsx_date_style_ids(archive)
-        date_system = _xlsx_date_system(archive)
-        with archive.open(sheet_path) as source:
-            for _event, element in ET.iterparse(source, events=("end",)):
-                if element.tag != f"{SHEET_TAG}c":
-                    continue
-                ref = element.get("r", "")
-                row_index, col_index = _cell_ref_to_indices(ref)
-                if row_index < min_row:
-                    element.clear()
-                    continue
-                if bounded_max_row is not None and row_index > bounded_max_row:
-                    element.clear()
-                    break
-                if col_index < min_col or (max_col is not None and col_index > max_col):
-                    element.clear()
-                    continue
-                rows_by_number.setdefault(row_index, {})[col_index] = _xlsx_cell_text(
-                    element,
-                    shared_strings,
-                    date_style_ids,
-                    date_system,
-                )
-                max_seen_row = max(max_seen_row, row_index)
-                max_seen_col = max(max_seen_col, col_index)
+    with archive.open(sheet_path) as source:
+        for _event, element in ET.iterparse(source, events=("end",)):
+            if element.tag != f"{SHEET_TAG}c":
+                continue
+            ref = element.get("r", "")
+            row_index, col_index = _cell_ref_to_indices(ref)
+            if row_index < min_row:
                 element.clear()
+                continue
+            if bounded_max_row is not None and row_index > bounded_max_row:
+                element.clear()
+                break
+            if col_index < min_col or (max_col is not None and col_index > max_col):
+                element.clear()
+                continue
+            rows_by_number.setdefault(row_index, {})[col_index] = _xlsx_cell_text(
+                element,
+                shared_strings,
+                date_style_ids,
+                date_system,
+            )
+            max_seen_row = max(max_seen_row, row_index)
+            max_seen_col = max(max_seen_col, col_index)
+            element.clear()
 
     if bounded_max_row is not None:
         output_max_row = bounded_max_row
@@ -372,6 +401,35 @@ def _xlsx_read_sheet(
         row_values = rows_by_number.get(row_index, {})
         rows.append([row_values.get(col_index, "") for col_index in range(min_col, output_max_col + 1)])
     return _rows_to_dataframe(rows)
+
+
+def _xlsx_read_sheet(
+    path: str,
+    sheet_name: str,
+    max_rows: Optional[int] = None,
+    min_row: int = 1,
+    max_row: Optional[int] = None,
+    min_col: int = 1,
+    max_col: Optional[int] = None,
+) -> "pd.DataFrame":
+    with zipfile.ZipFile(path) as archive:
+        refs = dict(_xlsx_sheet_refs_from_archive(archive))
+        sheet_path = refs.get(sheet_name)
+        if not sheet_path:
+            pd = _get_pandas()
+            return pd.DataFrame()
+        return _xlsx_read_sheet_from_archive(
+            archive,
+            sheet_path,
+            _xlsx_shared_strings(archive),
+            _xlsx_date_style_ids(archive),
+            _xlsx_date_system(archive),
+            max_rows=max_rows,
+            min_row=min_row,
+            max_row=max_row,
+            min_col=min_col,
+            max_col=max_col,
+        )
 
 
 def _rows_to_dataframe(rows: List[List[Any]]) -> "pd.DataFrame":
@@ -653,29 +711,43 @@ def extract_excel_table(path: str, parser_config: Optional[ParserConfig]) -> "pd
     return data
 
 
-def extract_excel_used_range(path: str, sheet_name: Optional[str] = None) -> Tuple["pd.DataFrame", ParserConfig]:
-    """Return the actual visible sheet area as an Excel-coordinate table.
+def _used_range_content_fingerprint(dataframe: "pd.DataFrame") -> Tuple[int, str]:
+    digest = hashlib.sha256()
+    non_empty_cell_count = 0
+    for dataframe_index, row in dataframe.iterrows():
+        excel_row = int(dataframe_index) + 1
+        for column_index, column in enumerate(dataframe.columns, start=1):
+            text = _stringify(row[column])
+            if not text:
+                continue
+            non_empty_cell_count += 1
+            digest.update(f"{excel_row}\t{column_index}\t{text}\n".encode("utf-8"))
+    return non_empty_cell_count, digest.hexdigest()
 
-    This intentionally ignores the saved parser_config used by Excel integration.
-    Version Management needs a read-only, source-coordinate view of the sheet so
-    stale registration-time table ranges do not block comparison.
-    """
+
+def _build_used_range(sheet_name: str, sheet_index: int, raw: "pd.DataFrame") -> ExcelUsedRange:
+    """Return one sheet's actual used range while preserving Excel coordinates."""
     import pandas as pd
 
-    sheet_names = list_sheet_names(path)
-    if not sheet_names:
-        raise ValueError("Excel 파일에 시트가 없습니다.")
-
-    selected_sheet = sheet_name if sheet_name in sheet_names else sheet_names[0]
-    raw = _read_excel_sheet(path, selected_sheet).copy()
     if raw.empty:
-        return pd.DataFrame(), {
-            "sheet_name": selected_sheet,
+        empty_config = {
+            "sheet_name": sheet_name,
             "header_row": 0,
             "start_col": 1,
             "end_col": 1,
             "end_row": 0,
         }
+        non_empty_cell_count, content_hash = _used_range_content_fingerprint(pd.DataFrame())
+        return ExcelUsedRange(
+            sheet_name=sheet_name,
+            sheet_index=sheet_index,
+            dataframe=pd.DataFrame(),
+            parser_config=empty_config,
+            row_count=0,
+            column_count=0,
+            non_empty_cell_count=non_empty_cell_count,
+            content_hash=content_hash,
+        )
 
     raw = raw.fillna("")
     non_empty = raw.map(_is_non_empty)
@@ -683,26 +755,100 @@ def extract_excel_used_range(path: str, sheet_name: Optional[str] = None) -> Tup
     non_empty_cols = non_empty.any(axis=0)
 
     if not bool(non_empty_rows.any()) or not bool(non_empty_cols.any()):
-        return pd.DataFrame(), {
-            "sheet_name": selected_sheet,
+        empty_config = {
+            "sheet_name": sheet_name,
             "header_row": 0,
             "start_col": 1,
             "end_col": 1,
             "end_row": 0,
         }
+        non_empty_cell_count, content_hash = _used_range_content_fingerprint(pd.DataFrame())
+        return ExcelUsedRange(
+            sheet_name=sheet_name,
+            sheet_index=sheet_index,
+            dataframe=pd.DataFrame(),
+            parser_config=empty_config,
+            row_count=0,
+            column_count=0,
+            non_empty_cell_count=non_empty_cell_count,
+            content_hash=content_hash,
+        )
 
     last_row_position = int(non_empty_rows[non_empty_rows].index[-1])
     last_col_position = int(non_empty_cols[non_empty_cols].index[-1])
     used = raw.iloc[: last_row_position + 1, : last_col_position + 1].copy()
     used.columns = [get_column_letter(index) for index in range(1, len(used.columns) + 1)]
+    non_empty_cell_count, content_hash = _used_range_content_fingerprint(used)
 
-    return used, {
-        "sheet_name": selected_sheet,
+    config = {
+        "sheet_name": sheet_name,
         "header_row": 0,
         "start_col": 1,
         "end_col": len(used.columns),
         "end_row": len(used.index),
     }
+    return ExcelUsedRange(
+        sheet_name=sheet_name,
+        sheet_index=sheet_index,
+        dataframe=used,
+        parser_config=config,
+        row_count=len(used.index),
+        column_count=len(used.columns),
+        non_empty_cell_count=non_empty_cell_count,
+        content_hash=content_hash,
+    )
+
+
+def extract_excel_used_ranges(path: str) -> List[ExcelUsedRange]:
+    """Return all visible Excel sheets as source-coordinate used ranges.
+
+    `.xlsx`/`.xlsm` hidden and veryHidden sheets are intentionally skipped so
+    normal search/version review follows what users see in Excel.  Legacy `.xls`
+    files use the available pandas/xlrd sheet list and may include hidden sheets
+    because that metadata is not exposed by the current lightweight path.
+    """
+    ext = Path(path).suffix.lower()
+    if ext == ".xls":
+        sheet_names = list_sheet_names(path)
+        if not sheet_names:
+            raise ValueError("Excel 파일에 시트가 없습니다.")
+        return [
+            _build_used_range(sheet_name, sheet_index, _read_excel_sheet(path, sheet_name).copy())
+            for sheet_index, sheet_name in enumerate(sheet_names, start=1)
+        ]
+
+    with zipfile.ZipFile(path) as archive:
+        refs = _xlsx_sheet_refs_from_archive(archive)
+        if not refs:
+            raise ValueError("Excel 파일에 시트가 없습니다.")
+        shared_strings = _xlsx_shared_strings(archive)
+        date_style_ids = _xlsx_date_style_ids(archive)
+        date_system = _xlsx_date_system(archive)
+        ranges: List[ExcelUsedRange] = []
+        for sheet_index, (current_sheet_name, sheet_path) in enumerate(refs, start=1):
+            raw = _xlsx_read_sheet_from_archive(
+                archive,
+                sheet_path,
+                shared_strings,
+                date_style_ids,
+                date_system,
+            ).copy()
+            ranges.append(_build_used_range(current_sheet_name, sheet_index, raw))
+        return ranges
+
+
+def extract_excel_used_range(path: str, sheet_name: Optional[str] = None) -> Tuple["pd.DataFrame", ParserConfig]:
+    """Return one visible sheet's source-coordinate used range.
+
+    This intentionally ignores the saved parser_config used by legacy Excel
+    integration. Version Management and search need read-only source coordinates
+    so stale registration-time table ranges do not block comparison.
+    """
+    used_ranges = extract_excel_used_ranges(path)
+    selected = next((item for item in used_ranges if item.sheet_name == sheet_name), None) if sheet_name else None
+    if selected is None:
+        selected = next((item for item in used_ranges if item.non_empty_cell_count > 0), used_ranges[0])
+    return selected.dataframe, selected.parser_config
 
 
 def inspect_excel_file(path: str, parser_config: Optional[ParserConfig] = None) -> Dict[str, Any]:

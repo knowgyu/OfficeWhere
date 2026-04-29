@@ -61,6 +61,7 @@ def consistency_check(req: CheckRequest):
                 "path": file_row["path"],
                 "name": file_row["name"],
                 "file_type": file_row["file_type"],
+                "file_mtime": file_row.get("file_mtime"),
             }
         )
 
@@ -112,6 +113,7 @@ def excel_diff_grid(req: ExcelDiffGridRequest):
                 "path": file_row["path"],
                 "name": file_row["name"],
                 "file_type": file_row["file_type"],
+                "file_mtime": file_row.get("file_mtime"),
             }
         )
 

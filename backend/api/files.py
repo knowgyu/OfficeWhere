@@ -224,6 +224,8 @@ def register(req: FileRegisterRequest):
             chunks=chunks,
             file_mtime=stat_result.st_mtime,
             parser_config=None,
+            excel_sheets=info.get("excel_sheets"),
+            excel_cells=info.get("excel_cells"),
         ),
     )
     log_index_perf(
@@ -436,6 +438,8 @@ def bulk_register(req: BulkRegisterRequest):
                     chunks=chunks,
                     file_mtime=stat_result.st_mtime,
                     parser_config=None,
+                    excel_sheets=info.get("excel_sheets"),
+                    excel_cells=info.get("excel_cells"),
                 ),
             )
             log_index_perf(

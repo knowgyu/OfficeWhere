@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
     import pandas as pd
 
-from .excel_analysis import extract_excel_used_range
+from ..database import get_excel_cell_index, get_excel_sheet_index
+from .excel_analysis import extract_excel_used_ranges
 from .normalizer import normalize_key, values_equal
 
 
@@ -239,8 +241,10 @@ def _version_cell_issue_type(before: str, after: str) -> str:
     return "value_conflict"
 
 
-def _version_cell_message(row_number: int, column_letter: str, issue_type: str) -> str:
+def _version_cell_message(row_number: int, column_letter: str, issue_type: str, sheet_name: str = "") -> str:
     location = f"{row_number}행 {column_letter}열"
+    if sheet_name:
+        location = f"{sheet_name} 시트 | {location}"
     if issue_type == "value_added":
         return f"{location} 값이 추가되었습니다."
     if issue_type == "value_removed":
@@ -248,62 +252,167 @@ def _version_cell_message(row_number: int, column_letter: str, issue_type: str) 
     return f"{location} 값이 변경되었습니다."
 
 
-def _version_cell_entry(file_info: Dict[str, Any], row_number: int, column_letter: str, value: str) -> Dict[str, Any]:
+def _version_cell_entry(
+    file_info: Dict[str, Any],
+    row_number: int,
+    column_letter: str,
+    value: str,
+    *,
+    sheet_name: str = "",
+    include_sheet_in_ref: bool = False,
+) -> Dict[str, Any]:
+    cell_ref = f"{column_letter}{row_number}"
+    if include_sheet_in_ref and sheet_name:
+        cell_ref = f"{sheet_name}!{cell_ref}"
     return {
         "file_id": file_info["id"],
         "file_name": file_info["name"],
+        "sheet_name": sheet_name,
         "columns": [column_letter],
         "values": [value or EMPTY_VALUE_LABEL],
         "row_numbers": [row_number],
         "column_letters": [column_letter],
-        "cell_refs": [f"{column_letter}{row_number}"],
+        "cell_refs": [cell_ref],
         "row_count": 1,
         "row_values": [[value]],
     }
+
+
+def _source_excel_payload(file_info: Dict[str, Any]) -> Dict[str, Any]:
+    used_ranges = extract_excel_used_ranges(file_info["path"])
+    sheets: Dict[str, Dict[str, Any]] = {}
+    cells: Dict[tuple[str, int, int], str] = {}
+    for used_range in used_ranges:
+        summary = used_range.sheet_summary()
+        sheets[used_range.sheet_name] = summary
+        for dataframe_index, row in used_range.dataframe.iterrows():
+            row_number = int(dataframe_index) + 1
+            for column_index, (_column, value) in enumerate(row.items(), start=1):
+                text = _stringify_cell(value)
+                if text.strip():
+                    cells[(used_range.sheet_name, row_number, column_index)] = text
+    return {
+        "info": file_info,
+        "sheets": sheets,
+        "cells": cells,
+    }
+
+
+def _indexed_excel_payloads(file_infos: List[Dict[str, Any]]) -> List[Dict[str, Any]] | None:
+    file_ids = [int(info["id"]) for info in file_infos]
+    if not all("file_mtime" in info for info in file_infos):
+        return None
+
+    for info in file_infos:
+        try:
+            current_mtime = os.path.getmtime(info["path"])
+        except OSError:
+            return None
+        stored_mtime = info.get("file_mtime")
+        if stored_mtime is None or abs(float(current_mtime) - float(stored_mtime)) >= 1.0:
+            return None
+
+    sheet_rows = get_excel_sheet_index(file_ids)
+    if not all(sheet_rows.get(file_id) for file_id in file_ids):
+        return None
+
+    cell_rows = get_excel_cell_index(file_ids)
+    payloads: List[Dict[str, Any]] = []
+    for info in file_infos:
+        file_id = int(info["id"])
+        sheets = {str(row["sheet_name"]): dict(row) for row in sheet_rows.get(file_id, [])}
+        cells: Dict[tuple[str, int, int], str] = {}
+        for row in cell_rows.get(file_id, []):
+            cells[(str(row["sheet_name"]), int(row["row_number"]), int(row["column_index"]))] = str(row["content"])
+        payloads.append({"info": info, "sheets": sheets, "cells": cells})
+    return payloads
+
+
+def _excel_payloads(file_infos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    indexed = _indexed_excel_payloads(file_infos)
+    if indexed is not None:
+        return indexed
+    return [_source_excel_payload(info) for info in file_infos]
+
+
+def _ordered_sheet_names(payloads: List[Dict[str, Any]]) -> List[str]:
+    order: Dict[str, int] = {}
+    for payload in payloads:
+        for sheet_name, sheet in payload["sheets"].items():
+            sheet_index = int(sheet.get("sheet_index") or 999_999)
+            if sheet_name not in order or sheet_index < order[sheet_name]:
+                order[sheet_name] = sheet_index
+    return sorted(order, key=lambda name: (order[name], name))
 
 
 def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(file_infos) != 2:
         raise ValueError("Excel 버전 관리는 두 버전씩 순서대로 비교합니다.")
 
-    before_info, after_info = file_infos
-    before_df, _before_config = extract_excel_used_range(before_info["path"])
-    after_df, _after_config = extract_excel_used_range(after_info["path"])
-
-    row_count = max(len(before_df.index), len(after_df.index))
-    column_count = max(len(before_df.columns), len(after_df.columns))
+    payloads = _excel_payloads(file_infos)
+    before_payload, after_payload = payloads
+    before_info = before_payload["info"]
+    after_info = after_payload["info"]
+    sheet_names = _ordered_sheet_names(payloads)
+    include_sheet_in_ref = len(sheet_names) > 1
+    total_rows = 0
     issues: List[Dict[str, Any]] = []
-    changed_rows: set[int] = set()
+    changed_rows: set[tuple[str, int]] = set()
     truncated = False
 
-    for row_index in range(row_count):
-        for column_index in range(column_count):
-            column_letter = _column_letter(column_index + 1)
-            before = _cell_value_at(before_df, row_index, column_index)
-            after = _cell_value_at(after_df, row_index, column_index)
-            if values_equal(before, after):
-                continue
+    for sheet_name in sheet_names:
+        before_sheet = before_payload["sheets"].get(sheet_name, {})
+        after_sheet = after_payload["sheets"].get(sheet_name, {})
+        row_count = max(int(before_sheet.get("row_count") or 0), int(after_sheet.get("row_count") or 0))
+        column_count = max(int(before_sheet.get("column_count") or 0), int(after_sheet.get("column_count") or 0))
+        total_rows += row_count
+        sheet_label = sheet_name if include_sheet_in_ref else ""
+        for row_index in range(row_count):
+            for column_index in range(column_count):
+                row_number = row_index + 1
+                column_number = column_index + 1
+                column_letter = _column_letter(column_number)
+                before = before_payload["cells"].get((sheet_name, row_number, column_number), "")
+                after = after_payload["cells"].get((sheet_name, row_number, column_number), "")
+                if values_equal(before, after):
+                    continue
 
-            if len(issues) >= EXCEL_VERSION_CELL_ISSUE_LIMIT:
-                truncated = True
+                if len(issues) >= EXCEL_VERSION_CELL_ISSUE_LIMIT:
+                    truncated = True
+                    break
+
+                issue_type = _version_cell_issue_type(before, after)
+                changed_rows.add((sheet_name, row_number))
+                issues.append(
+                    {
+                        "issue_type": issue_type,
+                        "severity": "warning" if issue_type != "value_conflict" else "conflict",
+                        "sheet_name": sheet_name,
+                        "key": f"{sheet_name}!{row_number}" if include_sheet_in_ref else str(row_number),
+                        "column": column_letter,
+                        "message": _version_cell_message(row_number, column_letter, issue_type, sheet_label),
+                        "values": [
+                            _version_cell_entry(
+                                before_info,
+                                row_number,
+                                column_letter,
+                                before,
+                                sheet_name=sheet_name,
+                                include_sheet_in_ref=include_sheet_in_ref,
+                            ),
+                            _version_cell_entry(
+                                after_info,
+                                row_number,
+                                column_letter,
+                                after,
+                                sheet_name=sheet_name,
+                                include_sheet_in_ref=include_sheet_in_ref,
+                            ),
+                        ],
+                    }
+                )
+            if truncated:
                 break
-
-            row_number = row_index + 1
-            issue_type = _version_cell_issue_type(before, after)
-            changed_rows.add(row_number)
-            issues.append(
-                {
-                    "issue_type": issue_type,
-                    "severity": "warning" if issue_type != "value_conflict" else "conflict",
-                    "key": str(row_number),
-                    "column": column_letter,
-                    "message": _version_cell_message(row_number, column_letter, issue_type),
-                    "values": [
-                        _version_cell_entry(before_info, row_number, column_letter, before),
-                        _version_cell_entry(after_info, row_number, column_letter, after),
-                    ],
-                }
-            )
         if truncated:
             break
 
@@ -320,8 +429,8 @@ def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[st
         )
 
     return {
-        "total_keys": row_count,
-        "matched_keys": max(row_count - len(changed_rows), 0),
+        "total_keys": total_rows,
+        "matched_keys": max(total_rows - len(changed_rows), 0),
         "issues": issues,
     }
 

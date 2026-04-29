@@ -111,4 +111,6 @@ def test_init_db_creates_library_group_index_tables(tmp_path, monkeypatch):
         "library_group_index",
         "library_group_members",
         "library_group_dirty_keys",
+        "excel_sheet_index",
+        "excel_cell_index",
     }.issubset(tables)

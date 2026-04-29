@@ -182,14 +182,20 @@ def _choose_ranges(
     return _merge_ranges(ranges)[:MAX_SECTIONS], True
 
 
-def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) -> Dict[str, Any]:
+def _build_excel_diff_grid_for_sheet(
+    file_infos: List[Dict[str, Any]],
+    focuses: List[Any],
+    *,
+    target_sheet: str | None = None,
+    section_id_prefix: str = "section",
+) -> Dict[str, Any]:
     if len(file_infos) < 2:
         raise ValueError("표로 보기는 최소 2개 Excel 파일이 필요합니다.")
 
     latest_info = file_infos[0]
     used_ranges = []
     for info in file_infos:
-        dataframe, parser = extract_excel_used_range(info["path"])
+        dataframe, parser = extract_excel_used_range(info["path"], sheet_name=target_sheet)
         used_ranges.append((info, dataframe, parser))
     latest_df = used_ranges[0][1]
     parser_config = used_ranges[0][2]
@@ -283,7 +289,14 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
 
     for raw_focus in focuses:
         focus = _coerce_focus(raw_focus)
+        focus_sheet = str(focus.get("sheet_name", "") or "")
+        if target_sheet and focus_sheet and focus_sheet != target_sheet:
+            continue
         key = str(focus.get("key", "") or "")
+        if target_sheet and "!" in key:
+            maybe_sheet, maybe_key = key.rsplit("!", 1)
+            if maybe_sheet == target_sheet:
+                key = maybe_key
         column = str(focus.get("column", "") or "")
         position = resolve_focus_position(key, column)
         if position is None:
@@ -370,6 +383,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                 position = (row_index, column_index)
                 cells.append(
                     {
+                        "sheet_name": str(parser_config["sheet_name"]),
                         "row_index": row_index,
                         "row_number": row_number,
                         "column_index": column_index,
@@ -382,6 +396,7 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
                 )
             rows.append(
                 {
+                    "sheet_name": str(parser_config["sheet_name"]),
                     "row_index": row_index,
                     "row_number": row_number,
                     "key_value": latest_value(row_index, key_col_index) if columns else "",
@@ -404,7 +419,8 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         )
         sections.append(
             {
-                "id": f"section-{section_index}",
+                "id": f"{section_id_prefix}-{section_index}",
+                "sheet_name": str(parser_config["sheet_name"]),
                 "title": title,
                 "description": description,
                 "partial": partial,
@@ -429,4 +445,67 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         "partial": partial,
         "omitted_focus_count": omitted_focus_count,
         "sections": sections,
+    }
+
+
+def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) -> Dict[str, Any]:
+    focus_sheet_names: List[str] = []
+    for raw_focus in focuses:
+        focus = _coerce_focus(raw_focus)
+        sheet_name = str(focus.get("sheet_name", "") or "")
+        if sheet_name and sheet_name not in focus_sheet_names:
+            focus_sheet_names.append(sheet_name)
+
+    if len(focus_sheet_names) <= 1:
+        return _build_excel_diff_grid_for_sheet(
+            file_infos,
+            focuses,
+            target_sheet=focus_sheet_names[0] if focus_sheet_names else None,
+        )
+
+    combined_sections: List[Dict[str, Any]] = []
+    row_count = 0
+    column_count = 0
+    partial = False
+    omitted_focus_count = 0
+    latest_file: Dict[str, Any] | None = None
+
+    for sheet_index, sheet_name in enumerate(focus_sheet_names[:MAX_SECTIONS], start=1):
+        sheet_focuses = [
+            raw_focus
+            for raw_focus in focuses
+            if str(_coerce_focus(raw_focus).get("sheet_name", "") or "") == sheet_name
+        ]
+        sheet_result = _build_excel_diff_grid_for_sheet(
+            file_infos,
+            sheet_focuses,
+            target_sheet=sheet_name,
+            section_id_prefix=f"sheet-{sheet_index}",
+        )
+        latest_file = latest_file or sheet_result["latest_file"]
+        row_count = max(row_count, int(sheet_result["row_count"]))
+        column_count = max(column_count, int(sheet_result["column_count"]))
+        partial = partial or bool(sheet_result["partial"])
+        omitted_focus_count += int(sheet_result["omitted_focus_count"])
+        for section in sheet_result["sections"]:
+            section["title"] = f"{sheet_name} 시트 · {section['title']}"
+            combined_sections.append(section)
+
+    if len(focus_sheet_names) > MAX_SECTIONS:
+        partial = True
+        omitted_focus_count += len(focus_sheet_names) - MAX_SECTIONS
+
+    return {
+        "latest_file": latest_file
+        or {
+            "file_id": file_infos[0]["id"],
+            "file_name": file_infos[0]["name"],
+        },
+        "row_count": row_count,
+        "column_count": column_count,
+        "key_column": "",
+        "sheet_name": "여러 시트",
+        "partial": partial,
+        "omitted_focus_count": omitted_focus_count,
+        "sections": combined_sections,
     }

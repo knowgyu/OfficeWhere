@@ -107,6 +107,7 @@ class ExcelDiffFocusHistory(BaseModel):
 
 
 class ExcelDiffGridFocus(BaseModel):
+    sheet_name: str = ""
     key: str = ""
     column: str = ""
     change_type: str = "changed"
@@ -131,6 +132,7 @@ class ExcelDiffGridColumn(BaseModel):
 
 
 class ExcelDiffGridCell(BaseModel):
+    sheet_name: str = ""
     row_index: int
     row_number: int
     column_index: int
@@ -142,6 +144,7 @@ class ExcelDiffGridCell(BaseModel):
 
 
 class ExcelDiffGridRow(BaseModel):
+    sheet_name: str = ""
     row_index: int
     row_number: int
     key_value: str = ""
@@ -150,6 +153,7 @@ class ExcelDiffGridRow(BaseModel):
 
 class ExcelDiffGridSection(BaseModel):
     id: str
+    sheet_name: str = ""
     title: str
     description: str
     partial: bool = False
@@ -175,6 +179,7 @@ class ExcelDiffGridResponse(BaseModel):
 class ExcelConflictValue(BaseModel):
     file_id: int
     file_name: str
+    sheet_name: str = ""
     columns: List[str] = Field(default_factory=list)
     values: List[str]
     row_numbers: List[int] = Field(default_factory=list)
@@ -187,6 +192,7 @@ class ExcelConflictValue(BaseModel):
 class ExcelCheckIssue(BaseModel):
     issue_type: str
     severity: Optional[str] = None
+    sheet_name: str = ""
     key: Optional[str] = None
     column: Optional[str] = None
     message: Optional[str] = None

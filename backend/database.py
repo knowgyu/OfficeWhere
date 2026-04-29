@@ -27,7 +27,9 @@ DB_DIR = _default_db_dir()
 DB_PATH = DB_DIR / "data.db"
 FINGERPRINT_VERSION = 1
 SEARCH_INDEX_VERSION = "6"
-COMPARISON_CACHE_VERSION = 2
+COMPARISON_CACHE_VERSION = 3
+EXCEL_INDEX_VERSION = "2"
+EXCEL_INDEX_VERSION_KEY = "excel_index_version"
 LIBRARY_GROUP_INDEX_VERSION = "1"
 LIBRARY_GROUP_INDEX_VERSION_KEY = "library_group_index_version"
 LIBRARY_GROUP_INDEX_STATE_KEY = "library_group_index_state"
@@ -52,6 +54,8 @@ class PreparedIndexedFile:
     chunk_values: List[Tuple[str, str, str, str]]
     fingerprint: Dict[str, Any]
     chunk_count: int
+    excel_sheets: List[Dict[str, Any]]
+    excel_cells: List[Dict[str, Any]]
 
 
 @dataclass
@@ -238,6 +242,8 @@ def _reset_legacy_join_schema_if_needed(cursor: sqlite3.Cursor) -> bool:
     _drop_legacy_file_search(cursor)
     cursor.execute("DROP TABLE IF EXISTS file_chunks")
     cursor.execute("DROP TABLE IF EXISTS document_fingerprints")
+    cursor.execute("DROP TABLE IF EXISTS excel_sheet_index")
+    cursor.execute("DROP TABLE IF EXISTS excel_cell_index")
     cursor.execute("DROP TABLE IF EXISTS comparison_cache")
     cursor.execute("DROP TABLE IF EXISTS registered_files")
     log_index_perf(
@@ -382,6 +388,64 @@ def _chunk_insert_values(chunks: Sequence[Dict[str, str]]) -> List[Tuple[str, st
     ]
 
 
+def _normalize_excel_sheet_rows(sheets: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for index, sheet in enumerate(sheets or [], start=1):
+        sheet_name = str(sheet.get("sheet_name", "") or "").strip()
+        if not sheet_name:
+            continue
+        normalized.append(
+            {
+                "sheet_name": sheet_name,
+                "sheet_index": int(sheet.get("sheet_index") or index),
+                "row_count": int(sheet.get("row_count") or 0),
+                "column_count": int(sheet.get("column_count") or 0),
+                "non_empty_cell_count": int(sheet.get("non_empty_cell_count") or 0),
+                "content_hash": str(sheet.get("content_hash", "") or ""),
+            }
+        )
+    return normalized
+
+
+def _normalize_excel_cell_rows(cells: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for cell in cells or []:
+        sheet_name = str(cell.get("sheet_name", "") or "").strip()
+        content = str(cell.get("content", "") or "")
+        if not sheet_name or not content.strip():
+            continue
+        row_number = int(cell.get("row_number") or 0)
+        column_index = int(cell.get("column_index") or 0)
+        if row_number < 1 or column_index < 1:
+            continue
+        column_letter = str(cell.get("column_letter", "") or "")
+        if not column_letter:
+            column_letter = _column_letter_for_index(column_index)
+        location = str(cell.get("location", "") or f"{sheet_name} 시트 | {row_number}행 {column_letter}열")
+        normalized.append(
+            {
+                "sheet_name": sheet_name,
+                "sheet_index": int(cell.get("sheet_index") or 1),
+                "row_number": row_number,
+                "column_index": column_index,
+                "column_letter": column_letter,
+                "content": content,
+                "location": location,
+            }
+        )
+    return normalized
+
+
+def _column_letter_for_index(index: int) -> str:
+    if index < 1:
+        return ""
+    letters = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
 def prepare_indexed_file(
     path: str,
     name: str,
@@ -391,6 +455,8 @@ def prepare_indexed_file(
     chunks: Sequence[Dict[str, str]],
     file_mtime: float,
     parser_config: Optional[Dict[str, Any]] = None,
+    excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
+    excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> PreparedIndexedFile:
     """Build CPU/string-heavy index fields before entering the DB writer."""
     return PreparedIndexedFile(
@@ -402,6 +468,8 @@ def prepare_indexed_file(
         chunk_values=_chunk_insert_values(chunks),
         fingerprint=_build_document_fingerprint(chunks, source_mtime=file_mtime),
         chunk_count=len(chunks),
+        excel_sheets=_normalize_excel_sheet_rows(excel_sheets),
+        excel_cells=_normalize_excel_cell_rows(excel_cells),
     )
 
 
@@ -440,6 +508,65 @@ def _upsert_document_fingerprint(
             fingerprint["fingerprinted_at"],
         ),
     )
+
+
+def _replace_excel_index(
+    cursor: sqlite3.Cursor,
+    file_id: int,
+    sheets: Sequence[Dict[str, Any]],
+    cells: Sequence[Dict[str, Any]],
+    *,
+    updated_at: str,
+) -> None:
+    """Replace machine-readable Excel sheet/cell rows for one indexed file."""
+    cursor.execute("DELETE FROM excel_cell_index WHERE file_id = ?", (file_id,))
+    cursor.execute("DELETE FROM excel_sheet_index WHERE file_id = ?", (file_id,))
+    if sheets:
+        cursor.executemany(
+            """
+            INSERT INTO excel_sheet_index (
+                file_id, sheet_name, sheet_index, row_count, column_count,
+                non_empty_cell_count, content_hash, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    file_id,
+                    sheet["sheet_name"],
+                    int(sheet["sheet_index"]),
+                    int(sheet["row_count"]),
+                    int(sheet["column_count"]),
+                    int(sheet["non_empty_cell_count"]),
+                    str(sheet["content_hash"]),
+                    updated_at,
+                )
+                for sheet in sheets
+            ],
+        )
+    if cells:
+        cursor.executemany(
+            """
+            INSERT INTO excel_cell_index (
+                file_id, sheet_name, sheet_index, row_number, column_index,
+                column_letter, content, location
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    file_id,
+                    cell["sheet_name"],
+                    int(cell["sheet_index"]),
+                    int(cell["row_number"]),
+                    int(cell["column_index"]),
+                    str(cell["column_letter"]),
+                    str(cell["content"]),
+                    str(cell["location"]),
+                )
+                for cell in cells
+            ],
+        )
 
 
 def _add_elapsed_metric(metrics: Optional[Dict[str, Any]], key: str, started: float) -> None:
@@ -527,6 +654,12 @@ def _save_prepared_indexed_file(
         fingerprint=payload.fingerprint,
     )
     _add_elapsed_metric(metrics, "fingerprint_upsert_ms", fingerprint_started)
+    excel_index_started = perf_counter()
+    if payload.file_type == "Excel":
+        _replace_excel_index(cursor, file_id, payload.excel_sheets, payload.excel_cells, updated_at=now)
+    else:
+        _replace_excel_index(cursor, file_id, [], [], updated_at=now)
+    _add_elapsed_metric(metrics, "excel_index_replace_ms", excel_index_started)
     return file_id
 
 
@@ -710,6 +843,48 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
     )
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS excel_sheet_index (
+            file_id INTEGER NOT NULL,
+            sheet_name TEXT NOT NULL,
+            sheet_index INTEGER NOT NULL,
+            row_count INTEGER NOT NULL,
+            column_count INTEGER NOT NULL,
+            non_empty_cell_count INTEGER NOT NULL,
+            content_hash TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (file_id, sheet_name)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_excel_sheet_index_file
+        ON excel_sheet_index(file_id, sheet_index)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS excel_cell_index (
+            file_id INTEGER NOT NULL,
+            sheet_name TEXT NOT NULL,
+            sheet_index INTEGER NOT NULL,
+            row_number INTEGER NOT NULL,
+            column_index INTEGER NOT NULL,
+            column_letter TEXT NOT NULL,
+            content TEXT NOT NULL,
+            location TEXT NOT NULL,
+            PRIMARY KEY (file_id, sheet_name, row_number, column_index)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_excel_cell_index_file
+        ON excel_cell_index(file_id, sheet_index, row_number, column_index)
+        """
+    )
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS comparison_cache (
             cache_key TEXT PRIMARY KEY,
             file_ids TEXT NOT NULL,
@@ -824,6 +999,43 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
     )
 
 
+def _ensure_excel_index_version(cursor: sqlite3.Cursor) -> None:
+    current = _get_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, "")
+    if current == EXCEL_INDEX_VERSION:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM registered_files WHERE file_type = 'Excel'")
+    excel_file_count = int(cursor.fetchone()[0])
+    if excel_file_count <= 0:
+        _set_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, EXCEL_INDEX_VERSION)
+        return
+
+    cursor.execute("DELETE FROM excel_cell_index")
+    cursor.execute("DELETE FROM excel_sheet_index")
+    cursor.execute(
+        """
+        DELETE FROM file_chunks
+        WHERE file_id IN (SELECT id FROM registered_files WHERE file_type = 'Excel')
+        """
+    )
+    cursor.execute(
+        """
+        DELETE FROM document_fingerprints
+        WHERE file_id IN (SELECT id FROM registered_files WHERE file_type = 'Excel')
+        """
+    )
+    cursor.execute("UPDATE registered_files SET file_mtime = NULL WHERE file_type = 'Excel'")
+    cursor.execute("DELETE FROM comparison_cache")
+    _set_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, EXCEL_INDEX_VERSION)
+    _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="excel_index_version_changed")
+    log_index_perf(
+        "db_excel_index_reset",
+        previous_version=current,
+        next_version=EXCEL_INDEX_VERSION,
+        excel_file_count=excel_file_count,
+    )
+
+
 def init_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
     with _write_connection() as conn:
@@ -850,6 +1062,8 @@ def init_db():
             _create_fts_tables(cursor)
             _create_fts_triggers(cursor)
             _rebuild_search_indexes(cursor, optimize=True)
+
+        _ensure_excel_index_version(cursor)
 
         conn.commit()
 
@@ -1323,6 +1537,7 @@ def begin_initial_index_staging() -> InitialIndexStagingDatabase:
             """,
             settings_rows,
         )
+    _set_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, EXCEL_INDEX_VERSION)
     conn.commit()
     log_index_perf(
         "initial_index_staging_started",
@@ -1394,6 +1609,8 @@ def save_indexed_file(
     chunks: List[Dict[str, str]],
     file_mtime: float,
     parser_config: Optional[Dict[str, Any]] = None,
+    excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
+    excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> int:
     """Upsert file metadata, chunks, fingerprint, and mtime in one write turn."""
     payload = prepare_indexed_file(
@@ -1405,6 +1622,8 @@ def save_indexed_file(
         chunks=chunks,
         file_mtime=file_mtime,
         parser_config=parser_config,
+        excel_sheets=excel_sheets,
+        excel_cells=excel_cells,
     )
     return save_prepared_indexed_file(payload)
 
@@ -1615,6 +1834,64 @@ def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
     return _normalize_file_row(dict(row)) if row else None
 
 
+def get_excel_sheet_index(file_ids: Sequence[int]) -> Dict[int, List[Dict[str, Any]]]:
+    ids = sorted({int(file_id) for file_id in file_ids if int(file_id) > 0})
+    if not ids:
+        return {}
+
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    rows: List[sqlite3.Row] = []
+    for batch in _batched_values(ids):
+        placeholders = ",".join("?" for _ in batch)
+        cursor.execute(
+            f"""
+            SELECT *
+            FROM excel_sheet_index
+            WHERE file_id IN ({placeholders})
+            ORDER BY file_id, sheet_index, sheet_name
+            """,
+            batch,
+        )
+        rows.extend(cursor.fetchall())
+    conn.close()
+
+    result: Dict[int, List[Dict[str, Any]]] = {file_id: [] for file_id in ids}
+    for row in rows:
+        result.setdefault(int(row["file_id"]), []).append(dict(row))
+    return result
+
+
+def get_excel_cell_index(file_ids: Sequence[int]) -> Dict[int, List[Dict[str, Any]]]:
+    ids = sorted({int(file_id) for file_id in file_ids if int(file_id) > 0})
+    if not ids:
+        return {}
+
+    conn = _connect()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    rows: List[sqlite3.Row] = []
+    for batch in _batched_values(ids):
+        placeholders = ",".join("?" for _ in batch)
+        cursor.execute(
+            f"""
+            SELECT *
+            FROM excel_cell_index
+            WHERE file_id IN ({placeholders})
+            ORDER BY file_id, sheet_index, row_number, column_index
+            """,
+            batch,
+        )
+        rows.extend(cursor.fetchall())
+    conn.close()
+
+    result: Dict[int, List[Dict[str, Any]]] = {file_id: [] for file_id in ids}
+    for row in rows:
+        result.setdefault(int(row["file_id"]), []).append(dict(row))
+    return result
+
+
 def search_file_names(
     query: str,
     *,
@@ -1667,6 +1944,8 @@ def delete_file(file_id: int) -> bool:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM file_chunks WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
+        cursor.execute("DELETE FROM excel_cell_index WHERE file_id=?", (file_id,))
+        cursor.execute("DELETE FROM excel_sheet_index WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM library_group_index_files WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM library_group_members WHERE file_id=?", (file_id,))
         cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
@@ -1695,6 +1974,8 @@ def delete_files_by_types(file_types: Sequence[str]) -> int:
         id_placeholders = ",".join("?" for _ in file_ids)
         cursor.execute(f"DELETE FROM file_chunks WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM document_fingerprints WHERE file_id IN ({id_placeholders})", file_ids)
+        cursor.execute(f"DELETE FROM excel_cell_index WHERE file_id IN ({id_placeholders})", file_ids)
+        cursor.execute(f"DELETE FROM excel_sheet_index WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM library_group_index_files WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM library_group_members WHERE file_id IN ({id_placeholders})", file_ids)
         cursor.execute(f"DELETE FROM registered_files WHERE id IN ({id_placeholders})", file_ids)
@@ -1712,6 +1993,8 @@ def delete_all_files() -> int:
         count = int(cursor.fetchone()[0])
         cursor.execute("DELETE FROM file_chunks")
         cursor.execute("DELETE FROM document_fingerprints")
+        cursor.execute("DELETE FROM excel_cell_index")
+        cursor.execute("DELETE FROM excel_sheet_index")
         cursor.execute("DELETE FROM comparison_cache")
         cursor.execute("DELETE FROM registered_files")
         cursor.execute("DELETE FROM library_group_members")
@@ -1723,14 +2006,23 @@ def delete_all_files() -> int:
         return count
 
 
-def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
+def save_file_chunks(
+    file_id: int,
+    chunks: List[Dict[str, str]],
+    *,
+    excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
+    excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
+):
     chunk_values = _chunk_insert_values(chunks)
+    normalized_excel_sheets = _normalize_excel_sheet_rows(excel_sheets)
+    normalized_excel_cells = _normalize_excel_cell_rows(excel_cells)
 
     with _write_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT file_mtime FROM registered_files WHERE id = ?", (file_id,))
+        cursor.execute("SELECT file_mtime, file_type FROM registered_files WHERE id = ?", (file_id,))
         row = cursor.fetchone()
         source_mtime = row[0] if row else None
+        file_type = row[1] if row else ""
         cursor.execute("DELETE FROM file_chunks WHERE file_id = ?", (file_id,))
         cursor.executemany(
             "INSERT INTO file_chunks (file_id, location, content, search_text, trigram_text) VALUES (?, ?, ?, ?, ?)",
@@ -1740,6 +2032,16 @@ def save_file_chunks(file_id: int, chunks: List[Dict[str, str]]):
             ],
         )
         _upsert_document_fingerprint(cursor, file_id, chunks, source_mtime=source_mtime)
+        if file_type == "Excel":
+            _replace_excel_index(
+                cursor,
+                file_id,
+                normalized_excel_sheets,
+                normalized_excel_cells,
+                updated_at=datetime.now().isoformat(),
+            )
+        else:
+            _replace_excel_index(cursor, file_id, [], [], updated_at=datetime.now().isoformat())
         _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="save_file_chunks")
         conn.commit()
 

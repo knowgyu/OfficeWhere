@@ -6,6 +6,7 @@ from datetime import datetime
 
 import pandas as pd
 import pytest
+from openpyxl import Workbook
 
 from backend.core.indexer import index_file, inspect_and_chunk, reindex_all, search, _sanitize_fts_query
 from backend.database import (
@@ -69,6 +70,23 @@ def test_search_returns_location(tmp_path):
     results = search("알파")
     assert len(results) > 0
     assert results[0]["location"] == "Sheet1 시트 | 2행 A열"
+
+
+def test_index_and_search_excel_all_visible_sheets(tmp_path):
+    xlsx = tmp_path / "multi-sheet.xlsx"
+    workbook = Workbook()
+    workbook.active.title = "요약"
+    workbook.active["A1"] = "요약내용"
+    detail = workbook.create_sheet("세부")
+    detail["C3"] = "세컨드시트키워드"
+    workbook.save(xlsx)
+
+    file_id = register_file(str(xlsx), "multi-sheet.xlsx", "Excel", "", 0)
+    chunk_count = index_file(file_id, str(xlsx))
+
+    assert chunk_count == 2
+    results = search("세컨드시트키워드")
+    assert any(result["location"] == "세부 시트 | 3행 C열" for result in results)
 
 
 def test_search_excel_header_uses_cell_location(tmp_path):

@@ -912,6 +912,8 @@ def _rescan_library_impl(
                     chunks=chunks,
                     file_mtime=current_mtime,
                     parser_config=None,
+                    excel_sheets=info.get("excel_sheets"),
+                    excel_cells=info.get("excel_cells"),
                 ),
             )
             metrics.update(

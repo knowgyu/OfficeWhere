@@ -165,13 +165,14 @@ const displayExcelGridValue = (value?: string | null) => {
 function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridFocus[] {
   const focusMap = new Map<string, ExcelDiffGridFocus>()
   const addFocus = (
+    sheetName: string,
     key: string,
     column: string,
     changeType: ExcelDiffHighlight,
     history: ExcelDiffGridFocus['histories'][number],
   ) => {
     if (!key || !column) return
-    const focusKey = `${key}::${column}`
+    const focusKey = `${sheetName}::${key}::${column}`
     const existing = focusMap.get(focusKey)
     if (existing) {
       existing.histories.push(history)
@@ -182,6 +183,7 @@ function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridF
     }
 
     focusMap.set(focusKey, {
+      sheet_name: sheetName,
       key,
       column,
       change_type: changeType,
@@ -199,7 +201,7 @@ function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridF
           conflict.rowValues.forEach((row) => {
             const key = row[0] ?? ''
             const value = row[row.length - 1] ?? ''
-            addFocus(key, issue.columnGroup, changeType, {
+            addFocus(conflict.sheetName || issue.sheetName, key, issue.columnGroup, changeType, {
               change_type: changeType,
               from_file_id: transition.fromFile.id,
               from_file_name: transition.fromFile.name,
@@ -221,7 +223,7 @@ function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridF
             const key = row[0] ?? issue.key
             conflict.columns.slice(1).forEach((column, columnIndex) => {
               const value = row[columnIndex + 1] ?? ''
-              addFocus(key, column, changeType, {
+              addFocus(conflict.sheetName || issue.sheetName, key, column, changeType, {
                 change_type: changeType,
                 from_file_id: transition.fromFile.id,
                 from_file_name: transition.fromFile.name,
@@ -254,7 +256,7 @@ function buildExcelGridFocuses(transitions: HistoryTransition[]): ExcelDiffGridF
         after,
         label: `${transition.fromFile.name} → ${transition.toFile.name}`,
       }
-      addFocus(issue.key, issue.columnGroup, changeType, history)
+      addFocus(issue.sheetName || beforeConflict?.sheetName || afterConflict?.sheetName || '', issue.key, issue.columnGroup, changeType, history)
     })
   })
 
@@ -2088,13 +2090,15 @@ function formatExcelLocation(conflict: ExcelCheckIssue['conflicts'][number]) {
   const rows = conflict.rowNumbers.length > 0 ? `${conflict.rowNumbers.join(', ')}행` : ''
   const columns = conflict.columnLetters.length > 0 ? `${conflict.columnLetters.join(', ')}열` : ''
   const rowColumnText = [rows, columns].filter(Boolean).join(' ')
+  const sheetPrefix = conflict.sheetName ? `${conflict.sheetName} 시트 · ` : ''
 
   if (conflict.cellRefs.length > 0) {
     const cells = conflict.cellRefs.slice(0, 4).join(', ')
     const suffix = conflict.cellRefs.length > 4 ? ` 외 ${conflict.cellRefs.length - 4}개` : ''
-    return rowColumnText ? `${rowColumnText} (${cells}${suffix})` : `${cells}${suffix}`
+    const location = rowColumnText ? `${rowColumnText} (${cells}${suffix})` : `${cells}${suffix}`
+    return `${sheetPrefix}${location}`
   }
-  return rowColumnText || '-'
+  return rowColumnText ? `${sheetPrefix}${rowColumnText}` : '-'
 }
 
 function firstExcelLocation(issue: ExcelCheckIssue) {
@@ -2458,7 +2462,7 @@ function excelGridHighlightLabel(highlight: ExcelDiffHighlight | null) {
 }
 
 function excelGridCellTitle(cell: ExcelDiffGridCell) {
-  const location = `${cell.row_number}행 ${cell.column_letter}열`
+  const location = `${cell.sheet_name ? `${cell.sheet_name} 시트 · ` : ''}${cell.row_number}행 ${cell.column_letter}열`
   if (cell.histories.length === 0) return `${location} · ${displayExcelGridValue(cell.value)}`
   const first = cell.histories[0]
   return `${location} · ${excelGridHighlightLabel(cell.highlight)} · ${displayExcelGridValue(first.before)} → ${displayExcelGridValue(first.after)}`
@@ -2676,6 +2680,7 @@ function ExcelDiffGridSectionView({
                 </th>
                 {row.cells.map((cell) => {
                   const selected =
+                    selectedCell?.sheet_name === cell.sheet_name &&
                     selectedCell?.row_index === cell.row_index &&
                     selectedCell?.column_index === cell.column_index
                   const isTutorialCell =
@@ -2685,7 +2690,7 @@ function ExcelDiffGridSectionView({
                     cell.column_letter === 'D'
                   return (
                     <td
-                      key={`${cell.row_index}-${cell.column_index}`}
+                      key={`${cell.sheet_name ?? ''}-${cell.row_index}-${cell.column_index}`}
                       title={excelGridCellTitle(cell)}
                       className={`w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-pointer hover:ring-1 hover:ring-inset hover:ring-[var(--md-sys-color-primary)] ${excelGridHighlightClass(cell.highlight)} ${
                         selected ? 'outline outline-2 outline-[var(--md-sys-color-primary)] outline-offset-[-2px]' : ''
@@ -2747,7 +2752,7 @@ function ExcelDiffGridCellDetail({
       <div className="flex items-center gap-2 flex-wrap">
         <Badge tone={badgeTone}>{excelGridHighlightLabel(cell.highlight)}</Badge>
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-          {cell.row_number}행 {cell.column_letter}열
+          {cell.sheet_name ? `${cell.sheet_name} 시트 · ` : ''}{cell.row_number}행 {cell.column_letter}열
         </p>
         {isTutorialHistoryTarget && (
           <span className="tour-evidence-note">
