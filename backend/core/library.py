@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import math
 import os
 import re
 import threading
@@ -61,18 +60,15 @@ from ..models.schemas import (
 )
 from .indexer import inspect_and_chunk
 from .index_perf import elapsed_ms, log_index_perf, timed_ms
-from .file_scope import (
-    DEFAULT_EXCLUDED_FOLDER_NAMES,
-    SUPPORTED_EXTENSIONS,
-    excluded_folder_key_set,
-    normalize_excluded_folder_names,
-    should_exclude_dir,
-    sorted_counter_map,
+from .file_scope import sorted_counter_map
+from .library_identity import _token_display, canonical_name, file_sort_key, parse_document_identity
+from .library_scanner import (
+    ScanCollection as _ScanCollection,
+    collect_supported_paths_with_stats as _scanner_collect_supported_paths_with_stats,
 )
-from ..runtime import get_fast_worker_count, get_worker_count, normalize_fast_worker_count
+from .library_settings import LAST_RESCAN_KEY, load_library_settings, save_library_settings
+from ..runtime import get_fast_worker_count, get_worker_count
 
-SETTINGS_KEY = "library_settings"
-LAST_RESCAN_KEY = "library_last_rescan_at"
 MANUAL_LATEST_SETTING_KEY = "library_manual_latest_files"
 logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[Dict[str, Any]], None]
@@ -109,18 +105,6 @@ class _PreparedLibraryWrite:
     metrics: Dict[str, Any]
     file_started: float
     ready_at: float
-
-
-@dataclass
-class _ScanCollection:
-    paths: List[str]
-    visited_dir_count: int = 0
-    skipped_dir_count: int = 0
-    skipped_dirs_by_name: Dict[str, int] | None = None
-    inaccessible_dir_count: int = 0
-    inaccessible_dirs_by_name: Dict[str, int] | None = None
-    unsupported_file_count: int = 0
-    unsupported_extensions_by_suffix: Dict[str, int] | None = None
 
 
 def _normalize_rescan_mode(mode: str = "normal") -> str:
@@ -184,50 +168,6 @@ def file_info_from_row(row: Dict[str, Any]) -> FileInfo:
     )
 
 
-def load_library_settings() -> LibrarySettings:
-    raw = get_setting(SETTINGS_KEY, "")
-    if not raw:
-        return LibrarySettings()
-    try:
-        settings = LibrarySettings(**json.loads(raw))
-        settings.last_rescan_at = get_setting(LAST_RESCAN_KEY) or None
-        return _normalize_library_settings(settings)
-    except Exception:
-        return LibrarySettings()
-
-
-def _normalize_interval_hours(value: float) -> int:
-    if not math.isfinite(float(value)) or value < 1:
-        return 1
-    return max(1, int(math.floor(float(value))))
-
-
-def _normalize_library_settings(settings: LibrarySettings) -> LibrarySettings:
-    return LibrarySettings(
-        watched_folders=[
-            {
-                "path": os.path.normpath(folder.path.strip()),
-                "recursive": folder.recursive,
-            }
-            for folder in settings.watched_folders
-            if folder.path.strip()
-        ],
-        excluded_folder_names=normalize_excluded_folder_names(settings.excluded_folder_names),
-        auto_rescan_mode=settings.auto_rescan_mode,
-        auto_rescan_interval_hours=_normalize_interval_hours(settings.auto_rescan_interval_hours),
-        auto_rescan_daily_time=settings.auto_rescan_daily_time,
-        fast_worker_count=normalize_fast_worker_count(settings.fast_worker_count),
-        last_rescan_at=settings.last_rescan_at,
-    )
-
-
-def save_library_settings(settings: LibrarySettings) -> LibrarySettings:
-    normalized = _normalize_library_settings(settings)
-    set_setting(SETTINGS_KEY, normalized.model_dump_json())
-    normalized.last_rescan_at = get_setting(LAST_RESCAN_KEY) or None
-    return normalized
-
-
 def _load_manual_latest_map() -> Dict[str, int]:
     raw = get_setting(MANUAL_LATEST_SETTING_KEY, "{}")
     try:
@@ -257,255 +197,12 @@ def _save_manual_latest_map(manual_latest: Dict[str, int]) -> None:
     set_setting(MANUAL_LATEST_SETTING_KEY, json.dumps(cleaned, ensure_ascii=False, sort_keys=True))
 
 
-def _normalize_name_part(value: str) -> str:
-    normalized = value.lower()
-    normalized = re.sub(r"[\[\]\(\)\{\}]", " ", normalized)
-    normalized = re.sub(r"[_\-.]+", " ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
-
-
-def _parse_date_token(raw: str) -> Optional[Tuple[str, int]]:
-    digits = re.sub(r"\D", "", raw)
-    if len(digits) == 6:
-        year = 2000 + int(digits[:2])
-        month = int(digits[2:4])
-        day = int(digits[4:6])
-    elif len(digits) == 8:
-        year = int(digits[:4])
-        month = int(digits[4:6])
-        day = int(digits[6:8])
-    else:
-        return None
-
-    if year < 1900 or not 1 <= month <= 12 or not 1 <= day <= 31:
-        return None
-    return f"{year:04d}-{month:02d}-{day:02d}", year * 10000 + month * 100 + day
-
-
-def _version_sort_value(value: str) -> Tuple[int, ...]:
-    return tuple(int(part) for part in value.split(".") if part.isdigit())
-
-
-def _token_display(token: Dict[str, Any]) -> str:
-    if token["kind"] == "version":
-        return f"v{token['value']}"
-    return str(token["value"])
-
-
-def parse_document_identity(name: str) -> Dict[str, Any]:
-    """Parse conservative document identity tokens from an Office filename.
-
-    The parser intentionally returns explainable tokens only. It is used for
-    grouping candidates, not for deleting/merging files or claiming content
-    differences.
-    """
-
-    original_stem = Path(name).stem
-    working = original_stem
-    tokens: List[Dict[str, Any]] = []
-
-    def replace_with_token(pattern: str, value_fn: Callable[[re.Match[str]], Optional[Dict[str, Any]]]):
-        nonlocal working
-
-        def repl(match: re.Match[str]) -> str:
-            token = value_fn(match)
-            if token:
-                token.setdefault("raw", match.group(0))
-                tokens.append(token)
-            return " "
-
-        working = re.sub(pattern, repl, working, flags=re.IGNORECASE)
-
-    replace_with_token(
-        r"(?<!\d)(20\d{2})[._-](0[1-9]|1[0-2])[._-]([0-2]\d|3[01])(?!\d)",
-        lambda match: (
-            {"kind": "date", "value": parsed[0], "sort_value": parsed[1]}
-            if (parsed := _parse_date_token(match.group(0)))
-            else None
-        ),
-    )
-    replace_with_token(
-        r"(?<!\d)(?:20\d{2}(?:0[1-9]|1[0-2])(?:[0-2]\d|3[01])|\d{2}(?:0[1-9]|1[0-2])(?:[0-2]\d|3[01]))(?!\d)",
-        lambda match: (
-            {"kind": "date", "value": parsed[0], "sort_value": parsed[1]}
-            if (parsed := _parse_date_token(match.group(0)))
-            else None
-        ),
-    )
-    replace_with_token(
-        r"(?<![A-Za-z0-9가-힣])(?:v|ver|version|rev|revision)\s*\.?\s*(\d+(?:\.\d+)*)(?![A-Za-z0-9가-힣])",
-        lambda match: {
-            "kind": "version",
-            "value": match.group(1),
-            "sort_value": _version_sort_value(match.group(1)),
-        },
-    )
-    replace_with_token(
-        r"(최종본?|수정본|개정본|복사본|초안|구버전|신버전)|(?<![A-Za-z0-9가-힣])(final|draft|copy|new|old)(?![A-Za-z0-9가-힣])",
-        lambda match: {
-            "kind": "status",
-            "value": (match.group(1) or match.group(2) or "").lower(),
-            "sort_value": {
-                "old": 10,
-                "구버전": 10,
-                "draft": 20,
-                "초안": 20,
-                "copy": 30,
-                "복사본": 30,
-                "수정본": 40,
-                "개정본": 45,
-                "new": 50,
-                "신버전": 50,
-                "final": 60,
-                "최종": 60,
-                "최종본": 60,
-            }.get((match.group(1) or match.group(2) or "").lower(), 0),
-        },
-    )
-
-    base_name = _normalize_name_part(working) or _normalize_name_part(original_stem)
-    latest_date = max((token.get("sort_value", 0) for token in tokens if token["kind"] == "date"), default=0)
-    latest_version = max((token.get("sort_value", ()) for token in tokens if token["kind"] == "version"), default=())
-    latest_status = max((token.get("sort_value", 0) for token in tokens if token["kind"] == "status"), default=0)
-    token_kinds = sorted({token["kind"] for token in tokens})
-    reason = "파일명에서 " + ", ".join(token_kinds) + " 표시를 감지했습니다." if token_kinds else "파일명 기준"
-    return {
-        "base_name": base_name,
-        "tokens": tokens,
-        "sort_key": (latest_date, latest_version, latest_status),
-        "confidence_reason": reason,
-    }
-
-
-def canonical_name(name: str) -> str:
-    return parse_document_identity(name)["base_name"]
-
-
-def file_sort_key(file_info: FileInfo) -> Tuple[float, str]:
-    if file_info.file_mtime is not None:
-        return (file_info.file_mtime, file_info.name)
-    if file_info.created_at:
-        try:
-            return (datetime.fromisoformat(file_info.created_at).timestamp(), file_info.name)
-        except ValueError:
-            pass
-    return (0, file_info.name)
-
-
 def _collect_supported_paths_with_stats(
     folder_path: str,
     recursive: bool,
     excluded_folder_names: Optional[List[str]] = None,
 ) -> _ScanCollection:
-    folder = Path(os.path.normpath(folder_path.strip()))
-    try:
-        if not folder.exists():
-            raise FileNotFoundError(f"폴더를 찾을 수 없습니다: {folder_path}")
-        if not folder.is_dir():
-            raise ValueError(f"폴더가 아닙니다: {folder_path}")
-    except PermissionError:
-        return _ScanCollection(
-            paths=[],
-            inaccessible_dir_count=1,
-            inaccessible_dirs_by_name={folder.name or str(folder): 1},
-        )
-
-    supported = {extension.lower() for extension in SUPPORTED_EXTENSIONS}
-    excluded_keys = excluded_folder_key_set(
-        DEFAULT_EXCLUDED_FOLDER_NAMES if excluded_folder_names is None else excluded_folder_names
-    )
-    paths: List[str] = []
-    skipped_dirs: Counter[str] = Counter()
-    inaccessible_dirs: Counter[str] = Counter()
-    unsupported_extensions: Counter[str] = Counter()
-    visited_dir_count = 0
-
-    def mark_inaccessible(path: Path) -> None:
-        inaccessible_dirs[path.name or str(path)] += 1
-
-    def visit_file(path: Path) -> None:
-        if path.name.startswith("~$"):
-            return
-        suffix = path.suffix.lower()
-        if suffix in supported:
-            paths.append(os.path.normpath(str(path)))
-        elif suffix:
-            unsupported_extensions[suffix] += 1
-        else:
-            unsupported_extensions["<none>"] += 1
-
-    if not recursive:
-        visited_dir_count = 1
-        try:
-            iterator = list(folder.iterdir())
-        except OSError:
-            mark_inaccessible(folder)
-            iterator = []
-        for path in iterator:
-            try:
-                is_file = path.is_file()
-            except OSError:
-                mark_inaccessible(path)
-                continue
-            if is_file:
-                visit_file(path)
-        return _ScanCollection(
-            paths=sorted(paths),
-            visited_dir_count=visited_dir_count,
-            skipped_dir_count=0,
-            skipped_dirs_by_name={},
-            inaccessible_dir_count=sum(inaccessible_dirs.values()),
-            inaccessible_dirs_by_name=sorted_counter_map(inaccessible_dirs),
-            unsupported_file_count=sum(unsupported_extensions.values()),
-            unsupported_extensions_by_suffix=sorted_counter_map(unsupported_extensions),
-        )
-
-    stack = [folder]
-    while stack:
-        current = stack.pop()
-        visited_dir_count += 1
-        try:
-            iterator = list(current.iterdir())
-        except OSError:
-            mark_inaccessible(current)
-            continue
-        for path in iterator:
-            if should_exclude_dir(path, excluded_keys):
-                skipped_dirs[path.name] += 1
-                continue
-            try:
-                is_dir = path.is_dir()
-            except OSError:
-                mark_inaccessible(path)
-                continue
-            if is_dir:
-                try:
-                    is_symlink = path.is_symlink()
-                except OSError:
-                    mark_inaccessible(path)
-                    continue
-                if not is_symlink:
-                    stack.append(path)
-                continue
-            try:
-                is_file = path.is_file()
-            except OSError:
-                mark_inaccessible(path)
-                continue
-            if is_file:
-                visit_file(path)
-
-    return _ScanCollection(
-        paths=sorted(paths),
-        visited_dir_count=visited_dir_count,
-        skipped_dir_count=sum(skipped_dirs.values()),
-        skipped_dirs_by_name=sorted_counter_map(skipped_dirs),
-        inaccessible_dir_count=sum(inaccessible_dirs.values()),
-        inaccessible_dirs_by_name=sorted_counter_map(inaccessible_dirs),
-        unsupported_file_count=sum(unsupported_extensions.values()),
-        unsupported_extensions_by_suffix=sorted_counter_map(unsupported_extensions),
-    )
+    return _scanner_collect_supported_paths_with_stats(folder_path, recursive, excluded_folder_names)
 
 
 def _collect_supported_paths(
@@ -513,6 +210,8 @@ def _collect_supported_paths(
     recursive: bool,
     excluded_folder_names: Optional[List[str]] = None,
 ) -> List[str]:
+    # Deliberately call the library.py compatibility alias above so existing
+    # tests and callers that monkeypatch this module keep intercepting scans.
     return _collect_supported_paths_with_stats(folder_path, recursive, excluded_folder_names).paths
 
 

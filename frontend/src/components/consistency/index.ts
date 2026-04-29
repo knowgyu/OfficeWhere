@@ -1,0 +1,7 @@
+export { buildExcelGridFocuses, ExcelCheckResult, ExcelDiffGridModal } from './excelResult'
+export { CompareMetadataWarnings } from './warnings'
+export { HistoryTransitions } from './historyTransitions'
+export { WordCheckResult } from './wordResult'
+export { PptCheckResult } from './pptResult'
+export { DiffPanel } from './diffPanel'
+export type { ExcelGridModalState, HistoryTransition, HistoryTransitionStatus } from './types'
