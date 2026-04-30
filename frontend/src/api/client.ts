@@ -1,143 +1,49 @@
 import axios from 'axios'
+import { libraryApi } from './library'
+import { apiPath, getOfficeWhereBridge } from './transport'
+import type {
+  AppResetState,
+  CloseBehavior,
+  ExampleLibraryPathResponse,
+  FolderPickResponse,
+  SchemaResetState,
+  UpdateCheckResult,
+} from './transport'
+import type { CellValue, CompareMode, ExcelParserConfig, FileInfo, FileType, ParserConfig } from './shared'
 
-export interface AppDataCandidate {
-  id: string
-  label: string
-  path: string
-  exists: boolean
-  sizeBytes?: number
-  description: string
-  dangerous?: boolean
-}
-
-export interface ClearAppDataResult {
-  success: boolean
-  deleted: string[]
-  failed: { id: string; path: string; error: string }[]
-  backendStopped: boolean
-  exitScheduled?: boolean
-}
+export { getBackendBaseUrl, getOfficeWhereBridge } from './transport'
+export type {
+  AppDataCandidate,
+  AppResetReason,
+  AppResetState,
+  ClearAppDataResult,
+  CloseBehavior,
+  ExampleLibraryPathResponse,
+  FolderPickResponse,
+  SchemaResetState,
+  UpdateAssetInfo,
+  UpdateCheckResult,
+  UpdateDownloadResult,
+} from './transport'
+export type { CellValue, CompareMode, ExcelParserConfig, FileInfo, FileType, ParserConfig } from './shared'
+export { getLibraryGroups } from './library'
+export type {
+  LibraryGroupDetail,
+  LibraryGroupKind,
+  LibraryGroupSummary,
+  LibraryGroupsParams,
+  LibraryGroupsResponse,
+  LibraryRescanMode,
+  LibraryRescanResponse,
+  LibraryRescanResult,
+  LibraryRescanStatus,
+  LibrarySettings,
+  WatchedFolder,
+} from './library'
 
 export interface ClearRegisteredFilesResult {
   deleted: number
   message: string
-}
-
-export type CloseBehavior = 'ask' | 'hide' | 'quit'
-export type AppResetReason = 'safe' | 'full' | 'custom'
-
-export interface AppResetState {
-  resetPending: boolean
-  reason?: AppResetReason
-  resetAt?: string
-}
-
-export interface ExampleLibraryPathResponse {
-  available: boolean
-  path: string
-  reason?: string
-}
-
-export interface SchemaResetState {
-  resetPending: boolean
-  detail?: string
-  message?: string
-}
-
-export interface UpdateAssetInfo {
-  name: string
-  url: string
-  sizeBytes?: number
-}
-
-export interface UpdateCheckResult {
-  currentVersion: string
-  latestVersion: string
-  updateAvailable: boolean
-  releaseUrl: string
-  asset?: UpdateAssetInfo
-}
-
-export interface UpdateDownloadResult {
-  success: boolean
-  path: string
-  fileName: string
-  sizeBytes: number
-}
-
-declare global {
-  interface OfficeWhereBridge {
-    getBackendBaseUrl?: () => Promise<string>
-    pickFolder?: () => Promise<FolderPickResponse & { error?: string }>
-    pickFile?: () => Promise<{ cancelled: boolean; path: string; error?: string }>
-    getAppVersion?: () => Promise<string>
-    getLogPath?: () => Promise<string>
-    getAppDataPaths?: () => Promise<AppDataCandidate[]>
-    clearAppData?: (candidateIds: string[], exitAfterClear?: boolean) => Promise<ClearAppDataResult>
-    consumeResetState?: () => Promise<AppResetState>
-    getCloseBehavior?: () => Promise<CloseBehavior>
-    setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
-    getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
-    checkForUpdates?: () => Promise<UpdateCheckResult>
-    downloadUpdate?: () => Promise<UpdateDownloadResult>
-    openReleasePage?: () => Promise<void>
-    showItemInFolder?: (filePath: string) => Promise<void>
-  }
-
-  interface Window {
-    officeWhere?: OfficeWhereBridge
-  }
-}
-
-let backendBaseUrlPromise: Promise<string> | null = null
-const configuredDevBackendUrl = import.meta.env.VITE_BACKEND_URL?.trim().replace(/\/$/, '')
-
-export function getOfficeWhereBridge(): OfficeWhereBridge | undefined {
-  if (typeof window === 'undefined') return undefined
-  return window.officeWhere
-}
-
-export async function getBackendBaseUrl(): Promise<string> {
-  if (!backendBaseUrlPromise) {
-    const bridge = getOfficeWhereBridge()
-    backendBaseUrlPromise = bridge?.getBackendBaseUrl
-      ? bridge.getBackendBaseUrl()
-      : Promise.resolve(import.meta.env.DEV ? configuredDevBackendUrl || '' : '')
-  }
-
-  return backendBaseUrlPromise
-}
-
-async function apiPath(path: string): Promise<string> {
-  const baseUrl = await getBackendBaseUrl()
-  return `${baseUrl}${path}`
-}
-
-export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Unknown'
-export type CompareMode = 'excel' | 'word' | 'ppt'
-export type CellValue = string | number | boolean | null | undefined
-
-export interface ExcelParserConfig {
-  sheet_name: string
-  header_row: number
-  start_col: number
-  end_col: number
-  end_row?: number | null
-}
-
-export type ParserConfig = ExcelParserConfig | Record<string, unknown>
-
-export interface FileInfo {
-  id: number
-  name: string
-  path: string
-  file_type: string
-  key_column: string
-  column_count: number
-  created_at?: string
-  file_mtime?: number | null
-  parser_config?: ParserConfig | null
-  compare_capabilities?: string[]
 }
 
 export interface FileListResponse {
@@ -486,11 +392,6 @@ export interface FolderScanResponse {
   files: ScannedFileInfo[]
 }
 
-export interface FolderPickResponse {
-  cancelled: boolean
-  folder_path: string
-}
-
 export interface BulkRegisterItem {
   path: string
   key_column?: string
@@ -558,124 +459,6 @@ export interface ReindexResponse {
   skipped: number
 }
 
-export interface WatchedFolder {
-  path: string
-  recursive: boolean
-}
-
-export interface LibrarySettings {
-  watched_folders: WatchedFolder[]
-  excluded_folder_names: string[]
-  auto_rescan_mode: 'manual' | 'interval' | 'daily'
-  auto_rescan_interval_hours: number
-  auto_rescan_daily_time: string
-  fast_worker_count: number
-  last_rescan_at?: string | null
-}
-
-export interface LibraryRescanResult {
-  path: string
-  name: string
-  success: boolean
-  action: 'registered' | 'updated' | 'skipped' | 'failed' | 'cancelled'
-  file_id?: number
-  error?: string
-  diagnostic_id?: string
-  error_code?: string
-  error_stage?: string
-  error_type?: string
-  error_hint?: string
-}
-
-export interface LibraryRescanResponse {
-  registered: number
-  updated: number
-  skipped: number
-  failed: number
-  results: LibraryRescanResult[]
-  cancelled: number
-  pruned_unsupported: number
-}
-
-export type LibraryRescanMode = 'normal' | 'fast'
-
-export interface LibraryRescanStatus {
-  running: boolean
-  stage: 'idle' | 'queued' | 'scanning' | 'indexing' | 'saving' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
-  message: string
-  mode: LibraryRescanMode
-  worker_count: number
-  started_at?: string | null
-  updated_at?: string | null
-  folders_total: number
-  folders_processed: number
-  found: number
-  total: number
-  processed: number
-  percent: number
-  eta_seconds?: number | null
-  registered: number
-  updated: number
-  skipped: number
-  failed: number
-  cancelled: number
-  pruned_unsupported: number
-  cancel_requested: boolean
-  current_file?: string | null
-  summary?: LibraryRescanResponse | null
-  error?: string | null
-}
-
-export type LibraryGroupKind = 'exact_name_conflict' | 'version_family'
-
-export interface LibraryGroupSummary {
-  id: string
-  group_kind: LibraryGroupKind
-  file_type: string
-  base_name: string
-  canonical_name: string
-  title: string
-  file_count: number
-  confidence: string
-  reason: string
-  latest_file?: FileInfo | null
-  previous_file?: FileInfo | null
-  manual_latest_file_id?: number | null
-  tokens_summary: string[]
-  content_status: 'pending' | 'partial' | 'not_enough_content' | 'same_content' | 'content_differs'
-  fingerprint_coverage: number
-  fingerprint_unique_count: number
-  content_evidence: string
-  recommended_action: 'excel_integrate' | 'compare_latest'
-}
-
-export interface LibraryGroupDetail extends LibraryGroupSummary {
-  files: FileInfo[]
-}
-
-export interface LibraryGroupsResponse {
-  total: number
-  groups: LibraryGroupSummary[]
-  limit: number
-  offset: number
-  counts_by_kind: Partial<Record<LibraryGroupKind, number>>
-  derived_index_state?: 'missing' | 'ready' | 'stale' | 'refreshing' | 'repair_needed' | 'error'
-  derived_index_stale?: boolean
-  derived_index_updated_at?: string | null
-  derived_index_error?: string | null
-}
-
-export interface LibraryGroupsParams {
-  kind?: LibraryGroupKind
-  fileType?: string
-  query?: string
-  sort?: 'recent' | 'name' | 'count' | 'content'
-  limit?: number
-  offset?: number
-  includeDuplicates?: boolean
-  cacheOnly?: boolean
-}
-
 const electronApi = () => getOfficeWhereBridge()
 
 function desktopError(message: string): never {
@@ -723,22 +506,6 @@ async function getFilePage(params: FileListParams = {}) {
   const url = await apiPath('/api/files/page')
   const suffix = searchParams.toString()
   return axios.get<FileListResponse>(suffix ? `${url}?${suffix}` : url)
-}
-
-async function getLibraryGroups(params: LibraryGroupsParams = {}) {
-  const searchParams = new URLSearchParams()
-  if (params.kind) searchParams.set('kind', params.kind)
-  if (params.fileType) searchParams.set('type', params.fileType)
-  if (params.query) searchParams.set('q', params.query)
-  if (params.sort) searchParams.set('sort', params.sort)
-  if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
-  if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
-  if (params.includeDuplicates) searchParams.set('include_duplicates', 'true')
-  if (params.cacheOnly) searchParams.set('cache_only', 'true')
-
-  const url = await apiPath('/api/library/groups')
-  const suffix = searchParams.toString()
-  return axios.get<LibraryGroupsResponse>(suffix ? `${url}?${suffix}` : url)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1645,28 +1412,7 @@ export const api = {
       }
     },
   },
-  library: {
-    getSettings: async () => axios.get<LibrarySettings>(await apiPath('/api/library/settings')),
-    updateSettings: (data: LibrarySettings) =>
-      apiPath('/api/library/settings').then((url) => axios.put<LibrarySettings>(url, data)),
-    rescan: async (mode: LibraryRescanMode = 'normal') =>
-      axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan'), { mode }),
-    startRescan: async (mode: LibraryRescanMode = 'normal') =>
-      axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start'), { mode }),
-    rescanStatus: async () => axios.get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
-    cancelRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/cancel')),
-    groups: getLibraryGroups,
-    groupDetail: async (id: string) =>
-      axios.get<LibraryGroupDetail>(await apiPath(`/api/library/groups/${encodeURIComponent(id)}`)),
-    setGroupLatestFile: (id: string, fileId: number) =>
-      apiPath(`/api/library/groups/${encodeURIComponent(id)}/latest-file`).then((url) =>
-        axios.put<LibraryGroupDetail>(url, { file_id: fileId })
-      ),
-    clearGroupLatestFile: (id: string) =>
-      apiPath(`/api/library/groups/${encodeURIComponent(id)}/latest-file`).then((url) =>
-        axios.delete<LibraryGroupDetail>(url)
-      ),
-  },
+  library: libraryApi,
 }
 
 export interface FileInspectRequest {
