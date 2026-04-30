@@ -32,6 +32,9 @@ This document is the source of truth for the 2026-04-30 external architecture re
   - Library rescan status/write policy/config coordination is isolated in `backend/core/rescan.py` and `backend/config.py`.
   - Shared file-scope constants live in `backend/file_constants.py`.
   - FileManager app-data/general settings sections and ConsistencyCheck group timeline presenter are split by product responsibility.
+- Second refactor wave landed as another facade-first slice:
+  - Library-group derived-index SQL/JSON mechanics moved behind `backend/storage/library_groups.py` while `backend/database.py` remains the public facade.
+  - `FileManager` registered-file list rendering moved to `components/file-manager/RegisteredFilesSection.tsx`; controller state/API/dialog behavior remains in `FileManager.tsx`.
 
 ## External review triage
 
@@ -91,7 +94,7 @@ Success criteria:
 - No DB schema change unless separately planned.
 - No source-document reads/writes added to normal UI paths.
 
-### P2 — Small boundary refactor waves — first wave completed
+### P2 — Small boundary refactor waves — second wave completed
 
 1. Extract a backend storage seam behind `backend/database.py` facade, starting with comparison artifacts or library group summaries.
 2. Extract `_rescan_library_impl` seams around scan/planning/status/write coordination, preserving monkeypatch-compatible aliases where tests depend on them.
@@ -107,12 +110,13 @@ Completed scope:
 - Comparison artifacts were chosen as the first storage repository slice.
 - File-location/show-in-folder was chosen as the first API service facade slice.
 - Rescan extraction stayed on status/write-policy/config seams and preserved the `backend/core/library.py` public facade.
+- Library-group derived-index storage mechanics are now isolated in `backend/storage/library_groups.py`; `backend/database.py` still owns connection/state/version policy and public function compatibility.
 
 Deferred scope:
-- Library group summary/search repositories remain behind `backend/database.py` until a separate hot-path performance plan exists.
+- Further group domain-builder extraction remains separate because it touches grouping semantics rather than storage mechanics.
 - DB engine replacement and generic service layers remain non-goals.
 
-### P3 — Frontend maintainability waves — first wave completed
+### P3 — Frontend maintainability waves — second wave completed
 
 1. Extract `FileManager` data-management/app-reset section first if reset/settings work continues.
 2. Extract `FileManager` library settings or file-list presenter when those areas are next touched.
@@ -127,9 +131,10 @@ Completed scope:
 - `FileManager` app-data reset/data-management UI was extracted to `components/file-manager/AppDataManagementSection.tsx`.
 - `FileManager` display/close-behavior UI was extracted to `components/file-manager/GeneralSettingsSection.tsx`.
 - `ConsistencyCheck` group timeline/version history presenter was extracted to `components/consistency/GroupTimeline.tsx`.
+- `FileManager` registered-file list/search/selection/pagination presenter was extracted to `components/file-manager/RegisteredFilesSection.tsx` without moving API calls or state ownership.
 
 Deferred scope:
-- File list/library settings hooks and frontend test framework remain separate decisions.
+- FileManager library settings hook/presenter and frontend test framework remain separate decisions.
 - No list virtualization dependency was added because current list/group pages are bounded and no profiling evidence justified it.
 
 ### P4 — Optional product/performance follow-ups

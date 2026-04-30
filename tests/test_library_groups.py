@@ -214,6 +214,41 @@ def test_library_groups_sql_filters_file_paths_before_pagination(tmp_path, monke
     assert [group.base_name for group in response.groups] == ["bravo"]
 
 
+def test_library_groups_sql_paginates_large_derived_index_without_source_scan(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.core.library import list_file_groups
+    from backend.database import replace_library_group_index_full
+
+    _setup_db(tmp_path, monkeypatch)
+    file_rows = []
+    group_rows = []
+    for index in range(500):
+        first_id = index * 2 + 1
+        second_id = first_id + 1
+        base_name = f"scale-{index:04d}"
+        file_rows.extend(
+            [
+                _indexed_file_row(first_id, f"{base_name}_v1.docx"),
+                _indexed_file_row(second_id, f"{base_name}_v2.docx"),
+            ]
+        )
+        group_rows.append(_indexed_group_row(f"g-{base_name}", base_name, [first_id, second_id]))
+    replace_library_group_index_full(file_rows, group_rows)
+
+    def fail_full_scan():
+        raise AssertionError("cache-only large group request must not scan source file rows")
+
+    monkeypatch.setattr(library, "get_all_files", fail_full_scan)
+
+    response = list_file_groups(kind="version_family", sort="name", limit=100, offset=200, cache_only=True)
+
+    assert response.total == 500
+    assert response.limit == 100
+    assert len(response.groups) == 100
+    assert response.groups[0].base_name == "scale-0200"
+    assert response.groups[-1].base_name == "scale-0299"
+
+
 def test_library_group_cache_reuses_full_group_build_and_invalidates(tmp_path, monkeypatch):
     from backend.core import library
     from backend.core.library import list_file_groups

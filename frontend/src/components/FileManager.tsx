@@ -24,7 +24,6 @@ import {
   Button,
   Card,
   CardSection,
-  Checkbox,
   Chip,
   Dialog,
   EmptyState,
@@ -45,6 +44,7 @@ import { TutorialStep } from '../tutorial'
 import AppDataManagementSection from './file-manager/AppDataManagementSection'
 import { formatBytes } from './file-manager/format'
 import GeneralSettingsSection from './file-manager/GeneralSettingsSection'
+import RegisteredFilesSection from './file-manager/RegisteredFilesSection'
 import PreviewPanel from './PreviewPanel'
 
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
@@ -1184,207 +1184,43 @@ export default function FileManager({
         </CardSection>
       </Card>
 
-      <Card variant="outlined" className="overflow-hidden">
-        <header
-          className="px-6 py-4 space-y-4 border-b border-[var(--md-sys-color-outline-variant)]"
-          onKeyDown={handleRegisteredFilesKeyDown}
-        >
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h3 className="type-title-md text-[var(--md-sys-color-on-surface)]">
-                등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({fileTotal})</span>
-              </h3>
-              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 앱 목록과 검색 인덱스에서만 제거하며 원본 파일은 삭제하지 않습니다.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button
-                variant={selectionMode ? 'tonal' : 'outlined'}
-                leadingIcon={selectionMode ? 'checklist' : 'delete_sweep'}
-                disabled={deletingFiles}
-                onClick={() => {
-                  setSelectionMode((value) => !value)
-                  if (selectionMode) setSelectedFileIds(new Set())
-                }}
-              >
-                {selectionMode ? '선택 종료' : '선택해서 등록 해제'}
-              </Button>
-              {selectedCount > 0 && (
-                <Button
-                  variant="danger"
-                  leadingIcon="delete"
-                  onClick={() => openDeleteConfirm(selectedFiles)}
-                  disabled={deletingFiles}
-                >
-                  선택 등록 해제 {selectedCount}개
-                </Button>
-              )}
-              <Button
-                variant="danger"
-                leadingIcon="delete_forever"
-                onClick={openClearAllFilesConfirm}
-                disabled={fileTotal === 0 || loading || deletingFiles}
-              >
-                전체 등록 해제
-              </Button>
-              <IconButton
-                icon="refresh"
-                label="새로고침"
-                variant="tonal"
-                onClick={() => void fetchFiles(fileOffset, fileQuery)}
-                disabled={loading || deletingFiles}
-              />
-            </div>
-          </div>
-          <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
-            <div className="flex-1 min-w-[240px]">
-              <TextField
-                leadingIcon="search"
-                placeholder="파일명 또는 경로로 검색"
-                value={fileQueryDraft}
-                onChange={(event) => setFileQueryDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') handleFileSearch()
-                }}
-              />
-            </div>
-            <Button variant="filled" leadingIcon="search" onClick={handleFileSearch} disabled={loading}>
-              검색
-            </Button>
-            {fileQuery && (
-              <Button variant="text" leadingIcon="close" onClick={clearFileSearch} disabled={loading}>
-                검색 해제
-              </Button>
-            )}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Chip
-              label={
-                fileTotal === 0
-                  ? '표시 0개'
-                  : `표시 ${visibleFileStart}-${visibleFileEnd} / 전체 ${fileTotal}`
-              }
-              tone="primary"
-              icon="view_list"
-              as="span"
-            />
-            {fileQuery && <Chip label={`검색어 · ${fileQuery}`} tone="secondary" icon="search" as="span" />}
-            {selectedCount > 0 && (
-              <Chip label={`선택 ${selectedCount}개 · Delete로 등록 해제`} tone="warning" icon="keyboard" as="span" />
-            )}
-            {fileTypeCounts.map(([fileType, count]) => (
-              <span
-                key={fileType}
-                className="inline-flex items-center h-7 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 type-label-md text-[var(--md-sys-color-on-surface-variant)]"
-              >
-                {fileType} {count}
-              </span>
-            ))}
-          </div>
-        </header>
-
-        {loading ? (
-          <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-            <Spinner size={18} /> 불러오는 중…
-          </div>
-        ) : files.length === 0 ? (
-          <EmptyState
-            icon="library_add"
-            title="아직 등록된 파일이 없습니다"
-            description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT 파일을 추가해 보세요."
-            compact
-          />
-        ) : (
-          <ul
-            className="divide-y divide-[var(--md-sys-color-outline-variant)]"
-            onKeyDown={handleRegisteredFilesKeyDown}
-          >
-            {files.map((file, index) => {
-              const selected = selectedFileIds.has(file.id)
-              return (
-              <li
-                key={file.id}
-                tabIndex={0}
-                onFocus={() => setFocusedFileId(file.id)}
-                onPointerDown={(event) => handleFileRowPointerDown(event, file, index)}
-                onPointerEnter={() => handleFileRowPointerEnter(index)}
-                className={`px-6 py-4 flex items-start justify-between gap-4 transition-colors outline-none ${
-                  selected
-                    ? 'bg-[var(--md-sys-color-primary-container)]/35'
-                    : 'hover:bg-[var(--md-sys-color-surface-container-low)]'
-                } ${selectionMode ? 'select-none cursor-crosshair' : ''}`}
-              >
-                {selectionVisible && (
-                  <div className="pt-1">
-                    <Checkbox
-                      checked={selected}
-                      aria-label={`${file.name} 선택`}
-                      onChange={() => toggleRegisteredFileSelection(file)}
-                    />
-                  </div>
-                )}
-                {selectionMode ? (
-                  <div
-                    className="flex-1 min-w-0 text-left group"
-                    onClick={() => toggleRegisteredFileSelection(file)}
-                  >
-                    <RegisteredFileSummary file={file} />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handlePreview(file)}
-                    className="flex-1 min-w-0 text-left group"
-                  >
-                    <RegisteredFileSummary file={file} />
-                  </button>
-                )}
-                <div className="shrink-0 flex flex-col items-end gap-2">
-                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                    {file.created_at ? file.created_at.replace('T', ' ').slice(0, 19) : '-'}
-                  </p>
-                  <IconButton
-                    icon="delete"
-                    label={`${file.name} 등록 해제`}
-                    variant="standard"
-                    size="sm"
-                    onClick={() => openDeleteConfirm([file])}
-                    disabled={deletingFiles}
-                    className="text-[var(--md-sys-color-error)]"
-                  />
-                </div>
-              </li>
-              )
-            })}
-          </ul>
-        )}
-        {fileTotal > REGISTERED_FILE_PAGE_SIZE && (
-          <footer className="px-6 py-4 flex items-center justify-between gap-3 border-t border-[var(--md-sys-color-outline-variant)] flex-wrap">
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              {visibleFileStart}-{visibleFileEnd} / {fileTotal}개
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="outlined"
-                leadingIcon="chevron_left"
-                onClick={() => goToFilePage(fileOffset - REGISTERED_FILE_PAGE_SIZE)}
-                disabled={!hasPreviousFilePage || loading}
-              >
-                이전
-              </Button>
-              <Button
-                variant="outlined"
-                trailingIcon="chevron_right"
-                onClick={() => goToFilePage(fileOffset + REGISTERED_FILE_PAGE_SIZE)}
-                disabled={!hasNextFilePage || loading}
-              >
-                다음
-              </Button>
-            </div>
-          </footer>
-        )}
-      </Card>
+      <RegisteredFilesSection
+        files={files}
+        fileTotal={fileTotal}
+        fileOffset={fileOffset}
+        pageSize={REGISTERED_FILE_PAGE_SIZE}
+        fileQuery={fileQuery}
+        fileQueryDraft={fileQueryDraft}
+        fileTypeCounts={fileTypeCounts}
+        loading={loading}
+        deletingFiles={deletingFiles}
+        selectedFileIds={selectedFileIds}
+        selectedFiles={selectedFiles}
+        selectedCount={selectedCount}
+        selectionMode={selectionMode}
+        selectionVisible={selectionVisible}
+        visibleFileStart={visibleFileStart}
+        visibleFileEnd={visibleFileEnd}
+        hasPreviousFilePage={hasPreviousFilePage}
+        hasNextFilePage={hasNextFilePage}
+        onToggleSelectionMode={() => {
+          setSelectionMode((value) => !value)
+          if (selectionMode) setSelectedFileIds(new Set())
+        }}
+        onOpenDeleteConfirm={openDeleteConfirm}
+        onOpenClearAllFilesConfirm={openClearAllFilesConfirm}
+        onRefresh={() => void fetchFiles(fileOffset, fileQuery)}
+        onQueryDraftChange={setFileQueryDraft}
+        onSearch={handleFileSearch}
+        onClearSearch={clearFileSearch}
+        onRegisteredFilesKeyDown={handleRegisteredFilesKeyDown}
+        onFileFocus={setFocusedFileId}
+        onFilePointerDown={handleFileRowPointerDown}
+        onFilePointerEnter={handleFileRowPointerEnter}
+        onToggleRegisteredFileSelection={toggleRegisteredFileSelection}
+        onPreview={(file) => void handlePreview(file)}
+        onPage={goToFilePage}
+      />
 
       {onReplayOnboarding && (
         <Card variant="outlined" className="overflow-hidden">
@@ -1737,22 +1573,6 @@ export default function FileManager({
         )}
       </Dialog>
     </div>
-  )
-}
-
-function RegisteredFileSummary({ file }: { file: FileInfo }) {
-  return (
-    <>
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="type-title-sm text-[var(--md-sys-color-primary)] group-hover:underline">
-          {file.name}
-        </span>
-        <FileTypeBadge fileType={file.file_type} />
-      </div>
-      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
-        {file.path}
-      </p>
-    </>
   )
 }
 

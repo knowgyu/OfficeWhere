@@ -21,8 +21,8 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 - [ ] Continue architecture cleanup only as scoped follow-up waves, not as a big-bang rewrite.
   - Durable decision record: `docs/architecture-review-roadmap.md`.
-  - Completed current wave: P0 security hardening, P1 read/constant/Hangul/diagnostics safety, P2 comparison-artifact storage + rescan/config + file-location seams, P3 FileManager/ConsistencyCheck presenter seams.
-  - Next possible slices: library group repository split, FileManager file-list/library-settings hooks, frontend tests, or migration backups — each needs its own performance/safety decision.
+  - Completed current waves: P0 security hardening, P1 read/constant/Hangul/diagnostics safety, P2 comparison-artifact storage + rescan/config + file-location seams + library-group storage seam, P3 FileManager app-data/general settings + registered-file list presenter + ConsistencyCheck presenter seams.
+  - Next possible slices: FileManager library-settings hook/presenter, deeper group domain-builder extraction, frontend tests, or migration backups — each needs its own performance/safety decision.
   - Preserve the >10% performance guard for 500~2,000 document libraries.
 
 - [ ] Consider a local AI Agent integration surface after the 0.6.x release line stabilizes.
@@ -36,7 +36,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 ## Completed / user-owned for now
 
-- External architecture review P0-P3 first implementation wave is complete enough for this pass; only scoped follow-up slices remain.
+- External architecture review P0-P3 first implementation wave and second responsibility-boundary refactor wave are complete enough for this pass; only scoped follow-up slices remain.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
 - Embedded-Python Windows packaging has been checked on DRM-policy PCs.
 - In-app update notice and portable zip update flow are implemented.
