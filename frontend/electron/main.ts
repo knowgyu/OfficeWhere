@@ -201,6 +201,15 @@ function isAllowedUpdateUrl(urlString: string): boolean {
   }
 }
 
+function isAllowedExternalUrl(urlString: string): boolean {
+  try {
+    const url = new URL(urlString)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
 function sanitizeUpdateFileName(name: string): string {
   const baseName = path.basename(name).replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
   if (!baseName.toLowerCase().endsWith('.zip')) {
@@ -417,7 +426,9 @@ async function createMainWindow() {
     mainWindow = null
   })
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (isAllowedExternalUrl(url)) {
+      void shell.openExternal(url)
+    }
     return { action: 'deny' }
   })
 

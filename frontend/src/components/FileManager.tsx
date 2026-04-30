@@ -39,12 +39,12 @@ import {
 } from '../ui'
 import { useLibraryRescan } from '../contexts/LibraryRescanContext'
 import {
-  APP_TEXT_SIZE_DESCRIPTIONS,
-  APP_TEXT_SIZE_LABELS,
-  APP_TEXT_SIZE_ORDER,
   useDisplaySettings,
 } from '../contexts/DisplaySettingsContext'
 import { TutorialStep } from '../tutorial'
+import AppDataManagementSection from './file-manager/AppDataManagementSection'
+import { formatBytes } from './file-manager/format'
+import GeneralSettingsSection from './file-manager/GeneralSettingsSection'
 import PreviewPanel from './PreviewPanel'
 
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
@@ -80,18 +80,6 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
   const cancelled = source.cancelled > 0 ? ` · 정지 ${source.cancelled}` : ''
   const cleanup = source.pruned_unsupported > 0 ? ` · 이전 미지원 항목 정리 ${source.pruned_unsupported}` : ''
   return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${cancelled}${cleanup} · 실패 ${source.failed}`
-}
-
-function formatBytes(bytes?: number) {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let value = bytes
-  let index = 0
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024
-    index += 1
-  }
-  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
 const REGISTERED_FILE_PAGE_SIZE = 50
@@ -894,91 +882,15 @@ export default function FileManager({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card variant="outlined">
-          <CardSection
-            title="화면 표시"
-            description="앱 전체 글자 크기"
-            className="p-3"
-          >
-            <div className="grid grid-cols-2 gap-2">
-              {APP_TEXT_SIZE_ORDER.map((size) => (
-                <button
-                  key={size}
-                  type="button"
-                  onClick={() => setTextSize(size)}
-                  className={`state-host relative text-left rounded-md border px-2.5 py-2 transition-colors ${
-                    textSize === size
-                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/40'
-                      : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-low)]'
-                  }`}
-                >
-                  <span className="state-layer" />
-                  <span className="relative flex items-center justify-between gap-2">
-                    <span className="type-label-md text-[var(--md-sys-color-on-surface)]">
-                      {APP_TEXT_SIZE_LABELS[size]}
-                    </span>
-                    {textSize === size && <Icon name="check_circle" size={18} filled className="text-[var(--md-sys-color-primary)]" />}
-                  </span>
-                  <span className="relative mt-1 block text-xs text-[var(--md-sys-color-on-surface-variant)]">
-                    {APP_TEXT_SIZE_DESCRIPTIONS[size]}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </CardSection>
-        </Card>
-
-        <Card variant="outlined">
-          <CardSection
-            title="창 닫기 동작"
-            description="X 버튼을 눌렀을 때의 동작"
-            className="p-3"
-          >
-            {!closeBehaviorAvailable ? (
-              <EmptyState
-                icon="desktop_windows"
-                title="Electron 앱에서만 사용할 수 있습니다"
-                description="브라우저/개발 서버 모드에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
-                compact
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 items-start">
-                <SelectField
-                  label="X 버튼 동작"
-                  value={closeBehavior}
-                  onChange={(event) => void handleUpdateCloseBehavior(event.target.value as CloseBehavior)}
-                  disabled={closeBehaviorLoading}
-                  helper="트레이로 보내면 창만 닫고 백그라운드 실행을 유지합니다."
-                >
-                  <option value="ask">{CLOSE_BEHAVIOR_LABELS.ask}</option>
-                  <option value="hide">{CLOSE_BEHAVIOR_LABELS.hide}</option>
-                  <option value="quit">{CLOSE_BEHAVIOR_LABELS.quit}</option>
-                </SelectField>
-                <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-2.5 flex items-start gap-2.5">
-                  <Icon
-                    name={closeBehavior === 'quit' ? 'power_settings_new' : 'move_to_inbox'}
-                    size={20}
-                    className="mt-0.5 text-[var(--md-sys-color-primary)]"
-                  />
-                  <div className="min-w-0 space-y-1">
-                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                      현재 설정 · {CLOSE_BEHAVIOR_LABELS[closeBehavior]}
-                    </p>
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                      {closeBehavior === 'ask'
-                        ? '창을 닫을 때마다 백그라운드 실행/종료/취소를 고를 수 있습니다.'
-                        : closeBehavior === 'hide'
-                          ? '창을 닫으면 트레이에 남고, 트레이 메뉴에서 열기 또는 종료를 선택할 수 있습니다.'
-                          : '창을 닫으면 앱과 백그라운드 색인이 함께 종료됩니다.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardSection>
-        </Card>
-      </div>
+      <GeneralSettingsSection
+        textSize={textSize}
+        closeBehavior={closeBehavior}
+        closeBehaviorLabels={CLOSE_BEHAVIOR_LABELS}
+        closeBehaviorAvailable={closeBehaviorAvailable}
+        closeBehaviorLoading={closeBehaviorLoading}
+        onTextSizeChange={setTextSize}
+        onCloseBehaviorChange={(behavior) => void handleUpdateCloseBehavior(behavior)}
+      />
       <Card variant="elevated">
         <CardSection
           title="대상 폴더"
@@ -1489,170 +1401,23 @@ export default function FileManager({
         </Card>
       )}
 
-      <Card variant="outlined">
-        <CardSection
-          title="앱 데이터 관리"
-          description="문제 해결이 필요할 때만 검색 색인과 앱 설정을 초기화합니다. 원본 문서는 삭제하지 않습니다."
-          className="p-3"
-          trailing={
-            appDataAvailable ? (
-              <div className="flex gap-2 flex-wrap">
-                <Button
-                  variant="tonal"
-                  size="sm"
-                  leadingIcon="refresh"
-                  onClick={() => void fetchAppDataPaths()}
-                  loading={appDataLoading}
-                >
-                  경로 새로고침
-                </Button>
-              </div>
-            ) : null
-          }
-        >
-          {!appDataAvailable ? (
-            <EmptyState
-              icon="desktop_windows"
-              title="Electron 앱에서만 사용할 수 있습니다"
-              description="브라우저/개발 서버 모드에서는 앱 userData 경로를 안전하게 확인할 수 없어 삭제 기능을 비활성화합니다."
-              compact
-            />
-          ) : appDataPaths.length === 0 ? (
-            <EmptyState
-              icon="folder_managed"
-              title="앱 데이터 경로를 불러오세요"
-              description="경로 새로고침을 누르면 초기화 가능한 앱 데이터를 확인합니다."
-              compact
-            />
-          ) : (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                        검색/앱 설정 초기화
-                      </p>
-                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        색인, 화면 설정, 임시 캐시를 다음 실행 때 새로 만듭니다.
-                      </p>
-                    </div>
-                    <Badge tone={safeResetIds.length > 0 ? 'success' : 'neutral'}>
-                      {safeResetIds.length > 0 ? formatBytes(safeResetSize) : '삭제할 항목 없음'}
-                    </Badge>
-                  </div>
-                  <Button
-                    variant="filled"
-                    size="sm"
-                    leadingIcon="restart_alt"
-                    onClick={() => openClearAppDataPreset(safeResetIds)}
-                    disabled={safeResetIds.length === 0 || appDataLoading}
-                  >
-                    초기화 후 앱 종료
-                  </Button>
-                </div>
-
-                <div className="rounded-md border border-[var(--md-sys-color-error)]/50 bg-[var(--md-sys-color-error-container)]/20 p-3 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                        문제 해결용 전체 초기화
-                      </p>
-                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        앱 프로필 전체를 다음 실행 때 새로 만듭니다.
-                      </p>
-                    </div>
-                    <Badge tone={fullResetIds.length > 0 ? 'warning' : 'neutral'}>
-                      {fullResetIds.length > 0 ? formatBytes(fullResetSize) : '삭제할 항목 없음'}
-                    </Badge>
-                  </div>
-                  <Button
-                    variant="outlined"
-                    size="sm"
-                    leadingIcon="warning"
-                    className="!text-[var(--md-sys-color-error)]"
-                    onClick={() => openClearAppDataPreset(fullResetIds)}
-                    disabled={fullResetIds.length === 0 || appDataLoading}
-                  >
-                    전체 초기화
-                  </Button>
-                </div>
-              </div>
-
-              <details
-                className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3"
-                open={appDataAdvancedOpen}
-                onToggle={(event) => setAppDataAdvancedOpen(event.currentTarget.open)}
-              >
-                <summary className="type-label-lg text-[var(--md-sys-color-primary)] cursor-pointer">
-                  고급 보기: 삭제 대상 직접 선택
-                </summary>
-                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-2">
-                  문제 해결을 위해 세부 항목을 직접 고를 때만 사용하세요.
-                </p>
-                <div className="mt-3 space-y-2">
-                  {appDataPaths.map((candidate) => (
-                    <div
-                      key={candidate.id}
-                      className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2.5 flex items-start gap-3"
-                    >
-                      <Checkbox
-                        checked={selectedAppDataIds.includes(candidate.id)}
-                        onChange={() => toggleAppDataCandidate(candidate.id)}
-                        disabled={!candidate.exists || appDataLoading}
-                        label=""
-                      />
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{candidate.label}</p>
-                          <Badge tone={candidate.exists ? 'success' : 'neutral'}>
-                            {candidate.exists ? formatBytes(candidate.sizeBytes) : '없음'}
-                          </Badge>
-                          {candidate.dangerous && <Badge tone="warning">전체 초기화</Badge>}
-                        </div>
-                        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                          {candidate.description}
-                        </p>
-                        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] break-all">
-                          {candidate.path}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                  <Button
-                    variant="outlined"
-                    leadingIcon="delete_sweep"
-                    className="!text-[var(--md-sys-color-error)]"
-                    onClick={() => setClearAppDataOpen(true)}
-                    disabled={selectedAppDataIds.length === 0 || appDataLoading}
-                  >
-                    선택한 항목 삭제
-                  </Button>
-                </div>
-              </details>
-            </div>
-          )}
-          {clearAppDataResult && (
-            <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-2">
-              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">최근 삭제 결과</p>
-              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                backend 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개
-                {clearAppDataResult.restartScheduled
-                  ? ' · 앱 재시작 예약'
-                  : clearAppDataResult.exitScheduled
-                    ? ' · 앱 종료 예약'
-                    : ''}
-              </p>
-              {clearAppDataResult.failed.map((item) => (
-                <p key={`${item.id}-${item.path}`} className="type-body-sm text-[var(--md-sys-color-error)] break-all">
-                  {item.path}: {item.error}
-                </p>
-              ))}
-            </div>
-          )}
-        </CardSection>
-      </Card>
-
+      <AppDataManagementSection
+        appDataAvailable={appDataAvailable}
+        appDataPaths={appDataPaths}
+        appDataLoading={appDataLoading}
+        selectedAppDataIds={selectedAppDataIds}
+        appDataAdvancedOpen={appDataAdvancedOpen}
+        clearAppDataResult={clearAppDataResult}
+        safeResetIds={safeResetIds}
+        safeResetSize={safeResetSize}
+        fullResetIds={fullResetIds}
+        fullResetSize={fullResetSize}
+        onRefreshPaths={() => void fetchAppDataPaths()}
+        onOpenPreset={openClearAppDataPreset}
+        onToggleCandidate={toggleAppDataCandidate}
+        onToggleAdvanced={setAppDataAdvancedOpen}
+        onOpenSelectedDelete={() => setClearAppDataOpen(true)}
+      />
 
 
       <Dialog
