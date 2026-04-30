@@ -1,10 +1,15 @@
 # OfficeWhere TODO
 
-Last updated: 2026-04-29
+Last updated: 2026-04-30
 
 This file tracks follow-up work that is not part of the formal release checklist. Keep `docs/release-test-checklist.md` for release validation steps.
 
 ## Immediate follow-ups
+
+- [ ] Follow the external architecture review triage roadmap for the next engineering cleanup waves.
+  - Durable decision record: `docs/architecture-review-roadmap.md`.
+  - Current order: tiny security hardening → DB/read stability and Hangul tests → backend storage/rescan boundary waves → frontend FileManager/ConsistencyCheck maintainability waves.
+  - Treat large-file findings as real signals, but use facade/strangler slices instead of a big-bang rewrite.
 
 - [ ] Decide whether root agent guides should be versioned, only if shared agent guidance becomes important.
   - Current state: `AGENTS.md` and `CLAUDE.md` exist locally, but `.gitignore` ignores both.
@@ -15,7 +20,8 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 - [ ] Follow the consolidated search/version performance roadmap when reopening performance work.
   - Durable decision record: `docs/search-version-performance-roadmap.md`.
-  - Current priority order: Excel sparse diff + warnings, SQL-backed group list filtering/paging, PPT similarity guard, Word/PPT compressed comparison artifacts, optional Everything/ES discovery.
+  - Already landed in 0.6.x: Excel sparse diff + warnings, SQL-backed group list filtering/paging, PPT similarity guard, Word/PPT compressed comparison artifacts.
+  - Remaining future item from that roadmap: optional Everything/ES discovery accelerator, only after scanner strategy boundaries and license/redistribution checks.
   - Treat this as the source of truth instead of duplicating the same performance notes across `.omx/context`, `.omx/wiki`, or session notes.
 
 - [ ] Consider a local AI Agent integration surface after the 0.6.x release line stabilizes.
