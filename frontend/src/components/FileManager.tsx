@@ -653,7 +653,11 @@ export default function FileManager({
       const response = await api.app.clearData(selectedAppDataIds, true)
       setClearAppDataResult(response.data)
       if (response.data.success) {
-        snackbar.success('앱 데이터를 삭제했습니다. 앱을 종료합니다. 다시 실행해 주세요.')
+        snackbar.success(
+          response.data.restartScheduled
+            ? '앱 데이터를 삭제했습니다. 앱을 다시 시작합니다.'
+            : '앱 데이터를 삭제했습니다. 앱을 종료합니다. 다시 실행해 주세요.',
+        )
       } else {
         snackbar.error('일부 앱 데이터 삭제에 실패했습니다.')
       }
@@ -1632,7 +1636,12 @@ export default function FileManager({
             <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-2">
               <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">최근 삭제 결과</p>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                backend 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개{clearAppDataResult.exitScheduled ? ' · 앱 종료 예약' : ''}
+                backend 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개
+                {clearAppDataResult.restartScheduled
+                  ? ' · 앱 재시작 예약'
+                  : clearAppDataResult.exitScheduled
+                    ? ' · 앱 종료 예약'
+                    : ''}
               </p>
               {clearAppDataResult.failed.map((item) => (
                 <p key={`${item.id}-${item.path}`} className="type-body-sm text-[var(--md-sys-color-error)] break-all">
@@ -1818,7 +1827,7 @@ export default function FileManager({
               onClick={handleClearAppData}
               loading={appDataLoading}
             >
-              삭제 후 앱 종료
+              삭제 후 앱 다시 시작
             </Button>
           </>
         }
@@ -1826,8 +1835,8 @@ export default function FileManager({
         <div className="space-y-4">
           <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
             {selectedFullReset
-              ? '문제 해결용 전체 초기화는 앱 프로필 전체를 삭제합니다. 삭제 후 앱은 종료되며, 다음 실행 때 앱 설정과 세션을 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'
-              : '선택한 앱 소유 데이터만 삭제합니다. 삭제 후 앱은 종료되며, 다음 실행 때 필요한 데이터를 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'}
+              ? '문제 해결용 전체 초기화는 앱 프로필 전체를 삭제합니다. 삭제 후 앱은 자동으로 다시 시작되며, 다음 실행 때 앱 설정과 세션을 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'
+              : '선택한 앱 소유 데이터만 삭제합니다. 삭제 후 앱은 자동으로 다시 시작되며, 다음 실행 때 필요한 데이터를 새로 만듭니다. 등록된 대상 폴더의 실제 문서 파일과 사용자의 작업 폴더는 삭제하지 않습니다.'}
           </p>
           <Badge tone="warning">삭제 예정 {formatBytes(selectedAppDataSize)}</Badge>
           <div className="space-y-2">

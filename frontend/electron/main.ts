@@ -49,6 +49,7 @@ type ClearAppDataResult = {
   failed: { id: string; path: string; error: string }[]
   backendStopped: boolean
   exitScheduled: boolean
+  restartScheduled: boolean
 }
 
 type CloseBehavior = 'ask' | 'hide' | 'quit'
@@ -93,6 +94,7 @@ let isQuitting = false
 let appDataCleanupInProgress = false
 let closePromptInProgress = false
 let appShutdownInProgress = false
+let appRelaunchScheduled = false
 let cachedUpdateCheck: UpdateCheckResult | null = null
 
 app.setName('OfficeWhere')
@@ -842,6 +844,18 @@ function requestAppQuit(exitCode = 0) {
   void shutdownApp(exitCode)
 }
 
+function scheduleAppRelaunch(): boolean {
+  if (appRelaunchScheduled) return true
+
+  try {
+    app.relaunch()
+    appRelaunchScheduled = true
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function shutdownApp(exitCode = 0) {
   if (appShutdownInProgress) return
 
@@ -1321,6 +1335,7 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
     failed: [],
     backendStopped: false,
     exitScheduled: false,
+    restartScheduled: false,
   }
 
   appDataCleanupInProgress = true
@@ -1356,6 +1371,9 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
     if (result.success) writeResetMarker(selected)
 
     if (shouldExitAfterClear) {
+      if (result.success) {
+        result.restartScheduled = scheduleAppRelaunch()
+      }
       result.exitScheduled = true
       setTimeout(() => requestAppQuit(), 250)
     }

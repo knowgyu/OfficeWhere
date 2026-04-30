@@ -14,6 +14,7 @@ export interface ClearAppDataResult {
   failed: { id: string; path: string; error: string }[]
   backendStopped: boolean
   exitScheduled?: boolean
+  restartScheduled?: boolean
 }
 
 export type CloseBehavior = 'ask' | 'hide' | 'quit'
