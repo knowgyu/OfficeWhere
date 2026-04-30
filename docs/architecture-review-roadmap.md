@@ -25,6 +25,13 @@ This document is the source of truth for the 2026-04-30 external architecture re
 - Responsibility refactor wave 2 landed the frontend API facade split: `transport.ts`, `shared.ts`, `library.ts`, with `client.ts` kept as compatibility facade.
 - Node 24 CI maintenance is complete.
 - App-data reset now schedules app restart after successful cleanup.
+- Architecture review P0-P3 wave landed as a facade-first strangler pass:
+  - Electron arbitrary window-open URLs are limited to `http:` / `https:`.
+  - File-location actions are delegated through `backend/services/file_location_service.py` with shell-free platform command construction.
+  - `backend/database.py` has a `_read_connection()` helper and comparison-artifact storage is isolated behind `backend/storage/comparison_artifacts.py`.
+  - Library rescan status/write policy/config coordination is isolated in `backend/core/rescan.py` and `backend/config.py`.
+  - Shared file-scope constants live in `backend/file_constants.py`.
+  - FileManager app-data/general settings sections and ConsistencyCheck group timeline presenter are split by product responsibility.
 
 ## External review triage
 
@@ -62,7 +69,7 @@ This document is the source of truth for the 2026-04-30 external architecture re
 
 ## Current roadmap / TODO order
 
-### P0 — Tiny security hardening
+### P0 — Tiny security hardening — completed in current wave
 
 1. Validate external URLs before `shell.openExternal` in Electron.
 2. Harden Windows “show in folder” command construction while preserving Explorer selection behavior.
@@ -72,7 +79,7 @@ Success criteria:
 - Existing release/update URL behavior still works.
 - Windows show-in-folder tests preserve the intended Explorer command semantics.
 
-### P1 — Stability and regression safety
+### P1 — Stability and regression safety — completed in current wave
 
 1. Add `_read_connection()` to `backend/database.py` and migrate a first low-risk set of read helpers.
 2. Move shared file-scope defaults out of `core` so `models/schemas.py` no longer depends on core implementation modules.
@@ -84,7 +91,7 @@ Success criteria:
 - No DB schema change unless separately planned.
 - No source-document reads/writes added to normal UI paths.
 
-### P2 — Small boundary refactor waves
+### P2 — Small boundary refactor waves — first wave completed
 
 1. Extract a backend storage seam behind `backend/database.py` facade, starting with comparison artifacts or library group summaries.
 2. Extract `_rescan_library_impl` seams around scan/planning/status/write coordination, preserving monkeypatch-compatible aliases where tests depend on them.
@@ -96,7 +103,16 @@ Success criteria:
 - Existing indexing/staging/batch/FTS behavior is unchanged unless a test-backed change is explicitly planned.
 - Representative search/version/indexing verification stays green.
 
-### P3 — Frontend maintainability waves
+Completed scope:
+- Comparison artifacts were chosen as the first storage repository slice.
+- File-location/show-in-folder was chosen as the first API service facade slice.
+- Rescan extraction stayed on status/write-policy/config seams and preserved the `backend/core/library.py` public facade.
+
+Deferred scope:
+- Library group summary/search repositories remain behind `backend/database.py` until a separate hot-path performance plan exists.
+- DB engine replacement and generic service layers remain non-goals.
+
+### P3 — Frontend maintainability waves — first wave completed
 
 1. Extract `FileManager` data-management/app-reset section first if reset/settings work continues.
 2. Extract `FileManager` library settings or file-list presenter when those areas are next touched.
@@ -106,6 +122,15 @@ Success criteria:
 Success criteria:
 - Existing Korean copy, CSS classes, tutorial markers, snackbar behavior, and import facade compatibility are preserved.
 - No new UI dependency unless a separate plan approves it.
+
+Completed scope:
+- `FileManager` app-data reset/data-management UI was extracted to `components/file-manager/AppDataManagementSection.tsx`.
+- `FileManager` display/close-behavior UI was extracted to `components/file-manager/GeneralSettingsSection.tsx`.
+- `ConsistencyCheck` group timeline/version history presenter was extracted to `components/consistency/GroupTimeline.tsx`.
+
+Deferred scope:
+- File list/library settings hooks and frontend test framework remain separate decisions.
+- No list virtualization dependency was added because current list/group pages are bounded and no profiling evidence justified it.
 
 ### P4 — Optional product/performance follow-ups
 

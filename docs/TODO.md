@@ -6,11 +6,6 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 ## Immediate follow-ups
 
-- [ ] Follow the external architecture review triage roadmap for the next engineering cleanup waves.
-  - Durable decision record: `docs/architecture-review-roadmap.md`.
-  - Current order: tiny security hardening → DB/read stability and Hangul tests → backend storage/rescan boundary waves → frontend FileManager/ConsistencyCheck maintainability waves.
-  - Treat large-file findings as real signals, but use facade/strangler slices instead of a big-bang rewrite.
-
 - [ ] Decide whether root agent guides should be versioned, only if shared agent guidance becomes important.
   - Current state: `AGENTS.md` and `CLAUDE.md` exist locally, but `.gitignore` ignores both.
   - Default: keep them local/ignored because they may contain machine- or session-specific agent instructions.
@@ -24,6 +19,12 @@ This file tracks follow-up work that is not part of the formal release checklist
   - Remaining future item from that roadmap: optional Everything/ES discovery accelerator, only after scanner strategy boundaries and license/redistribution checks.
   - Treat this as the source of truth instead of duplicating the same performance notes across `.omx/context`, `.omx/wiki`, or session notes.
 
+- [ ] Continue architecture cleanup only as scoped follow-up waves, not as a big-bang rewrite.
+  - Durable decision record: `docs/architecture-review-roadmap.md`.
+  - Completed current wave: P0 security hardening, P1 read/constant/Hangul/diagnostics safety, P2 comparison-artifact storage + rescan/config + file-location seams, P3 FileManager/ConsistencyCheck presenter seams.
+  - Next possible slices: library group repository split, FileManager file-list/library-settings hooks, frontend tests, or migration backups — each needs its own performance/safety decision.
+  - Preserve the >10% performance guard for 500~2,000 document libraries.
+
 - [ ] Consider a local AI Agent integration surface after the 0.6.x release line stabilizes.
   - Candidate shapes: loopback-only REST API for search/version/library state, or MCP server exposing read-only tools plus explicitly user-approved app actions.
   - Constraints: source Office documents remain read-only; no broad filesystem mutation tools; any external agent access should be opt-in, local-only by default, and documented with clear trust boundaries.
@@ -35,6 +36,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 
 ## Completed / user-owned for now
 
+- External architecture review P0-P3 first implementation wave is complete enough for this pass; only scoped follow-up slices remain.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
 - Embedded-Python Windows packaging has been checked on DRM-policy PCs.
 - In-app update notice and portable zip update flow are implemented.
