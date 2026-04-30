@@ -2215,7 +2215,10 @@ def get_comparison_artifact(
     expected_artifact_version: str = COMPARISON_ARTIFACT_VERSION,
     expected_parser_version: str = "",
 ) -> Dict[str, Any]:
-    conn = _connect()
+    try:
+        conn = _connect()
+    except sqlite3.OperationalError:
+        return {"status": "unavailable", "payload": None}
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     try:

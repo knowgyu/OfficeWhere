@@ -161,3 +161,41 @@ def test_artifact_version_mismatch_falls_back_with_warning(tmp_path, monkeypatch
     assert "artifact_version_mismatch" in warning_types
     assert "artifact_missing" in warning_types
     assert result["metadata"]["used_last_index_snapshot"] is False
+
+
+def test_compare_falls_back_when_artifact_database_is_unavailable(tmp_path, monkeypatch):
+    from backend.core.ppt_compare import compare_ppt_files
+    from backend.core.word_compare import compare_word_files
+    from backend import database
+
+    missing_dir = tmp_path / "missing-db-dir"
+    monkeypatch.setattr(database, "DB_DIR", missing_dir)
+    monkeypatch.setattr(database, "DB_PATH", missing_dir / "data.db")
+
+    left_word = tmp_path / "left.docx"
+    right_word = tmp_path / "right.docx"
+    _write_word(left_word, "본문 버전 A")
+    _write_word(right_word, "본문 버전 B")
+
+    word_result = compare_word_files([
+        {"id": 101, "path": str(left_word), "name": left_word.name, "file_type": "Word"},
+        {"id": 102, "path": str(right_word), "name": right_word.name, "file_type": "Word"},
+    ])
+
+    assert word_result["metadata"]["artifact_status"] == "unavailable"
+    assert word_result["metadata"]["used_last_index_snapshot"] is False
+    assert any(change["change_type"] == "replace" for change in word_result["changes"])
+
+    left_ppt = tmp_path / "left.pptx"
+    right_ppt = tmp_path / "right.pptx"
+    _write_ppt(left_ppt, "원본 본문")
+    _write_ppt(right_ppt, "수정 본문")
+
+    ppt_result = compare_ppt_files([
+        {"id": 201, "path": str(left_ppt), "name": left_ppt.name, "file_type": "PowerPoint"},
+        {"id": 202, "path": str(right_ppt), "name": right_ppt.name, "file_type": "PowerPoint"},
+    ])
+
+    assert ppt_result["metadata"]["artifact_status"] == "unavailable"
+    assert ppt_result["metadata"]["used_last_index_snapshot"] is False
+    assert any(change["change_type"] == "slide_update" for change in ppt_result["changes"])
