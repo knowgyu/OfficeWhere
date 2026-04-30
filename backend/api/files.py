@@ -1,6 +1,4 @@
 import os
-import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Annotated, List, Optional
@@ -42,25 +40,15 @@ from ..models.schemas import (
     SchemaResponse,
 )
 from ..runtime import get_worker_count
+from ..services.file_location_service import (
+    open_registered_file as open_registered_file_path,
+    show_registered_file_in_folder as show_registered_file_location,
+)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 DEFAULT_FILE_PAGE_LIMIT = 50
 MAX_FILE_PAGE_LIMIT = 100
-
-
-def _show_item_in_folder(path: Path) -> None:
-    if sys.platform == "win32":
-        # Explorer is picky about /select with paths containing spaces or
-        # non-ASCII characters.  Passing ["/select,<path>"] lets Python quote
-        # the whole argument, which Explorer can misread and fall back to the
-        # default Documents folder.  Keep the documented explorer syntax:
-        # explorer.exe /select,"C:\path\file.ext"
-        subprocess.Popen(f'explorer.exe /select,"{path}"')
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", "-R", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path.parent)])
 
 
 def _normalize_file_page_limit(limit: int) -> int:
@@ -329,20 +317,10 @@ def remove_all_files():
 @router.post("/{file_id}/open")
 def open_registered_file(file_id: int):
     file_row = get_file_by_id(file_id)
-    if not file_row:
-        raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
-
-    path = file_row["path"]
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail=f"파일이 삭제되었거나 경로가 변경되었습니다: {path}")
-
     try:
-        if sys.platform == "win32":
-            os.startfile(path)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
+        open_registered_file_path(file_row)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"파일을 열지 못했습니다: {exc}")
 
@@ -352,15 +330,10 @@ def open_registered_file(file_id: int):
 @router.post("/{file_id}/show-in-folder")
 def show_registered_file_in_folder(file_id: int):
     file_row = get_file_by_id(file_id)
-    if not file_row:
-        raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
-
-    path = Path(file_row["path"])
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"파일이 삭제되었거나 경로가 변경되었습니다: {path}")
-
     try:
-        _show_item_in_folder(path)
+        show_registered_file_location(file_row)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"폴더를 열지 못했습니다: {exc}")
 

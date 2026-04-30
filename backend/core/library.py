@@ -11,7 +11,6 @@ import uuid
 from collections import Counter
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -67,6 +66,12 @@ from .library_scanner import (
     collect_supported_paths_with_stats as _scanner_collect_supported_paths_with_stats,
 )
 from .library_settings import LAST_RESCAN_KEY, load_library_settings, save_library_settings
+from .rescan import (
+    PreparedLibraryWrite as _PreparedLibraryWrite,
+    RescanStatusCoordinator,
+    RescanWritePolicy,
+)
+from ..config import get_library_rescan_config
 from ..runtime import get_fast_worker_count, get_worker_count
 
 MANUAL_LATEST_SETTING_KEY = "library_manual_latest_files"
@@ -85,26 +90,19 @@ DEFAULT_GROUP_LIMIT = 50
 MAX_GROUP_LIMIT = 100
 MAX_GROUP_DETAIL_LIMIT = 200
 MAX_GROUP_SUMMARY_FINGERPRINT_FILES = 5
-BATCH_FLUSH_FILE_LIMIT = 24
-BATCH_FLUSH_CHUNK_LIMIT = 5000
-BATCH_FLUSH_INTERVAL_SECONDS = 1.0
-INITIAL_STAGING_FILE_THRESHOLD = 50
+_rescan_config = get_library_rescan_config()
+BATCH_FLUSH_FILE_LIMIT = _rescan_config.batch_flush_file_limit
+BATCH_FLUSH_CHUNK_LIMIT = _rescan_config.batch_flush_chunk_limit
+BATCH_FLUSH_INTERVAL_SECONDS = _rescan_config.batch_flush_interval_seconds
+INITIAL_STAGING_FILE_THRESHOLD = _rescan_config.initial_staging_file_threshold
 
-_rescan_status_lock = threading.Lock()
-_rescan_status: Dict[str, Any] = LibraryRescanStatus().model_dump()
-_rescan_execution_lock = threading.Lock()
-_cancel_event = threading.Event()
-
-
-@dataclass
-class _PreparedLibraryWrite:
-    path: str
-    name: str
-    action: str
-    payload: PreparedIndexedFile
-    metrics: Dict[str, Any]
-    file_started: float
-    ready_at: float
+_rescan_status_coordinator = RescanStatusCoordinator(lambda: LibraryRescanStatus().model_dump())
+# Compatibility aliases: tests and callers may still inspect/monkeypatch these
+# module-private objects while the coordination behavior lives in the seam.
+_rescan_status_lock = _rescan_status_coordinator.lock
+_rescan_status: Dict[str, Any] = _rescan_status_coordinator.status
+_rescan_execution_lock = _rescan_status_coordinator.execution_lock
+_cancel_event = _rescan_status_coordinator.cancel_event
 
 
 def _normalize_rescan_mode(mode: str = "normal") -> str:
@@ -121,8 +119,7 @@ def _now_iso() -> str:
 
 
 def _status_snapshot() -> LibraryRescanStatus:
-    with _rescan_status_lock:
-        return LibraryRescanStatus(**_rescan_status)
+    return LibraryRescanStatus(**_rescan_status_coordinator.snapshot())
 
 
 def get_library_rescan_status() -> LibraryRescanStatus:
@@ -130,10 +127,7 @@ def get_library_rescan_status() -> LibraryRescanStatus:
 
 
 def _update_rescan_status(patch: Dict[str, Any]) -> LibraryRescanStatus:
-    with _rescan_status_lock:
-        _rescan_status.update(patch)
-        _rescan_status["updated_at"] = _now_iso()
-        return LibraryRescanStatus(**_rescan_status)
+    return LibraryRescanStatus(**_rescan_status_coordinator.update(patch, now_iso=_now_iso))
 
 
 def _estimate_eta_seconds(started_monotonic: float, processed: int, total: int) -> Optional[int]:
@@ -693,24 +687,27 @@ def _rescan_library_impl(
     def _write_buffer_chunk_count() -> int:
         return sum(item.payload.chunk_count for item in write_buffer)
 
+    def _write_policy() -> RescanWritePolicy:
+        return RescanWritePolicy(
+            file_limit=BATCH_FLUSH_FILE_LIMIT,
+            chunk_limit=BATCH_FLUSH_CHUNK_LIMIT,
+            interval_seconds=BATCH_FLUSH_INTERVAL_SECONDS,
+        )
+
     def _flush_reason_after_append() -> Optional[str]:
-        if not write_buffer:
-            return None
-        if _write_buffer_chunk_count() >= BATCH_FLUSH_CHUNK_LIMIT:
-            return "chunk_limit"
-        if len(write_buffer) >= BATCH_FLUSH_FILE_LIMIT:
-            return "file_limit"
-        if (time.perf_counter() - last_flush_at) >= BATCH_FLUSH_INTERVAL_SECONDS:
-            return "interval"
-        return None
+        return _write_policy().flush_reason_after_append(
+            file_count=len(write_buffer),
+            chunk_count=_write_buffer_chunk_count(),
+            elapsed_since_flush=time.perf_counter() - last_flush_at,
+        )
 
     def _append_prepared_write(item: _PreparedLibraryWrite) -> Optional[str]:
         current_chunk_count = _write_buffer_chunk_count()
         item_chunk_count = item.payload.chunk_count
-        if write_buffer and current_chunk_count + item_chunk_count > BATCH_FLUSH_CHUNK_LIMIT:
+        if _write_policy().should_flush_before_append(current_chunk_count, item_chunk_count) and write_buffer:
             _flush_write_buffer("chunk_limit")
         write_buffer.append(item)
-        if item_chunk_count >= BATCH_FLUSH_CHUNK_LIMIT:
+        if _write_policy().is_single_large_file(item_chunk_count):
             return "single_large_file"
         return _flush_reason_after_append()
 
@@ -1136,33 +1133,30 @@ def start_library_rescan(mode: str = "normal") -> LibraryRescanStatus:
     mode = _normalize_rescan_mode(mode)
     settings = load_library_settings()
     worker_count = _rescan_worker_count(mode, settings)
-    with _rescan_status_lock:
-        if _rescan_status.get("running"):
-            return LibraryRescanStatus(**_rescan_status)
-        if not _rescan_execution_lock.acquire(blocking=False):
-            return LibraryRescanStatus(
-                running=True,
-                stage="queued",
-                message="이미 문서 새로고침이 실행 중입니다.",
-                mode=mode,
-                worker_count=worker_count,
-                started_at=_now_iso(),
-                updated_at=_now_iso(),
-            )
-
-        _cancel_event.clear()
-        _rescan_status.clear()
-        _rescan_status.update(
-            LibraryRescanStatus(
-                running=True,
-                stage="queued",
-                message="대상 폴더 색인을 준비하는 중입니다." if mode == "normal" else "고속 색인을 준비하는 중입니다.",
-                mode=mode,
-                worker_count=worker_count,
-                started_at=_now_iso(),
-                updated_at=_now_iso(),
-            ).model_dump()
-        )
+    queued_status = LibraryRescanStatus(
+        running=True,
+        stage="queued",
+        message="이미 문서 새로고침이 실행 중입니다.",
+        mode=mode,
+        worker_count=worker_count,
+        started_at=_now_iso(),
+        updated_at=_now_iso(),
+    ).model_dump()
+    initial_status = LibraryRescanStatus(
+        running=True,
+        stage="queued",
+        message="대상 폴더 색인을 준비하는 중입니다." if mode == "normal" else "고속 색인을 준비하는 중입니다.",
+        mode=mode,
+        worker_count=worker_count,
+        started_at=_now_iso(),
+        updated_at=_now_iso(),
+    ).model_dump()
+    start_status, acquired = _rescan_status_coordinator.begin_or_current(
+        initial_status,
+        already_running_status=queued_status,
+    )
+    if not acquired:
+        return LibraryRescanStatus(**start_status)
 
     thread = threading.Thread(target=_run_rescan_job, args=(mode, True), daemon=True, name="library-rescan")
     thread.start()
@@ -1170,19 +1164,16 @@ def start_library_rescan(mode: str = "normal") -> LibraryRescanStatus:
 
 
 def cancel_library_rescan() -> LibraryRescanStatus:
-    with _rescan_status_lock:
-        if not _rescan_status.get("running"):
-            return LibraryRescanStatus(**_rescan_status)
-        _cancel_event.set()
-        _rescan_status.update(
+    return LibraryRescanStatus(
+        **_rescan_status_coordinator.request_cancel(
             {
                 "stage": "cancelling",
                 "message": "정지 요청을 처리하는 중입니다.",
                 "cancel_requested": True,
-                "updated_at": _now_iso(),
-            }
+            },
+            now_iso=_now_iso,
         )
-        return LibraryRescanStatus(**_rescan_status)
+    )
 
 def _bounded_limit(limit: int, *, default: int = DEFAULT_GROUP_LIMIT, maximum: int = MAX_GROUP_LIMIT) -> int:
     if limit < 1:
@@ -1632,10 +1623,7 @@ _group_refresh_pending_full = False
 
 
 def _is_library_rescan_active() -> bool:
-    with _rescan_status_lock:
-        if bool(_rescan_status.get("running")):
-            return True
-    return _rescan_execution_lock.locked()
+    return _rescan_status_coordinator.is_active()
 
 
 def _mark_dirty_for_file_changes(

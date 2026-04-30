@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import backend_server
+from backend.config import get_library_rescan_config
 from backend import database
 from backend.main import example_library_path
 from backend.runtime import get_fast_worker_count, get_worker_count, normalize_fast_worker_count
@@ -65,6 +66,20 @@ def test_fast_worker_count_normalizes_ui_bounds_and_steps(monkeypatch):
     assert normalize_fast_worker_count(2) == 4
     assert normalize_fast_worker_count(26) == 28
     assert normalize_fast_worker_count(99) == 32
+
+
+def test_library_rescan_config_uses_narrow_ow_env_overrides(monkeypatch):
+    monkeypatch.setenv("OW_RESCAN_BATCH_FLUSH_FILE_LIMIT", "7")
+    monkeypatch.setenv("OW_RESCAN_BATCH_FLUSH_CHUNK_LIMIT", "100")
+    monkeypatch.setenv("OW_RESCAN_BATCH_FLUSH_INTERVAL_SECONDS", "0.25")
+    monkeypatch.setenv("OW_RESCAN_INITIAL_STAGING_FILE_THRESHOLD", "12")
+
+    config = get_library_rescan_config()
+
+    assert config.batch_flush_file_limit == 7
+    assert config.batch_flush_chunk_limit == 100
+    assert config.batch_flush_interval_seconds == 0.25
+    assert config.initial_staging_file_threshold == 12
 
 
 def test_example_library_path_uses_repo_examples():

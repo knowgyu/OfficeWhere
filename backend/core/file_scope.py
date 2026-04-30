@@ -4,48 +4,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
-SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".docx", ".pptx"}
-SUPPORTED_EXTENSIONS_LABEL = ".xlsx, .xls, .docx, .pptx"
-
-DEFAULT_EXCLUDED_FOLDER_NAMES = [
-    ".git",
-    ".svn",
-    ".hg",
-    "node_modules",
-    "bower_components",
-    "vendor",
-    "venv",
-    ".venv",
-    "env",
-    ".tox",
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".cache",
-    "dist",
-    "build",
-    "out",
-    "target",
-    "bin",
-    "obj",
-    ".next",
-    ".nuxt",
-    ".gradle",
-    ".m2",
-    ".cargo",
-    ".rustup",
-    ".vscode",
-    ".idea",
-    ".vs",
-    "AppData",
-    "Library",
-    "Application Support",
-    ".codex",
-    ".claude",
-    ".omx",
-    ".omc",
-]
+from ..file_constants import DEFAULT_EXCLUDED_FOLDER_NAMES, SUPPORTED_EXTENSIONS, SUPPORTED_EXTENSIONS_LABEL
 
 
 def normalize_excluded_folder_names(values: Iterable[str] | None) -> list[str]:

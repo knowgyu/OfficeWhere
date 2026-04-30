@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -11,6 +12,8 @@ from .file_scope import (
 )
 from .parser import get_file_schema, get_file_type
 from ..runtime import get_worker_count
+
+logger = logging.getLogger(__name__)
 
 
 def inspect_file_path(path: str) -> Dict[str, Any]:
@@ -100,12 +103,14 @@ def _scan_supported_paths(
         try:
             iterator = list(folder.iterdir())
         except OSError:
+            logger.debug("folder scan skipped unreadable directory", extra={"path": str(folder)}, exc_info=True)
             return []
         output: List[Path] = []
         for path in iterator:
             try:
                 is_file = path.is_file()
             except OSError:
+                logger.debug("folder scan skipped unreadable path", extra={"path": str(path)}, exc_info=True)
                 continue
             if is_file and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 output.append(path)
@@ -117,6 +122,7 @@ def _scan_supported_paths(
         try:
             iterator = list(current.iterdir())
         except OSError:
+            logger.debug("folder scan skipped unreadable directory", extra={"path": str(current)}, exc_info=True)
             continue
         for path in iterator:
             if should_exclude_dir(path, excluded):
@@ -124,11 +130,13 @@ def _scan_supported_paths(
             try:
                 is_dir = path.is_dir()
             except OSError:
+                logger.debug("folder scan skipped stat failure", extra={"path": str(path)}, exc_info=True)
                 continue
             if is_dir:
                 try:
                     is_symlink = path.is_symlink()
                 except OSError:
+                    logger.debug("folder scan skipped symlink check failure", extra={"path": str(path)}, exc_info=True)
                     continue
                 if not is_symlink:
                     stack.append(path)
@@ -136,6 +144,7 @@ def _scan_supported_paths(
             try:
                 is_file = path.is_file()
             except OSError:
+                logger.debug("folder scan skipped file check failure", extra={"path": str(path)}, exc_info=True)
                 continue
             if is_file and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 found.append(path)
@@ -157,6 +166,7 @@ def scan_folder(
         if not folder.is_dir():
             raise ValueError(f"폴더가 아닙니다: {folder_path}")
     except PermissionError:
+        logger.debug("folder scan skipped path with permission error", extra={"path": str(folder)}, exc_info=True)
         return []
 
     found = _scan_supported_paths(folder, recursive=recursive, excluded_folder_names=excluded_folder_names)

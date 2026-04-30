@@ -1,11 +1,11 @@
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
 import threading
 import uuid
-import zlib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -15,6 +15,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .core.hangul_search import build_search_text, build_trigram_search_text, make_search_snippet
 from .core.index_perf import elapsed_ms, log_index_perf
+from .storage import comparison_artifacts as artifact_storage
+
+logger = logging.getLogger(__name__)
 
 
 def _default_db_dir() -> Path:
@@ -225,6 +228,18 @@ def _write_connection():
             yield conn
         finally:
             conn.close()
+
+
+@contextmanager
+def _read_connection(*, row_factory: Optional[type] = None):
+    """Open a SQLite read connection and always close it on success/failure."""
+    conn = _connect()
+    if row_factory is not None:
+        conn.row_factory = row_factory
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _registered_files_columns(cursor: sqlite3.Cursor) -> set[str]:
@@ -445,24 +460,10 @@ def _normalize_excel_cell_rows(cells: Optional[Sequence[Dict[str, Any]]]) -> Lis
 
 
 def _normalize_comparison_artifacts(artifacts: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    normalized: List[Dict[str, Any]] = []
-    for artifact in artifacts or []:
-        artifact_kind = str(artifact.get("artifact_kind") or artifact.get("kind") or "").strip()
-        file_type = str(artifact.get("file_type") or "").strip()
-        payload = artifact.get("payload")
-        if not artifact_kind or not file_type or not isinstance(payload, dict):
-            continue
-        normalized.append(
-            {
-                "artifact_kind": artifact_kind,
-                "file_type": file_type,
-                "artifact_version": str(artifact.get("artifact_version") or COMPARISON_ARTIFACT_VERSION),
-                "parser_version": str(artifact.get("parser_version") or ""),
-                "payload": payload,
-                "source_mtime": artifact.get("source_mtime"),
-            }
-        )
-    return normalized
+    return artifact_storage.normalize_comparison_artifacts(
+        artifacts,
+        default_artifact_version=COMPARISON_ARTIFACT_VERSION,
+    )
 
 
 def _column_letter_for_index(index: int) -> str:
@@ -601,8 +602,7 @@ def _replace_excel_index(
 
 
 def _artifact_payload_bytes(payload: Dict[str, Any]) -> Tuple[bytes, bytes]:
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return raw, zlib.compress(raw)
+    return artifact_storage.artifact_payload_bytes(payload)
 
 
 def _replace_comparison_artifacts(
@@ -613,56 +613,13 @@ def _replace_comparison_artifacts(
     source_mtime: Optional[float],
     updated_at: str,
 ) -> None:
-    cursor.execute("DELETE FROM comparison_artifacts WHERE file_id = ?", (file_id,))
-    if not artifacts:
-        return
-
-    rows = []
-    for artifact in artifacts:
-        payload = artifact.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        raw, compressed = _artifact_payload_bytes(payload)
-        artifact_source_mtime = artifact.get("source_mtime")
-        if artifact_source_mtime is None:
-            artifact_source_mtime = source_mtime
-        rows.append(
-            (
-                file_id,
-                str(artifact["artifact_kind"]),
-                str(artifact["file_type"]),
-                str(artifact.get("artifact_version") or COMPARISON_ARTIFACT_VERSION),
-                str(artifact.get("parser_version") or ""),
-                artifact_source_mtime,
-                compressed,
-                len(raw),
-                len(compressed),
-                updated_at,
-                updated_at,
-            )
-        )
-
-    if not rows:
-        return
-    cursor.executemany(
-        """
-        INSERT INTO comparison_artifacts (
-            file_id, artifact_kind, file_type, artifact_version, parser_version,
-            source_mtime, payload_compressed, raw_size_bytes, compressed_size_bytes,
-            created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(file_id, artifact_kind) DO UPDATE SET
-            file_type=excluded.file_type,
-            artifact_version=excluded.artifact_version,
-            parser_version=excluded.parser_version,
-            source_mtime=excluded.source_mtime,
-            payload_compressed=excluded.payload_compressed,
-            raw_size_bytes=excluded.raw_size_bytes,
-            compressed_size_bytes=excluded.compressed_size_bytes,
-            updated_at=excluded.updated_at
-        """,
-        rows,
+    artifact_storage.replace_comparison_artifacts(
+        cursor,
+        file_id,
+        artifacts,
+        default_artifact_version=COMPARISON_ARTIFACT_VERSION,
+        source_mtime=source_mtime,
+        updated_at=updated_at,
     )
 
 
@@ -1200,15 +1157,14 @@ def init_db():
 
 
 def get_library_group_index_status() -> Dict[str, str]:
-    conn = _connect()
-    cursor = conn.cursor()
-    status = {
-        "version": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_VERSION_KEY, ""),
-        "state": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_STATE_KEY, "missing"),
-        "updated_at": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_UPDATED_AT_KEY, ""),
-        "error": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_ERROR_KEY, ""),
-    }
-    conn.close()
+    with _read_connection() as conn:
+        cursor = conn.cursor()
+        status = {
+            "version": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_VERSION_KEY, ""),
+            "state": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_STATE_KEY, "missing"),
+            "updated_at": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_UPDATED_AT_KEY, ""),
+            "error": _get_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_ERROR_KEY, ""),
+        }
     if status["version"] and status["version"] != LIBRARY_GROUP_INDEX_VERSION:
         status["state"] = "repair_needed"
         status["error"] = "derived index version mismatch"
@@ -1246,17 +1202,16 @@ def mark_library_group_keys_dirty(keys: Sequence[Tuple[str, str, str]]) -> int:
 
 
 def list_library_group_dirty_keys() -> List[Tuple[str, str, str]]:
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT group_kind, file_type, base_name
-        FROM library_group_dirty_keys
-        ORDER BY marked_at ASC
-        """
-    )
-    rows = [(str(row[0]), str(row[1]), str(row[2])) for row in cursor.fetchall()]
-    conn.close()
+    with _read_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT group_kind, file_type, base_name
+            FROM library_group_dirty_keys
+            ORDER BY marked_at ASC
+            """
+        )
+        rows = [(str(row[0]), str(row[1]), str(row[2])) for row in cursor.fetchall()]
     return rows
 
 
@@ -1357,53 +1312,57 @@ def delete_library_group_index_files(file_ids: Sequence[int]) -> None:
 
 
 def get_library_group_index_file(file_id: int) -> Optional[Dict[str, Any]]:
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM library_group_index_files WHERE file_id=?", (int(file_id),))
-    row = cursor.fetchone()
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM library_group_index_files WHERE file_id=?", (int(file_id),))
+        row = cursor.fetchone()
     if not row:
         return None
     data = dict(row)
     try:
         data["file"] = json.loads(data["file_json"])
-    except (TypeError, json.JSONDecodeError):
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "library group file fact JSON is corrupt",
+            extra={"file_id": int(file_id), "error": str(exc)},
+        )
         set_library_group_index_state("repair_needed", error="corrupt file fact JSON")
         return None
     return data
 
 
 def list_library_group_index_files_for_key(group_kind: str, file_type: str, base_name: str) -> List[Dict[str, Any]]:
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    if group_kind == "exact_name_conflict":
-        cursor.execute(
-            """
-            SELECT * FROM library_group_index_files
-            WHERE file_type=? AND exact_key=?
-            ORDER BY name COLLATE NOCASE ASC, file_id ASC
-            """,
-            (file_type, base_name),
-        )
-    else:
-        cursor.execute(
-            """
-            SELECT * FROM library_group_index_files
-            WHERE file_type=? AND version_key=?
-            ORDER BY name COLLATE NOCASE ASC, file_id ASC
-            """,
-            (file_type, base_name),
-        )
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        if group_kind == "exact_name_conflict":
+            cursor.execute(
+                """
+                SELECT * FROM library_group_index_files
+                WHERE file_type=? AND exact_key=?
+                ORDER BY name COLLATE NOCASE ASC, file_id ASC
+                """,
+                (file_type, base_name),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT * FROM library_group_index_files
+                WHERE file_type=? AND version_key=?
+                ORDER BY name COLLATE NOCASE ASC, file_id ASC
+                """,
+                (file_type, base_name),
+            )
+        rows = [dict(row) for row in cursor.fetchall()]
 
     parsed: List[Dict[str, Any]] = []
     for row in rows:
         try:
             row["file"] = json.loads(row["file_json"])
-        except (TypeError, json.JSONDecodeError):
+        except (TypeError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "library group file fact JSON is corrupt",
+                extra={"group_kind": group_kind, "file_type": file_type, "base_name": base_name, "error": str(exc)},
+            )
             set_library_group_index_state("repair_needed", error="corrupt file fact JSON")
             return []
         parsed.append(row)
@@ -1411,11 +1370,10 @@ def list_library_group_index_files_for_key(group_kind: str, file_type: str, base
 
 
 def list_library_group_index_file_ids() -> List[int]:
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute("SELECT file_id FROM library_group_index_files")
-    ids = [int(row[0]) for row in cursor.fetchall()]
-    conn.close()
+    with _read_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_id FROM library_group_index_files")
+        ids = [int(row[0]) for row in cursor.fetchall()]
     return ids
 
 
@@ -1586,24 +1544,23 @@ def list_indexed_library_groups() -> List[Dict[str, Any]]:
         set_library_group_index_state("repair_needed", error="derived index version mismatch")
         return []
 
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT *
-        FROM library_group_index
-        WHERE index_version=?
-        ORDER BY updated_at DESC
-        """,
-        (LIBRARY_GROUP_INDEX_VERSION,),
-    )
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM library_group_index
+            WHERE index_version=?
+            ORDER BY updated_at DESC
+            """,
+            (LIBRARY_GROUP_INDEX_VERSION,),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
     for row in rows:
         try:
             row["group"] = json.loads(row["group_json"])
-        except (TypeError, json.JSONDecodeError):
+        except (TypeError, json.JSONDecodeError) as exc:
+            logger.warning("library group JSON is corrupt", extra={"group_id": row.get("group_id"), "error": str(exc)})
             set_library_group_index_state("repair_needed", error="corrupt group JSON")
             return []
     return rows
@@ -1680,6 +1637,7 @@ def _safe_json_list(value: Any) -> List[str]:
     try:
         parsed = json.loads(value) if isinstance(value, str) else value
     except (TypeError, json.JSONDecodeError):
+        logger.debug("library group summary JSON list is corrupt", extra={"value_type": type(value).__name__}, exc_info=True)
         return []
     if not isinstance(parsed, list):
         return []
@@ -1690,6 +1648,7 @@ def _safe_json_dict(value: Any) -> Optional[Dict[str, Any]]:
     try:
         parsed = json.loads(value) if isinstance(value, str) else value
     except (TypeError, json.JSONDecodeError):
+        logger.debug("library group summary JSON object is corrupt", extra={"value_type": type(value).__name__}, exc_info=True)
         return None
     return parsed if isinstance(parsed, dict) else None
 
@@ -1719,71 +1678,69 @@ def list_library_group_summaries(
     )
     order_sql = _library_group_sort_sql(sort)
 
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        f"""
-        SELECT COUNT(*)
-        FROM library_group_index gi
-        WHERE {where_sql}
-        """,
-        params,
-    )
-    total = int(cursor.fetchone()[0] or 0)
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM library_group_index gi
+            WHERE {where_sql}
+            """,
+            params,
+        )
+        total = int(cursor.fetchone()[0] or 0)
 
-    cursor.execute(
-        f"""
-        SELECT gi.group_kind, COUNT(*) AS count
-        FROM library_group_index gi
-        WHERE {where_sql}
-        GROUP BY gi.group_kind
-        """,
-        params,
-    )
-    counts_by_kind = {str(row["group_kind"]): int(row["count"] or 0) for row in cursor.fetchall()}
+        cursor.execute(
+            f"""
+            SELECT gi.group_kind, COUNT(*) AS count
+            FROM library_group_index gi
+            WHERE {where_sql}
+            GROUP BY gi.group_kind
+            """,
+            params,
+        )
+        counts_by_kind = {str(row["group_kind"]): int(row["count"] or 0) for row in cursor.fetchall()}
 
-    cursor.execute(
-        f"""
-        SELECT
-            gi.group_id,
-            gi.group_kind,
-            gi.file_type,
-            gi.base_name,
-            gi.canonical_name,
-            gi.title,
-            gi.confidence,
-            gi.reason,
-            gi.file_count,
-            gi.latest_file_id,
-            gi.previous_file_id,
-            gi.manual_latest_file_id,
-            gi.tokens_summary_json,
-            gi.content_status,
-            gi.fingerprint_coverage,
-            gi.fingerprint_unique_count,
-            gi.content_evidence,
-            gi.recommended_action,
-            gi.updated_at,
-            latest.file_json AS latest_file_json,
-            previous.file_json AS previous_file_json
-        FROM library_group_index gi
-        LEFT JOIN library_group_index_files latest ON latest.file_id = gi.latest_file_id
-        LEFT JOIN library_group_index_files previous ON previous.file_id = gi.previous_file_id
-        WHERE {where_sql}
-        ORDER BY {order_sql}
-        LIMIT ? OFFSET ?
-        """,
-        [*params, safe_limit, safe_offset],
-    )
-    rows = []
-    for row in cursor.fetchall():
-        data = dict(row)
-        data["tokens_summary"] = _safe_json_list(data.pop("tokens_summary_json", "[]"))
-        data["latest_file"] = _safe_json_dict(data.pop("latest_file_json", None))
-        data["previous_file"] = _safe_json_dict(data.pop("previous_file_json", None))
-        rows.append(data)
-    conn.close()
+        cursor.execute(
+            f"""
+            SELECT
+                gi.group_id,
+                gi.group_kind,
+                gi.file_type,
+                gi.base_name,
+                gi.canonical_name,
+                gi.title,
+                gi.confidence,
+                gi.reason,
+                gi.file_count,
+                gi.latest_file_id,
+                gi.previous_file_id,
+                gi.manual_latest_file_id,
+                gi.tokens_summary_json,
+                gi.content_status,
+                gi.fingerprint_coverage,
+                gi.fingerprint_unique_count,
+                gi.content_evidence,
+                gi.recommended_action,
+                gi.updated_at,
+                latest.file_json AS latest_file_json,
+                previous.file_json AS previous_file_json
+            FROM library_group_index gi
+            LEFT JOIN library_group_index_files latest ON latest.file_id = gi.latest_file_id
+            LEFT JOIN library_group_index_files previous ON previous.file_id = gi.previous_file_id
+            WHERE {where_sql}
+            ORDER BY {order_sql}
+            LIMIT ? OFFSET ?
+            """,
+            [*params, safe_limit, safe_offset],
+        )
+        rows = []
+        for row in cursor.fetchall():
+            data = dict(row)
+            data["tokens_summary"] = _safe_json_list(data.pop("tokens_summary_json", "[]"))
+            data["latest_file"] = _safe_json_dict(data.pop("latest_file_json", None))
+            data["previous_file"] = _safe_json_dict(data.pop("previous_file_json", None))
+            rows.append(data)
 
     return {
         "total": total,
@@ -1793,25 +1750,24 @@ def list_library_group_summaries(
 
 
 def get_indexed_library_group(group_id: str) -> Optional[Dict[str, Any]]:
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT *
-        FROM library_group_index
-        WHERE group_id=? AND index_version=?
-        """,
-        (group_id, LIBRARY_GROUP_INDEX_VERSION),
-    )
-    row = cursor.fetchone()
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM library_group_index
+            WHERE group_id=? AND index_version=?
+            """,
+            (group_id, LIBRARY_GROUP_INDEX_VERSION),
+        )
+        row = cursor.fetchone()
     if not row:
         return None
     data = dict(row)
     try:
         data["group"] = json.loads(data["group_json"])
-    except (TypeError, json.JSONDecodeError):
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.warning("library group JSON is corrupt", extra={"group_id": group_id, "error": str(exc)})
         set_library_group_index_state("repair_needed", error="corrupt group JSON")
         return None
     return data
@@ -1833,15 +1789,13 @@ def begin_initial_index_staging() -> InitialIndexStagingDatabase:
 
     settings_rows: List[Tuple[str, str]] = []
     if DB_PATH.exists():
-        source = _connect()
         try:
-            source_cursor = source.cursor()
-            source_cursor.execute("SELECT key, value FROM settings")
-            settings_rows = [(str(row[0]), str(row[1])) for row in source_cursor.fetchall()]
+            with _read_connection() as source:
+                source_cursor = source.cursor()
+                source_cursor.execute("SELECT key, value FROM settings")
+                settings_rows = [(str(row[0]), str(row[1])) for row in source_cursor.fetchall()]
         except sqlite3.Error:
             settings_rows = []
-        finally:
-            source.close()
     if settings_rows:
         cursor.executemany(
             """
@@ -2014,30 +1968,26 @@ def save_indexed_files_batch(payloads: Sequence[PreparedIndexedFile]) -> List[in
 
 
 def get_all_files() -> List[Dict[str, Any]]:
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM registered_files ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM registered_files ORDER BY created_at DESC")
+        rows = cursor.fetchall()
     return [_normalize_file_row(dict(row)) for row in rows]
 
 
 def get_registered_files_signature() -> str:
     """Return a cheap stable signature for group-cache invalidation."""
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT id, path, name, file_type, column_count,
-               created_at, file_mtime
-        FROM registered_files
-        ORDER BY id
-        """
-    )
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, path, name, file_type, column_count,
+                   created_at, file_mtime
+            FROM registered_files
+            ORDER BY id
+            """
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
     payload = {
         "db_path": str(DB_PATH),
         "count": len(rows),
@@ -2087,22 +2037,20 @@ def list_files_page(
     offset: int = 0,
     sort: str = "created_at_desc",
 ) -> List[Dict[str, Any]]:
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    where_clause, params = _build_file_list_filters(query, file_types)
-    cursor.execute(
-        f"""
-        SELECT *
-        FROM registered_files
-        {where_clause}
-        ORDER BY {_file_list_order_by(sort)}
-        LIMIT ? OFFSET ?
-        """,
-        [*params, limit, offset],
-    )
-    rows = cursor.fetchall()
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        where_clause, params = _build_file_list_filters(query, file_types)
+        cursor.execute(
+            f"""
+            SELECT *
+            FROM registered_files
+            {where_clause}
+            ORDER BY {_file_list_order_by(sort)}
+            LIMIT ? OFFSET ?
+            """,
+            [*params, limit, offset],
+        )
+        rows = cursor.fetchall()
     return [_normalize_file_row(dict(row)) for row in rows]
 
 
@@ -2110,12 +2058,11 @@ def count_files(
     query: str = "",
     file_types: Optional[Sequence[str]] = None,
 ) -> int:
-    conn = _connect()
-    cursor = conn.cursor()
-    where_clause, params = _build_file_list_filters(query, file_types)
-    cursor.execute(f"SELECT COUNT(*) FROM registered_files{where_clause}", params)
-    total = int(cursor.fetchone()[0])
-    conn.close()
+    with _read_connection() as conn:
+        cursor = conn.cursor()
+        where_clause, params = _build_file_list_filters(query, file_types)
+        cursor.execute(f"SELECT COUNT(*) FROM registered_files{where_clause}", params)
+        total = int(cursor.fetchone()[0])
     return total
 
 
@@ -2123,30 +2070,27 @@ def count_files_by_type(
     query: str = "",
     file_types: Optional[Sequence[str]] = None,
 ) -> Dict[str, int]:
-    conn = _connect()
-    cursor = conn.cursor()
-    where_clause, params = _build_file_list_filters(query, file_types)
-    cursor.execute(
-        f"""
-        SELECT file_type, COUNT(*) AS count
-        FROM registered_files
-        {where_clause}
-        GROUP BY file_type
-        """,
-        params,
-    )
-    counts = {str(row[0]): int(row[1]) for row in cursor.fetchall()}
-    conn.close()
+    with _read_connection() as conn:
+        cursor = conn.cursor()
+        where_clause, params = _build_file_list_filters(query, file_types)
+        cursor.execute(
+            f"""
+            SELECT file_type, COUNT(*) AS count
+            FROM registered_files
+            {where_clause}
+            GROUP BY file_type
+            """,
+            params,
+        )
+        counts = {str(row[0]): int(row[1]) for row in cursor.fetchall()}
     return counts
 
 
 def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM registered_files WHERE id=?", (file_id,))
-    row = cursor.fetchone()
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM registered_files WHERE id=?", (file_id,))
+        row = cursor.fetchone()
     return _normalize_file_row(dict(row)) if row else None
 
 
@@ -2155,23 +2099,21 @@ def get_excel_sheet_index(file_ids: Sequence[int]) -> Dict[int, List[Dict[str, A
     if not ids:
         return {}
 
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    rows: List[sqlite3.Row] = []
-    for batch in _batched_values(ids):
-        placeholders = ",".join("?" for _ in batch)
-        cursor.execute(
-            f"""
-            SELECT *
-            FROM excel_sheet_index
-            WHERE file_id IN ({placeholders})
-            ORDER BY file_id, sheet_index, sheet_name
-            """,
-            batch,
-        )
-        rows.extend(cursor.fetchall())
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        rows: List[sqlite3.Row] = []
+        for batch in _batched_values(ids):
+            placeholders = ",".join("?" for _ in batch)
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM excel_sheet_index
+                WHERE file_id IN ({placeholders})
+                ORDER BY file_id, sheet_index, sheet_name
+                """,
+                batch,
+            )
+            rows.extend(cursor.fetchall())
 
     result: Dict[int, List[Dict[str, Any]]] = {file_id: [] for file_id in ids}
     for row in rows:
@@ -2184,23 +2126,21 @@ def get_excel_cell_index(file_ids: Sequence[int]) -> Dict[int, List[Dict[str, An
     if not ids:
         return {}
 
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    rows: List[sqlite3.Row] = []
-    for batch in _batched_values(ids):
-        placeholders = ",".join("?" for _ in batch)
-        cursor.execute(
-            f"""
-            SELECT *
-            FROM excel_cell_index
-            WHERE file_id IN ({placeholders})
-            ORDER BY file_id, sheet_index, row_number, column_index
-            """,
-            batch,
-        )
-        rows.extend(cursor.fetchall())
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        rows: List[sqlite3.Row] = []
+        for batch in _batched_values(ids):
+            placeholders = ",".join("?" for _ in batch)
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM excel_cell_index
+                WHERE file_id IN ({placeholders})
+                ORDER BY file_id, sheet_index, row_number, column_index
+                """,
+                batch,
+            )
+            rows.extend(cursor.fetchall())
 
     result: Dict[int, List[Dict[str, Any]]] = {file_id: [] for file_id in ids}
     for row in rows:
@@ -2216,50 +2156,27 @@ def get_comparison_artifact(
     expected_parser_version: str = "",
 ) -> Dict[str, Any]:
     try:
-        conn = _connect()
-    except sqlite3.OperationalError:
-        return {"status": "unavailable", "payload": None}
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            """
-            SELECT *
-            FROM comparison_artifacts
-            WHERE file_id=? AND artifact_kind=?
-            """,
-            (int(file_id), str(artifact_kind)),
+        with _read_connection() as conn:
+            artifact = artifact_storage.fetch_comparison_artifact(
+                conn,
+                int(file_id),
+                str(artifact_kind),
+                expected_artifact_version=expected_artifact_version,
+                expected_parser_version=expected_parser_version,
+            )
+    except sqlite3.OperationalError as exc:
+        logger.warning(
+            "comparison artifact database unavailable",
+            extra={"file_id": int(file_id), "artifact_kind": str(artifact_kind), "error": str(exc)},
         )
-    except sqlite3.OperationalError:
-        conn.close()
         return {"status": "unavailable", "payload": None}
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return {"status": "missing", "payload": None}
 
-    data = dict(row)
-    if data.get("artifact_version") != expected_artifact_version:
-        return {"status": "artifact_version_mismatch", "payload": None, **data}
-    if expected_parser_version and data.get("parser_version") != expected_parser_version:
-        return {"status": "parser_version_mismatch", "payload": None, **data}
-
-    try:
-        raw = zlib.decompress(data["payload_compressed"])
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception:
+    if artifact.get("status") == "corrupt":
         with _write_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM comparison_artifacts WHERE file_id=? AND artifact_kind=?",
-                (int(file_id), str(artifact_kind)),
-            )
+            artifact_storage.delete_comparison_artifact(cursor, int(file_id), str(artifact_kind))
             conn.commit()
-        return {"status": "corrupt", "payload": None, **data}
-
-    if not isinstance(payload, dict):
-        return {"status": "corrupt", "payload": None, **data}
-    return {"status": "ok", "payload": payload, **data}
+    return artifact
 
 
 def save_comparison_artifact(
@@ -2321,21 +2238,19 @@ def search_file_names(
         params.append(modified_to)
     params.append(max(1, limit))
 
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        f"""
-        SELECT *
-        FROM registered_files
-        WHERE {' AND '.join(clauses)}
-        ORDER BY file_mtime DESC, created_at DESC, id DESC
-        LIMIT ?
-        """,
-        params,
-    )
-    rows = cursor.fetchall()
-    conn.close()
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT *
+            FROM registered_files
+            WHERE {' AND '.join(clauses)}
+            ORDER BY file_mtime DESC, created_at DESC, id DESC
+            LIMIT ?
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
     return [_normalize_file_row(dict(row)) for row in rows]
 
 
@@ -2468,16 +2383,19 @@ def update_file_mtime(file_id: int, mtime: float):
 
 
 def get_cached_comparison_result(cache_key: str) -> Optional[Dict[str, Any]]:
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute("SELECT result_json FROM comparison_cache WHERE cache_key = ?", (cache_key,))
-    row = cursor.fetchone()
-    conn.close()
+    with _read_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT result_json FROM comparison_cache WHERE cache_key = ?", (cache_key,))
+        row = cursor.fetchone()
     if not row:
         return None
     try:
         result = json.loads(row[0])
-    except (TypeError, json.JSONDecodeError):
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "comparison cache entry is corrupt",
+            extra={"cache_key": cache_key, "error": str(exc)},
+        )
         return None
     return result if isinstance(result, dict) else None
 
@@ -2593,22 +2511,19 @@ def save_cached_comparison_result(
 
 
 def get_file_fingerprints(file_ids: Optional[Sequence[int]] = None) -> Dict[int, Dict[str, Any]]:
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    rows: List[sqlite3.Row] = []
-    ids = [int(file_id) for file_id in file_ids] if file_ids is not None else None
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        rows: List[sqlite3.Row] = []
+        ids = [int(file_id) for file_id in file_ids] if file_ids is not None else None
 
-    if ids is None:
-        cursor.execute("SELECT * FROM document_fingerprints")
-        rows = cursor.fetchall()
-    elif ids:
-        for batch in _batched_values(ids):
-            placeholders = ",".join("?" for _ in batch)
-            cursor.execute(f"SELECT * FROM document_fingerprints WHERE file_id IN ({placeholders})", batch)
-            rows.extend(cursor.fetchall())
-
-    conn.close()
+        if ids is None:
+            cursor.execute("SELECT * FROM document_fingerprints")
+            rows = cursor.fetchall()
+        elif ids:
+            for batch in _batched_values(ids):
+                placeholders = ",".join("?" for _ in batch)
+                cursor.execute(f"SELECT * FROM document_fingerprints WHERE file_id IN ({placeholders})", batch)
+                rows.extend(cursor.fetchall())
     return {int(row["file_id"]): dict(row) for row in rows}
 
 
@@ -2878,11 +2793,10 @@ def search_chunks(
 
 
 def get_setting(key: str, default: str = "") -> str:
-    conn = _connect()
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = cursor.fetchone()
-    conn.close()
+    with _read_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
     return row[0] if row else default
 
 

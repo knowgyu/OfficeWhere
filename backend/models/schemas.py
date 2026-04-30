@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from ..core.file_scope import DEFAULT_EXCLUDED_FOLDER_NAMES
+from ..file_constants import DEFAULT_EXCLUDED_FOLDER_NAMES
 
 
 class FileRegisterRequest(BaseModel):

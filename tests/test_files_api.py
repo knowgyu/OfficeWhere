@@ -121,8 +121,11 @@ def test_show_in_folder_uses_platform_reveal_command(tmp_path, monkeypatch):
     class DummyProcess:
         pass
 
-    monkeypatch.setattr("backend.api.files.sys.platform", "darwin")
-    monkeypatch.setattr("backend.api.files.subprocess.Popen", lambda command: commands.append(command) or DummyProcess())
+    monkeypatch.setattr("backend.services.file_location_service.sys.platform", "darwin")
+    monkeypatch.setattr(
+        "backend.services.file_location_service.subprocess.Popen",
+        lambda command: commands.append(command) or DummyProcess(),
+    )
 
     response = show_registered_file_in_folder(file_id)
 
@@ -144,15 +147,18 @@ def test_show_in_folder_quotes_windows_select_command(tmp_path, monkeypatch):
         key_column="",
         column_count=1,
     )
-    commands: list[str] = []
+    commands: list[list[str]] = []
 
     class DummyProcess:
         pass
 
-    monkeypatch.setattr("backend.api.files.sys.platform", "win32")
-    monkeypatch.setattr("backend.api.files.subprocess.Popen", lambda command: commands.append(command) or DummyProcess())
+    monkeypatch.setattr("backend.services.file_location_service.sys.platform", "win32")
+    monkeypatch.setattr(
+        "backend.services.file_location_service.subprocess.Popen",
+        lambda command: commands.append(command) or DummyProcess(),
+    )
 
     response = show_registered_file_in_folder(file_id)
 
     assert response["message"] == "폴더 열기 요청을 보냈습니다."
-    assert commands == [f'explorer.exe /select,"{target}"']
+    assert commands == [["explorer.exe", f'/select,"{target}"']]
