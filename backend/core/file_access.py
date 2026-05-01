@@ -7,9 +7,8 @@ from .file_scope import (
     DEFAULT_EXCLUDED_FOLDER_NAMES,
     SUPPORTED_EXTENSIONS,
     SUPPORTED_EXTENSIONS_LABEL,
-    excluded_folder_key_set,
-    should_exclude_dir,
 )
+from .library_scanner import collect_supported_paths_with_stats
 from .parser import get_file_schema, get_file_type
 from ..runtime import get_worker_count
 
@@ -95,60 +94,13 @@ def _scan_supported_paths(
     recursive: bool,
     excluded_folder_names: List[str] | None = None,
 ) -> List[Path]:
-    excluded = excluded_folder_key_set(
-        DEFAULT_EXCLUDED_FOLDER_NAMES if excluded_folder_names is None else excluded_folder_names
+    scan = collect_supported_paths_with_stats(
+        str(folder),
+        recursive=recursive,
+        excluded_folder_names=DEFAULT_EXCLUDED_FOLDER_NAMES if excluded_folder_names is None else excluded_folder_names,
+        use_cache=False,
     )
-    found: List[Path] = []
-    if not recursive:
-        try:
-            iterator = list(folder.iterdir())
-        except OSError:
-            logger.debug("folder scan skipped unreadable directory", extra={"path": str(folder)}, exc_info=True)
-            return []
-        output: List[Path] = []
-        for path in iterator:
-            try:
-                is_file = path.is_file()
-            except OSError:
-                logger.debug("folder scan skipped unreadable path", extra={"path": str(path)}, exc_info=True)
-                continue
-            if is_file and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-                output.append(path)
-        return sorted(output)
-
-    stack = [folder]
-    while stack:
-        current = stack.pop()
-        try:
-            iterator = list(current.iterdir())
-        except OSError:
-            logger.debug("folder scan skipped unreadable directory", extra={"path": str(current)}, exc_info=True)
-            continue
-        for path in iterator:
-            if should_exclude_dir(path, excluded):
-                continue
-            try:
-                is_dir = path.is_dir()
-            except OSError:
-                logger.debug("folder scan skipped stat failure", extra={"path": str(path)}, exc_info=True)
-                continue
-            if is_dir:
-                try:
-                    is_symlink = path.is_symlink()
-                except OSError:
-                    logger.debug("folder scan skipped symlink check failure", extra={"path": str(path)}, exc_info=True)
-                    continue
-                if not is_symlink:
-                    stack.append(path)
-                continue
-            try:
-                is_file = path.is_file()
-            except OSError:
-                logger.debug("folder scan skipped file check failure", extra={"path": str(path)}, exc_info=True)
-                continue
-            if is_file and not path.name.startswith("~$") and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-                found.append(path)
-    return sorted(found)
+    return [Path(path) for path in scan.paths]
 
 
 def scan_folder(

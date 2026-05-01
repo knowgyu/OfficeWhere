@@ -16,7 +16,8 @@ This file tracks follow-up work that is not part of the formal release checklist
 - [ ] Follow the consolidated search/version performance roadmap when reopening performance work.
   - Durable decision record: `docs/search-version-performance-roadmap.md`.
   - Already landed in 0.6.x: Excel sparse diff + warnings, SQL-backed group list filtering/paging, PPT similarity guard, Word/PPT compressed comparison artifacts.
-  - Remaining future item from that roadmap: optional Everything/ES discovery accelerator, only after scanner strategy boundaries and license/redistribution checks.
+  - v0.6.8 scanner boundary work: default discovery now has an `os.scandir`/snapshot-cache direction with fallback-on-doubt.
+  - Remaining future item from that roadmap: optional Everything/ES discovery accelerator, only after Windows manual validation and SDK/license/redistribution checks.
   - Treat this as the source of truth instead of duplicating the same performance notes across `.omx/context`, `.omx/wiki`, or session notes.
 
 - [ ] Continue architecture cleanup only as scoped follow-up waves, not as a big-bang rewrite.
@@ -37,6 +38,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 ## Completed / user-owned for now
 
 - External architecture review P0-P3 first implementation wave and second responsibility-boundary refactor wave are complete enough for this pass; only scoped follow-up slices remain.
+- v0.6.8 default scanner improvement is complete enough for release prep; Everything remains a separate v0.7.0 candidate pending Windows manual validation.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
 - Embedded-Python Windows packaging has been checked on DRM-policy PCs.
 - In-app update notice and portable zip update flow are implemented.

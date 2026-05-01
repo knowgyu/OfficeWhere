@@ -35,6 +35,10 @@ This document is the source of truth for the 2026-04-30 external architecture re
 - Second refactor wave landed as another facade-first slice:
   - Library-group derived-index SQL/JSON mechanics moved behind `backend/storage/library_groups.py` while `backend/database.py` remains the public facade.
   - `FileManager` registered-file list rendering moved to `components/file-manager/RegisteredFilesSection.tsx`; controller state/API/dialog behavior remains in `FileManager.tsx`.
+- Scanner boundary/performance slice landed for v0.6.8:
+  - Default folder discovery moved toward `os.scandir` streaming traversal.
+  - Managed library rescans can reuse conservative app-owned directory snapshots only when validation is high-confidence; otherwise they fallback to full filesystem scan.
+  - One-shot folder scan now reuses the shared scanner filtering semantics.
 
 ## External review triage
 

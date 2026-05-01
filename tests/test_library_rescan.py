@@ -251,52 +251,227 @@ def test_classify_index_error_database_locked_is_specific():
     assert "새로고침" in diagnostic["error_hint"]
 
 
-def test_collect_supported_paths_filters_supported_files_once(tmp_path):
+def test_collect_supported_paths_filters_supported_files_once(tmp_path, monkeypatch):
     from pathlib import Path
 
     from backend.core.library import _collect_supported_paths
+    from backend.file_constants import SUPPORTED_EXTENSIONS
 
-    (tmp_path / "report.xlsx").write_text("x")
-    (tmp_path / "note.md").write_text("x")
-    (tmp_path / "~$temp.xlsx").write_text("x")
-    (tmp_path / "image.png").write_text("x")
-    nested = tmp_path / "nested"
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+
+    (scan_root / "report.xlsx").write_text("x")
+    (scan_root / "note.md").write_text("x")
+    (scan_root / "~$temp.xlsx").write_text("x")
+    (scan_root / "image.png").write_text("x")
+    nested = scan_root / "nested"
     nested.mkdir()
     (nested / "deck.pptx").write_text("x")
-    excluded = tmp_path / "node_modules"
+    excluded = scan_root / "node_modules"
     excluded.mkdir()
     (excluded / "hidden.docx").write_text("x")
-    similarly_named = tmp_path / "my-node_modules-docs"
+    similarly_named = scan_root / "my-node_modules-docs"
     similarly_named.mkdir()
     (similarly_named / "kept.docx").write_text("x")
 
-    recursive = _collect_supported_paths(str(tmp_path), recursive=True)
-    flat = _collect_supported_paths(str(tmp_path), recursive=False)
+    recursive = _collect_supported_paths(str(scan_root), recursive=True)
+    flat = _collect_supported_paths(str(scan_root), recursive=False)
 
-    assert {tmp_path / "report.xlsx", nested / "deck.pptx", similarly_named / "kept.docx"} == {
+    assert ".md" not in SUPPORTED_EXTENSIONS
+    assert {scan_root / "report.xlsx", nested / "deck.pptx", similarly_named / "kept.docx"} == {
         Path(path) for path in recursive
     }
-    assert {tmp_path / "report.xlsx"} == {Path(path) for path in flat}
+    assert {scan_root / "report.xlsx"} == {Path(path) for path in flat}
 
 
-def test_collect_supported_paths_skips_inaccessible_start_menu_junction(tmp_path, monkeypatch):
+def test_collect_supported_paths_uses_snapshot_for_unchanged_folder(tmp_path, monkeypatch):
     from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    target = scan_root / "report.xlsx"
+    target.write_text("x")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+
+    first = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+    assert first.cache_hit is False
+    assert {Path(path) for path in first.paths} == {target}
+
+    def fail_scandir(_path):
+        raise AssertionError("unchanged snapshot should avoid directory listing")
+
+    monkeypatch.setattr(library_scanner.os, "scandir", fail_scandir)
+
+    second = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert second.cache_hit is True
+    assert second.discovery_source == "snapshot_cache"
+    assert {Path(path) for path in second.paths} == {target}
+
+
+def test_collect_supported_paths_cache_reuse_write_failure_is_nonfatal(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    target = scan_root / "report.xlsx"
+    target.write_text("x")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+
+    first = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+    assert {Path(path) for path in first.paths} == {target}
+
+    def fail_mark_reused(_entry):
+        raise OSError("cache is temporarily read-only")
+
+    monkeypatch.setattr(library_scanner, "mark_reused", fail_mark_reused)
+
+    second = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert second.cache_hit is True
+    assert second.discovery_source == "snapshot_cache"
+    assert {Path(path) for path in second.paths} == {target}
+
+
+def test_collect_supported_paths_falls_back_when_directory_signature_changes(tmp_path, monkeypatch):
+    from pathlib import Path
+    import os
+    import time
 
     from backend.core.library import _collect_supported_paths_with_stats
 
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    first_file = scan_root / "report.xlsx"
+    first_file.write_text("x")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+
+    first = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+    assert {Path(path) for path in first.paths} == {first_file}
+
+    added = scan_root / "deck.pptx"
+    added.write_text("x")
+    next_mtime = time.time() + 3
+    os.utime(scan_root, (next_mtime, next_mtime))
+
+    second = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert second.cache_hit is False
+    assert second.cache_fallback_reason == "directory_signature_changed"
+    assert {Path(path) for path in second.paths} == {first_file, added}
+
+
+def test_collect_supported_paths_full_scan_escape_after_reuse_limit(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scan_cache
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    target = scan_root / "report.xlsx"
+    target.write_text("x")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setattr(library_scan_cache, "MAX_SNAPSHOT_REUSE_COUNT", 0)
+
+    _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+    second = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert second.cache_hit is False
+    assert second.cache_fallback_reason == "reuse_limit"
+    assert second.visited_dir_count == 1
+    assert {Path(path) for path in second.paths} == {target}
+
+
+def test_collect_supported_paths_keeps_symlinked_files(tmp_path, monkeypatch):
+    from pathlib import Path
+    import os
+
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    target = scan_root / "report.xlsx"
+    target.write_text("x")
+    link = scan_root / "linked.xlsx"
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("file symlink creation is unavailable on this platform")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+
+    result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert {Path(path) for path in result.paths} == {target, link}
+
+
+def test_scan_cache_disables_low_confidence_network_roots():
+    from backend.core.library_scan_cache import is_high_confidence_root
+
+    assert is_high_confidence_root("//server/share") is False
+    assert is_high_confidence_root(r"\\server\\share") is False
+
+
+def test_collect_supported_paths_skips_inaccessible_start_menu_junction(tmp_path, monkeypatch):
+    from backend.core import library_scanner
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path / "appdata")
     report = tmp_path / "report.docx"
     report.write_text("x")
     start_menu = tmp_path / "시작 메뉴"
     start_menu.mkdir()
 
-    original_is_dir = Path.is_dir
+    original_scandir = library_scanner.os.scandir
 
-    def guarded_is_dir(path):
-        if path == start_menu:
-            raise PermissionError("[WinError 5] 액세스가 거부되었습니다")
-        return original_is_dir(path)
+    class GuardedEntry:
+        def __init__(self, entry):
+            self._entry = entry
+            self.name = entry.name
+            self.path = entry.path
 
-    monkeypatch.setattr(Path, "is_dir", guarded_is_dir)
+        def is_dir(self, *args, **kwargs):
+            if self.path == str(start_menu):
+                raise PermissionError("[WinError 5] 액세스가 거부되었습니다")
+            return self._entry.is_dir(*args, **kwargs)
+
+        def is_file(self, *args, **kwargs):
+            return self._entry.is_file(*args, **kwargs)
+
+    class GuardedScandir:
+        def __init__(self, path):
+            self._iterator = original_scandir(path)
+
+        def __enter__(self):
+            return (GuardedEntry(entry) for entry in self._iterator.__enter__())
+
+        def __exit__(self, *args):
+            return self._iterator.__exit__(*args)
+
+    monkeypatch.setattr(library_scanner.os, "scandir", GuardedScandir)
 
     result = _collect_supported_paths_with_stats(str(tmp_path), recursive=True)
 
