@@ -111,9 +111,9 @@ def insert_group_index_rows(
                 confidence, reason, file_count, latest_file_id, previous_file_id,
                 manual_latest_file_id, tokens_summary_json, content_status,
                 fingerprint_coverage, fingerprint_unique_count, content_evidence,
-                recommended_action, group_json, index_version, updated_at
+                group_json, index_version, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(group_id) DO UPDATE SET
                 group_kind=excluded.group_kind,
                 file_type=excluded.file_type,
@@ -131,7 +131,6 @@ def insert_group_index_rows(
                 fingerprint_coverage=excluded.fingerprint_coverage,
                 fingerprint_unique_count=excluded.fingerprint_unique_count,
                 content_evidence=excluded.content_evidence,
-                recommended_action=excluded.recommended_action,
                 group_json=excluded.group_json,
                 index_version=excluded.index_version,
                 updated_at=excluded.updated_at
@@ -154,7 +153,6 @@ def insert_group_index_rows(
                 int(group["fingerprint_coverage"]),
                 int(group["fingerprint_unique_count"]),
                 str(group["content_evidence"]),
-                str(group["recommended_action"]),
                 group_json,
                 index_version,
                 updated_at,
@@ -203,7 +201,6 @@ def summary_filters(
                 OR lower(gi.group_kind) LIKE ?
                 OR lower(gi.tokens_summary_json) LIKE ?
                 OR lower(gi.content_evidence) LIKE ?
-                OR lower(gi.recommended_action) LIKE ?
                 OR EXISTS (
                     SELECT 1
                     FROM library_group_members gm
@@ -214,7 +211,7 @@ def summary_filters(
             )
             """
         )
-        params.extend([like, like, like, like, like, like, like, like, like, like])
+        params.extend([like, like, like, like, like, like, like, like, like])
     return " AND ".join(clauses), params
 
 

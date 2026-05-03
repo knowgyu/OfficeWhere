@@ -56,7 +56,6 @@ def _indexed_group_row(
         "fingerprint_coverage": 0,
         "fingerprint_unique_count": 0,
         "content_evidence": "",
-        "recommended_action": "변경점을 확인하세요.",
         "group_json": group_json if group_json is not None else {"id": group_id},
         "members": file_ids,
     }

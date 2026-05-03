@@ -90,7 +90,6 @@ export interface LibraryGroupSummary {
   fingerprint_coverage: number
   fingerprint_unique_count: number
   content_evidence: string
-  recommended_action: 'excel_integrate' | 'compare_latest'
 }
 
 export interface LibraryGroupDetail extends LibraryGroupSummary {

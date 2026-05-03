@@ -1173,10 +1173,6 @@ def _slug(value: str) -> str:
     return f"{base}-{digest}"
 
 
-def _recommended_action(file_type: str) -> str:
-    return "excel_integrate" if file_type == "Excel" else "compare_latest"
-
-
 def _tokens_summary(identities: List[Dict[str, Any]]) -> List[str]:
     seen: set[str] = set()
     summary: List[str] = []
@@ -1357,7 +1353,6 @@ def _group_detail(
         fingerprint_coverage=content["fingerprint_coverage"],
         fingerprint_unique_count=content["fingerprint_unique_count"],
         content_evidence=content["content_evidence"],
-        recommended_action=_recommended_action(file_type),
         manual_latest_file_id=manual_latest_file_id,
         files=ordered,
     )
@@ -1441,7 +1436,6 @@ def _group_index_row(group: LibraryGroupDetail) -> Dict[str, Any]:
         "fingerprint_coverage": group.fingerprint_coverage,
         "fingerprint_unique_count": group.fingerprint_unique_count,
         "content_evidence": group.content_evidence,
-        "recommended_action": group.recommended_action,
         "group_json": group.model_dump(),
         "members": [file.id for file in group.files],
     }
@@ -1867,7 +1861,6 @@ def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
         fingerprint_coverage=group.fingerprint_coverage,
         fingerprint_unique_count=group.fingerprint_unique_count,
         content_evidence=group.content_evidence,
-        recommended_action=group.recommended_action,
     )
 
 
@@ -1900,7 +1893,6 @@ def _group_summary_from_index_row(row: Dict[str, Any]) -> LibraryGroupSummary:
         fingerprint_coverage=int(row.get("fingerprint_coverage") or 0),
         fingerprint_unique_count=int(row.get("fingerprint_unique_count") or 0),
         content_evidence=str(row.get("content_evidence") or ""),
-        recommended_action=str(row.get("recommended_action") or ""),
     )
 
 

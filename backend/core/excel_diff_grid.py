@@ -22,7 +22,6 @@ MAX_SECTIONS = 8
 
 Position = Tuple[int, int]
 Range = Tuple[int, int, int, int]
-ColumnSource = Tuple[int, str]
 
 
 def _coerce_history(history: Any) -> Dict[str, Any]:
@@ -60,10 +59,10 @@ def _add_row_alias(lookup: Dict[str, int], value: Any, row_index: int) -> None:
         lookup[key] = row_index
 
 
-def _add_column_alias(lookup: Dict[str, ColumnSource], value: Any, column_index: int, source: str) -> None:
+def _add_column_alias(lookup: Dict[str, int], value: Any, column_index: int) -> None:
     key = normalize_key(str(value or ""))
     if key and key not in lookup:
-        lookup[key] = (column_index, source)
+        lookup[key] = column_index
 
 
 def _diff_change_type(before: str, after: str) -> str:
@@ -205,11 +204,11 @@ def _build_excel_diff_grid_for_sheet(
     row_count = used_row_count + DISPLAY_ROW_MARGIN if used_row_count > 0 else 0
     column_count = used_column_count + DISPLAY_COL_MARGIN if used_column_count > 0 else 0
     columns = [_column_letter(index) for index in range(1, column_count + 1)]
-    column_lookup: Dict[str, ColumnSource] = {}
+    column_lookup: Dict[str, int] = {}
     row_number_lookup: Dict[str, int] = {}
 
     for column_index, column in enumerate(columns):
-        _add_column_alias(column_lookup, column, column_index, "letter")
+        _add_column_alias(column_lookup, column, column_index)
     for row_index in range(row_count):
         _add_row_alias(row_number_lookup, row_index + 1, row_index)
 
@@ -229,7 +228,7 @@ def _build_excel_diff_grid_for_sheet(
             if sum(1 for value in row_values if value.strip()) < 2:
                 continue
             for column_index, value in enumerate(row_values):
-                _add_column_alias(column_lookup, value, column_index, "header")
+                _add_column_alias(column_lookup, value, column_index)
 
     for _info, dataframe, _config in used_ranges:
         register_header_aliases(dataframe)
@@ -242,7 +241,7 @@ def _build_excel_diff_grid_for_sheet(
         if not normalized_key or not column_ref:
             return None
 
-        column_index, _column_source = column_ref
+        column_index = column_ref
         row_index = row_number_lookup.get(normalized_key)
         if row_index is None:
             return None

@@ -430,7 +430,6 @@ class LibraryFileGroup(BaseModel):
     fingerprint_unique_count: int = 0
     content_evidence: str = ""
     files: List[FileInfo] = Field(default_factory=list)
-    recommended_action: str
 
 
 class LibraryGroupSummary(BaseModel):
@@ -451,7 +450,6 @@ class LibraryGroupSummary(BaseModel):
     fingerprint_coverage: int = 0
     fingerprint_unique_count: int = 0
     content_evidence: str = ""
-    recommended_action: str
 
 
 class LibraryGroupDetail(LibraryGroupSummary):

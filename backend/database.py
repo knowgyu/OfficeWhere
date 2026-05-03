@@ -40,7 +40,7 @@ PPT_COMPARISON_ARTIFACT_KIND = "ppt_ordered_text"
 WORD_COMPARISON_PARSER_VERSION = "word-blocks-v1"
 PPT_COMPARISON_PARSER_VERSION = "ppt-slides-v1"
 EXCEL_INDEX_VERSION_KEY = "excel_index_version"
-LIBRARY_GROUP_INDEX_VERSION = "1"
+LIBRARY_GROUP_INDEX_VERSION = "2"
 LIBRARY_GROUP_INDEX_VERSION_KEY = "library_group_index_version"
 LIBRARY_GROUP_INDEX_STATE_KEY = "library_group_index_state"
 LIBRARY_GROUP_INDEX_UPDATED_AT_KEY = "library_group_index_updated_at"
@@ -306,6 +306,23 @@ def _reset_legacy_comparison_cache_schema_if_needed(cursor: sqlite3.Cursor) -> N
     log_index_perf(
         "db_schema_reset",
         reason="remove_legacy_comparison_scope_cache",
+        legacy_columns=sorted(existing_columns),
+    )
+
+
+def _reset_legacy_library_group_action_schema_if_needed(cursor: sqlite3.Cursor) -> None:
+    """Drop app-owned derived group tables when an old unused action column exists."""
+    cursor.execute("PRAGMA table_info(library_group_index)")
+    existing_columns = {str(row[1]) for row in cursor.fetchall()}
+    if "recommended_action" not in existing_columns:
+        return
+
+    cursor.execute("DROP TABLE IF EXISTS library_group_members")
+    cursor.execute("DROP TABLE IF EXISTS library_group_index")
+    _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="remove_unused_group_action")
+    log_index_perf(
+        "db_schema_reset",
+        reason="remove_unused_group_action",
         legacy_columns=sorted(existing_columns),
     )
 
@@ -1021,6 +1038,7 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
         """
     )
 
+    _reset_legacy_library_group_action_schema_if_needed(cursor)
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS library_group_index (
@@ -1041,7 +1059,6 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
             fingerprint_coverage INTEGER NOT NULL,
             fingerprint_unique_count INTEGER NOT NULL,
             content_evidence TEXT NOT NULL,
-            recommended_action TEXT NOT NULL,
             group_json TEXT NOT NULL,
             index_version TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -1478,7 +1495,6 @@ def list_library_group_summaries(
                 gi.fingerprint_coverage,
                 gi.fingerprint_unique_count,
                 gi.content_evidence,
-                gi.recommended_action,
                 gi.updated_at,
                 latest.file_json AS latest_file_json,
                 previous.file_json AS previous_file_json
