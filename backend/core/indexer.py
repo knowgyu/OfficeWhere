@@ -106,12 +106,11 @@ def _excel_used_range_inspection_and_chunks(path: str) -> Tuple[Dict[str, Any], 
 
         preview_range = next((item for item in used_ranges if item.non_empty_cell_count > 0), used_ranges[0])
         df = preview_range.dataframe
-        config = preview_range.parser_config
-        sheet_name = config["sheet_name"]
+        range_config = preview_range.range_config
+        sheet_name = range_config["sheet_name"]
         if df.empty:
             columns: List[str] = []
             sample: List[List[str]] = []
-            preview_config = config
         else:
             header_values = [_excel_preview_text(value) for value in df.iloc[0].tolist()]
             columns = [
@@ -122,10 +121,7 @@ def _excel_used_range_inspection_and_chunks(path: str) -> Tuple[Dict[str, Any], 
                 [_excel_preview_text(value) for value in row.tolist()]
                 for _, row in df.iloc[1:].head(5).iterrows()
             ]
-            preview_config = {**config, "header_row": 1}
         inspection = {
-            "parser_config": preview_config,
-            "table_candidates": [],
             "columns": columns,
             "sample": sample,
             "excel_sheets": excel_sheets,
@@ -154,7 +150,7 @@ def _excel_used_range_inspection_and_chunks(path: str) -> Tuple[Dict[str, Any], 
         raise
 
 
-def _inspect_and_chunk_excel(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
+def _inspect_and_chunk_excel(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     started = time.perf_counter()
     metrics: Dict[str, Any] = {
         "path": path,
@@ -271,10 +267,10 @@ def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, s
         raise
 
 
-def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
+def inspect_and_chunk(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     ext = Path(path).suffix.lower()
     if ext in (".xlsx", ".xls"):
-        inspection, chunks = _inspect_and_chunk_excel(path, parser_config=parser_config)
+        inspection, chunks = _inspect_and_chunk_excel(path)
     elif ext == ".docx":
         inspection, chunks = _inspect_and_chunk_word(path)
     elif ext == ".pptx":
@@ -286,8 +282,6 @@ def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None)
         "name": Path(path).name,
         "file_type": get_file_type(path),
         "columns": inspection["columns"],
-        "parser_config": inspection["parser_config"],
-        "table_candidates": inspection.get("table_candidates", []),
         "sample": inspection["sample"],
         "excel_sheets": inspection.get("excel_sheets", []),
         "excel_cells": inspection.get("excel_cells", []),
@@ -295,7 +289,7 @@ def inspect_and_chunk(path: str, parser_config: Optional[Dict[str, Any]] = None)
     }, chunks
 
 
-def index_file(file_id: int, path: str, parser_config: Optional[Dict[str, Any]] = None) -> int:
+def index_file(file_id: int, path: str) -> int:
     started = time.perf_counter()
     metrics: Dict[str, Any] = {
         "operation": "reindex_file",

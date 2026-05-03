@@ -198,8 +198,7 @@ def _build_excel_diff_grid_for_sheet(
         dataframe, parser = extract_excel_used_range(info["path"], sheet_name=target_sheet)
         used_ranges.append((info, dataframe, parser))
     latest_df = used_ranges[0][1]
-    parser_config = used_ranges[0][2]
-    key_column = ""
+    range_config = used_ranges[0][2]
 
     used_row_count = max((len(df.index) for _info, df, _config in used_ranges), default=0)
     used_column_count = max((len(df.columns) for _info, df, _config in used_ranges), default=0)
@@ -208,7 +207,6 @@ def _build_excel_diff_grid_for_sheet(
     columns = [_column_letter(index) for index in range(1, column_count + 1)]
     column_lookup: Dict[str, ColumnSource] = {}
     row_number_lookup: Dict[str, int] = {}
-    key_value_row_lookup: Dict[str, int] = {}
 
     for column_index, column in enumerate(columns):
         _add_column_alias(column_lookup, column, column_index, "letter")
@@ -236,11 +234,7 @@ def _build_excel_diff_grid_for_sheet(
     for _info, dataframe, _config in used_ranges:
         register_header_aliases(dataframe)
 
-    key_col_index = 0
-
-    for _info, dataframe, _config in used_ranges:
-        for row_index in range(min(len(dataframe.index), row_count)):
-            _add_row_alias(key_value_row_lookup, value_at(dataframe, row_index, key_col_index), row_index)
+    context_col_index = 0
 
     def resolve_focus_position(key: str, column: str) -> Position | None:
         normalized_key = normalize_key(key)
@@ -248,15 +242,8 @@ def _build_excel_diff_grid_for_sheet(
         if not normalized_key or not column_ref:
             return None
 
-        column_index, column_source = column_ref
-        if column_source == "letter":
-            row_index = row_number_lookup.get(normalized_key)
-            if row_index is None:
-                row_index = key_value_row_lookup.get(normalized_key)
-        else:
-            row_index = key_value_row_lookup.get(normalized_key)
-            if row_index is None:
-                row_index = row_number_lookup.get(normalized_key)
+        column_index, _column_source = column_ref
+        row_index = row_number_lookup.get(normalized_key)
         if row_index is None:
             return None
         return (row_index, column_index)
@@ -361,15 +348,14 @@ def _build_excel_diff_grid_for_sheet(
             continue
 
         column_range = list(range(col_start, col_end + 1))
-        if key_col_index not in column_range:
-            column_range = [key_col_index, *column_range]
+        if context_col_index not in column_range:
+            column_range = [context_col_index, *column_range]
 
         section_columns = [
             {
                 "index": column_index,
                 "letter": _column_letter(column_index + 1),
                 "name": columns[column_index],
-                "is_key": column_index == key_col_index,
             }
             for column_index in column_range
         ]
@@ -383,7 +369,7 @@ def _build_excel_diff_grid_for_sheet(
                 position = (row_index, column_index)
                 cells.append(
                     {
-                        "sheet_name": str(parser_config["sheet_name"]),
+                        "sheet_name": str(range_config["sheet_name"]),
                         "row_index": row_index,
                         "row_number": row_number,
                         "column_index": column_index,
@@ -396,10 +382,9 @@ def _build_excel_diff_grid_for_sheet(
                 )
             rows.append(
                 {
-                    "sheet_name": str(parser_config["sheet_name"]),
+                    "sheet_name": str(range_config["sheet_name"]),
                     "row_index": row_index,
                     "row_number": row_number,
-                    "key_value": latest_value(row_index, key_col_index) if columns else "",
                     "cells": cells,
                 }
             )
@@ -415,12 +400,12 @@ def _build_excel_diff_grid_for_sheet(
         description = (
             "표가 작아 전체 사용 범위와 여유 2행/열을 표시합니다."
             if not partial
-            else "변경 셀을 중심으로 필요한 범위만 표시합니다. 기준 컬럼은 함께 보여줍니다."
+            else "변경 셀을 중심으로 필요한 범위만 표시합니다. 첫 열은 함께 보여줍니다."
         )
         sections.append(
             {
                 "id": f"{section_id_prefix}-{section_index}",
-                "sheet_name": str(parser_config["sheet_name"]),
+                "sheet_name": str(range_config["sheet_name"]),
                 "title": title,
                 "description": description,
                 "partial": partial,
@@ -440,8 +425,7 @@ def _build_excel_diff_grid_for_sheet(
         },
         "row_count": row_count,
         "column_count": column_count,
-        "key_column": "",
-        "sheet_name": str(parser_config["sheet_name"]),
+        "sheet_name": str(range_config["sheet_name"]),
         "partial": partial,
         "omitted_focus_count": omitted_focus_count,
         "sections": sections,
@@ -503,7 +487,6 @@ def build_excel_diff_grid(file_infos: List[Dict[str, Any]], focuses: List[Any]) 
         },
         "row_count": row_count,
         "column_count": column_count,
-        "key_column": "",
         "sheet_name": "여러 시트",
         "partial": partial,
         "omitted_focus_count": omitted_focus_count,

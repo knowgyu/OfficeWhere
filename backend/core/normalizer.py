@@ -1,5 +1,4 @@
 import re
-from typing import List, Optional
 
 
 def normalize_key(value: str) -> str:
@@ -38,16 +37,3 @@ def values_equal(a: str, b: str) -> bool:
         return float(na.replace(",", "")) == float(nb.replace(",", ""))
     except ValueError:
         return False
-
-
-def suggest_key_column(columns: List[str]) -> Optional[str]:
-    """
-    파일 등록 시 key 컬럼 자동 추천.
-    컬럼명에 '과제', 'key', 'id', '번호' 포함된 것 우선 추천.
-    """
-    priority_keywords = ["과제", "key", "id", "번호", "name", "이름", "코드", "code"]
-    for keyword in priority_keywords:
-        for col in columns:
-            if keyword.lower() in col.lower():
-                return col
-    return columns[0] if columns else None

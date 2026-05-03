@@ -65,14 +65,6 @@ def _write_multisheet_excel(path: Path, detail_value: str):
     workbook.save(path)
 
 
-def _make_parser_config(columns: int, rows: int) -> dict:
-    return {
-        "sheet_name": "Sheet1",
-        "header_row": 1,
-        "start_col": 1,
-        "end_col": columns,
-        "end_row": rows + 1,
-    }
 
 
 def _write_word(path: Path, paragraph_text: str, table_value: str):
@@ -126,11 +118,7 @@ def test_excel_inspect_uses_visible_range_without_table_detection(tmp_path):
 
     result = inspect_file_path(str(file_path))
 
-    assert result["table_candidates"] == []
     assert result["columns"][0] == "2026 사업 목록"
-    assert result["parser_config"]["header_row"] == 1
-    assert result["parser_config"]["start_col"] == 1
-    assert result["parser_config"]["end_col"] == 5
     flattened_sample = [cell for row in result["sample"] for cell in row]
     assert {"과제명", "담당자", "예산", "A", "Kim", "100"} <= set(flattened_sample)
 
@@ -143,22 +131,8 @@ def test_excel_consistency_uses_cell_diffs_not_registered_keys(tmp_path):
 
     result = run_consistency_check(
         [
-            {
-                "id": 1,
-                "path": str(file_a),
-                "name": "a.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": _make_parser_config(columns=3, rows=2),
-            },
-            {
-                "id": 2,
-                "path": str(file_b),
-                "name": "b.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": _make_parser_config(columns=2, rows=2),
-            },
+            {'id': 1, 'path': str(file_a), 'name': 'a.xlsx', 'file_type': 'Excel'},
+            {'id': 2, 'path': str(file_b), 'name': 'b.xlsx', 'file_type': 'Excel'},
         ]
     )
 
@@ -196,22 +170,8 @@ def test_excel_consistency_reports_cell_value_added_and_removed(tmp_path):
 
     result = run_consistency_check(
         [
-            {
-                "id": 1,
-                "path": str(file_a),
-                "name": "cell-a.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": _make_parser_config(columns=3, rows=2),
-            },
-            {
-                "id": 2,
-                "path": str(file_b),
-                "name": "cell-b.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": _make_parser_config(columns=3, rows=2),
-            },
+            {'id': 1, 'path': str(file_a), 'name': 'cell-a.xlsx', 'file_type': 'Excel'},
+            {'id': 2, 'path': str(file_b), 'name': 'cell-b.xlsx', 'file_type': 'Excel'},
         ]
     )
 
@@ -240,22 +200,8 @@ def test_excel_consistency_compares_all_visible_sheets(tmp_path):
 
     result = run_consistency_check(
         [
-            {
-                "id": 1,
-                "path": str(file_a),
-                "name": "multi-a.xlsx",
-                "file_type": "Excel",
-                "key_column": "",
-                "parser_config": {},
-            },
-            {
-                "id": 2,
-                "path": str(file_b),
-                "name": "multi-b.xlsx",
-                "file_type": "Excel",
-                "key_column": "",
-                "parser_config": {},
-            },
+            {'id': 1, 'path': str(file_a), 'name': 'multi-a.xlsx', 'file_type': 'Excel'},
+            {'id': 2, 'path': str(file_b), 'name': 'multi-b.xlsx', 'file_type': 'Excel'},
         ]
     )
 
@@ -284,18 +230,7 @@ def test_excel_consistency_uses_fresh_indexed_sheet_cache(tmp_path, monkeypatch)
     file_ids = []
     for file_path in (file_a, file_b):
         info, chunks = inspect_and_chunk(str(file_path))
-        file_id = save_indexed_file(
-            path=str(file_path),
-            name=info["name"],
-            file_type=info["file_type"],
-            key_column="",
-            column_count=len(info["columns"]),
-            chunks=chunks,
-            file_mtime=file_path.stat().st_mtime,
-            parser_config=None,
-            excel_sheets=info["excel_sheets"],
-            excel_cells=info["excel_cells"],
-        )
+        file_id = save_indexed_file(path=str(file_path), name=info['name'], file_type=info['file_type'], column_count=len(info['columns']), chunks=chunks, file_mtime=file_path.stat().st_mtime, excel_sheets=info['excel_sheets'], excel_cells=info['excel_cells'])
         file_ids.append(file_id)
 
     def fail_source_parse(_path):
@@ -337,18 +272,7 @@ def test_excel_indexed_payload_used_when_source_mtime_newer_with_warning(tmp_pat
     file_ids = []
     for file_path in (file_a, file_b):
         info, chunks = inspect_and_chunk(str(file_path))
-        file_id = save_indexed_file(
-            path=str(file_path),
-            name=info["name"],
-            file_type=info["file_type"],
-            key_column="",
-            column_count=len(info["columns"]),
-            chunks=chunks,
-            file_mtime=file_path.stat().st_mtime,
-            parser_config=None,
-            excel_sheets=info["excel_sheets"],
-            excel_cells=info["excel_cells"],
-        )
+        file_id = save_indexed_file(path=str(file_path), name=info['name'], file_type=info['file_type'], column_count=len(info['columns']), chunks=chunks, file_mtime=file_path.stat().st_mtime, excel_sheets=info['excel_sheets'], excel_cells=info['excel_cells'])
         file_ids.append(file_id)
 
     newer_mtime = file_b.stat().st_mtime + 5
@@ -456,31 +380,10 @@ def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
     _write_excel_with_offset_conflict_table(file_a, "100")
     _write_excel_with_offset_conflict_table(file_b, "999")
 
-    parser_config = {
-        "sheet_name": "사업현황",
-        "header_row": 3,
-        "start_col": 3,
-        "end_col": 5,
-        "end_row": 6,
-    }
     result = run_consistency_check(
         [
-            {
-                "id": 1,
-                "path": str(file_a),
-                "name": "offset-a.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": parser_config,
-            },
-            {
-                "id": 2,
-                "path": str(file_b),
-                "name": "offset-b.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": parser_config,
-            },
+            {'id': 1, 'path': str(file_a), 'name': 'offset-a.xlsx', 'file_type': 'Excel'},
+            {'id': 2, 'path': str(file_b), 'name': 'offset-b.xlsx', 'file_type': 'Excel'},
         ]
     )
 
@@ -494,40 +397,13 @@ def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
         assert entry["row_count"] == 1
 
 
-def test_excel_version_history_ignores_stale_parser_config(tmp_path):
+def test_excel_version_history_uses_current_used_range(tmp_path):
     previous = tmp_path / "budget-v1.xlsx"
     latest = tmp_path / "budget-v2.xlsx"
     _write_dataframe_excel(previous, {"과제명": ["A"], "예산": ["100"]})
     _write_dataframe_excel(latest, {"과제명": ["A"], "예산": ["999"]})
-    stale_parser_config = {
-        "sheet_name": "Sheet1",
-        "header_row": 1,
-        "start_col": 1,
-        "end_col": 99,
-        "end_row": 99,
-    }
 
-    result = run_consistency_check(
-        [
-            {
-                "id": 1,
-                "path": str(previous),
-                "name": "budget-v1.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": stale_parser_config,
-            },
-            {
-                "id": 2,
-                "path": str(latest),
-                "name": "budget-v2.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": stale_parser_config,
-            },
-        ],
-        comparison_scope="version_history",
-    )
+    result = run_consistency_check([{'id': 1, 'path': str(previous), 'name': 'budget-v1.xlsx', 'file_type': 'Excel'}, {'id': 2, 'path': str(latest), 'name': 'budget-v2.xlsx', 'file_type': 'Excel'}])
 
     issue = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
     assert issue["key"] == "2"
@@ -537,33 +413,13 @@ def test_excel_version_history_ignores_stale_parser_config(tmp_path):
     assert [entry["values"] for entry in issue["values"]] == [["100"], ["999"]]
 
 
-def test_excel_version_history_does_not_require_key_column(tmp_path):
+def test_excel_version_history_uses_row_coordinates(tmp_path):
     previous = tmp_path / "budget-v1.xlsx"
     latest = tmp_path / "budget-v2.xlsx"
     _write_dataframe_excel(previous, {"과제명": ["A"], "예산": ["100"]})
     _write_dataframe_excel(latest, {"과제명": ["A"], "예산": ["120"]})
 
-    result = run_consistency_check(
-        [
-            {
-                "id": 1,
-                "path": str(previous),
-                "name": "budget-v1.xlsx",
-                "file_type": "Excel",
-                "key_column": "",
-                "parser_config": {},
-            },
-            {
-                "id": 2,
-                "path": str(latest),
-                "name": "budget-v2.xlsx",
-                "file_type": "Excel",
-                "key_column": "",
-                "parser_config": {},
-            },
-        ],
-        comparison_scope="version_history",
-    )
+    result = run_consistency_check([{'id': 1, 'path': str(previous), 'name': 'budget-v1.xlsx', 'file_type': 'Excel'}, {'id': 2, 'path': str(latest), 'name': 'budget-v2.xlsx', 'file_type': 'Excel'}])
 
     issue = next(issue for issue in result["excel"]["issues"] if issue["issue_type"] == "value_conflict")
     assert issue["key"] == "2"
@@ -571,37 +427,16 @@ def test_excel_version_history_does_not_require_key_column(tmp_path):
     assert [entry["values"] for entry in issue["values"]] == [["100"], ["120"]]
 
 
-def test_excel_diff_grid_returns_full_small_latest_sheet_without_parser_config(tmp_path):
+def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
     latest = tmp_path / "grid-latest.xlsx"
     previous = tmp_path / "grid-previous.xlsx"
     _write_dataframe_excel(latest, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
     _write_dataframe_excel(previous, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "200"]})
 
-    stale_parser_config = {
-        "sheet_name": "Sheet1",
-        "header_row": 1,
-        "start_col": 1,
-        "end_col": 99,
-        "end_row": 99,
-    }
     result = build_excel_diff_grid(
         [
-            {
-                "id": 2,
-                "path": str(latest),
-                "name": "grid-latest.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": stale_parser_config,
-            },
-            {
-                "id": 1,
-                "path": str(previous),
-                "name": "grid-previous.xlsx",
-                "file_type": "Excel",
-                "key_column": "과제명",
-                "parser_config": stale_parser_config,
-            },
+            {'id': 2, 'path': str(latest), 'name': 'grid-latest.xlsx', 'file_type': 'Excel'},
+            {'id': 1, 'path': str(previous), 'name': 'grid-previous.xlsx', 'file_type': 'Excel'},
         ],
         [
             {
@@ -654,30 +489,9 @@ def test_excel_diff_grid_colors_only_latest_vs_previous_but_keeps_older_history(
 
     result = build_excel_diff_grid(
         [
-            {
-                "id": 3,
-                "path": str(v3),
-                "name": "budget-v3.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": {},
-            },
-            {
-                "id": 2,
-                "path": str(v2),
-                "name": "budget-v2.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": {},
-            },
-            {
-                "id": 1,
-                "path": str(v1),
-                "name": "budget-v1.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": {},
-            },
+            {'id': 3, 'path': str(v3), 'name': 'budget-v3.xlsx', 'file_type': 'Excel'},
+            {'id': 2, 'path': str(v2), 'name': 'budget-v2.xlsx', 'file_type': 'Excel'},
+            {'id': 1, 'path': str(v1), 'name': 'budget-v1.xlsx', 'file_type': 'Excel'},
         ],
         [],
     )
@@ -719,22 +533,8 @@ def test_excel_diff_grid_uses_largest_compared_range_for_removed_cells(tmp_path)
 
     result = build_excel_diff_grid(
         [
-            {
-                "id": 2,
-                "path": str(latest),
-                "name": "smaller-latest.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": _make_parser_config(columns=3, rows=2),
-            },
-            {
-                "id": 1,
-                "path": str(previous),
-                "name": "larger-previous.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": _make_parser_config(columns=5, rows=4),
-            },
+            {'id': 2, 'path': str(latest), 'name': 'smaller-latest.xlsx', 'file_type': 'Excel'},
+            {'id': 1, 'path': str(previous), 'name': 'larger-previous.xlsx', 'file_type': 'Excel'},
         ],
         [
             {
@@ -792,22 +592,8 @@ def test_excel_diff_grid_shows_small_compared_used_range_with_margin(tmp_path):
 
     result = build_excel_diff_grid(
         [
-            {
-                "id": 2,
-                "path": str(latest),
-                "name": "dirty-latest.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": {},
-            },
-            {
-                "id": 1,
-                "path": str(previous),
-                "name": "dirty-previous.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": {},
-            },
+            {'id': 2, 'path': str(latest), 'name': 'dirty-latest.xlsx', 'file_type': 'Excel'},
+            {'id': 1, 'path': str(previous), 'name': 'dirty-previous.xlsx', 'file_type': 'Excel'},
         ],
         [
             {
@@ -859,7 +645,7 @@ def test_excel_diff_grid_shows_small_compared_used_range_with_margin(tmp_path):
     assert removed[0]["histories"][0]["before"] == "삭제될 먼 위치 값"
 
 
-def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
+def test_excel_diff_grid_limits_large_far_focus_and_keeps_context_column(tmp_path):
     latest = tmp_path / "large-latest.xlsx"
     previous = tmp_path / "large-previous.xlsx"
     rows = 120
@@ -871,22 +657,8 @@ def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
 
     result = build_excel_diff_grid(
         [
-            {
-                "id": 2,
-                "path": str(latest),
-                "name": "large-latest.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": _make_parser_config(columns=120, rows=rows),
-            },
-            {
-                "id": 1,
-                "path": str(previous),
-                "name": "large-previous.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": _make_parser_config(columns=120, rows=rows),
-            },
+            {'id': 2, 'path': str(latest), 'name': 'large-latest.xlsx', 'file_type': 'Excel'},
+            {'id': 1, 'path': str(previous), 'name': 'large-previous.xlsx', 'file_type': 'Excel'},
         ],
         [{"key": "101", "column": "CW", "change_type": "added", "histories": []}],
     )
@@ -896,7 +668,7 @@ def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
     assert section["row_start"] > 1
     assert section["row_end"] - section["row_start"] + 1 < rows + 1
     assert section["col_start"] > 1
-    assert any(column["name"] == "A" and column["is_key"] for column in section["columns"])
+    assert any(column["name"] == "A" for column in section["columns"])
     highlighted = [
         cell
         for row in section["rows"]
@@ -907,7 +679,7 @@ def test_excel_diff_grid_limits_large_far_focus_and_keeps_key_column(tmp_path):
     assert highlighted[0]["column_name"] == "CW"
 
 
-def test_excel_diff_grid_resolves_partial_focus_by_key_value_and_header(tmp_path):
+def test_excel_diff_grid_resolves_partial_focus_by_row_number_and_header(tmp_path):
     latest = tmp_path / "large-key-latest.xlsx"
     previous = tmp_path / "large-key-previous.xlsx"
     rows = 120
@@ -924,26 +696,12 @@ def test_excel_diff_grid_resolves_partial_focus_by_key_value_and_header(tmp_path
 
     result = build_excel_diff_grid(
         [
-            {
-                "id": 2,
-                "path": str(latest),
-                "name": "large-key-latest.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": _make_parser_config(columns=120, rows=rows),
-            },
-            {
-                "id": 1,
-                "path": str(previous),
-                "name": "large-key-previous.xlsx",
-                "file_type": "Excel",
-                "key_column": "ID",
-                "parser_config": _make_parser_config(columns=120, rows=rows),
-            },
+            {'id': 2, 'path': str(latest), 'name': 'large-key-latest.xlsx', 'file_type': 'Excel'},
+            {'id': 1, 'path': str(previous), 'name': 'large-key-previous.xlsx', 'file_type': 'Excel'},
         ],
         [
             {
-                "key": "K101",
+                "key": "102",
                 "column": "C119",
                 "change_type": "changed",
                 "histories": [
@@ -986,8 +744,8 @@ def test_word_diff_reports_paragraph_and_table_changes(tmp_path):
 
     result = run_consistency_check(
         [
-            {"id": 1, "path": str(left), "name": "left.docx", "file_type": "Word", "key_column": "", "parser_config": {}},
-            {"id": 2, "path": str(right), "name": "right.docx", "file_type": "Word", "key_column": "", "parser_config": {}},
+            {'id': 1, 'path': str(left), 'name': 'left.docx', 'file_type': 'Word'},
+            {'id': 2, 'path': str(right), 'name': 'right.docx', 'file_type': 'Word'},
         ]
     )
 
@@ -1009,8 +767,8 @@ def test_word_diff_reports_best_effort_page_numbers(tmp_path):
 
     result = run_consistency_check(
         [
-            {"id": 1, "path": str(left), "name": "left-page.docx", "file_type": "Word", "key_column": "", "parser_config": {}},
-            {"id": 2, "path": str(right), "name": "right-page.docx", "file_type": "Word", "key_column": "", "parser_config": {}},
+            {'id': 1, 'path': str(left), 'name': 'left-page.docx', 'file_type': 'Word'},
+            {'id': 2, 'path': str(right), 'name': 'right-page.docx', 'file_type': 'Word'},
         ]
     )
 
@@ -1027,8 +785,8 @@ def test_ppt_diff_reports_slide_insert_and_update(tmp_path):
 
     result = run_consistency_check(
         [
-            {"id": 1, "path": str(left), "name": "left.pptx", "file_type": "PowerPoint", "key_column": "", "parser_config": {}},
-            {"id": 2, "path": str(right), "name": "right.pptx", "file_type": "PowerPoint", "key_column": "", "parser_config": {}},
+            {'id': 1, 'path': str(left), 'name': 'left.pptx', 'file_type': 'PowerPoint'},
+            {'id': 2, 'path': str(right), 'name': 'right.pptx', 'file_type': 'PowerPoint'},
         ]
     )
 
@@ -1039,8 +797,8 @@ def test_ppt_diff_reports_slide_insert_and_update(tmp_path):
 
 def test_check_api_rejects_mixed_file_types(monkeypatch):
     rows = {
-        1: {"id": 1, "path": "/tmp/a.xlsx", "name": "a.xlsx", "file_type": "Excel", "key_column": "과제명", "parser_config": {}},
-        2: {"id": 2, "path": "/tmp/b.docx", "name": "b.docx", "file_type": "Word", "key_column": "", "parser_config": {}},
+        1: {'id': 1, 'path': '/tmp/a.xlsx', 'name': 'a.xlsx', 'file_type': 'Excel'},
+        2: {'id': 2, 'path': '/tmp/b.docx', 'name': 'b.docx', 'file_type': 'Word'},
     }
     monkeypatch.setattr("backend.api.check.get_file_by_id", lambda file_id: rows[file_id])
     monkeypatch.setattr("backend.api.check.os.path.exists", lambda _: True)
@@ -1062,14 +820,14 @@ def test_check_api_reuses_comparison_cache_until_index_mtime_changes(tmp_path, m
     right = tmp_path / "right.docx"
     left.write_text("left", encoding="utf-8")
     right.write_text("right", encoding="utf-8")
-    left_id = register_file(str(left), "left.docx", "Word", "", 0)
-    right_id = register_file(str(right), "right.docx", "Word", "", 0)
+    left_id = register_file(str(left), 'left.docx', 'Word', 0)
+    right_id = register_file(str(right), 'right.docx', 'Word', 0)
     update_file_mtime(left_id, left.stat().st_mtime)
     update_file_mtime(right_id, right.stat().st_mtime)
 
     calls = 0
 
-    def fake_run(file_infos, comparison_scope="registered_table"):
+    def fake_run(file_infos):
         nonlocal calls
         calls += 1
         return {
@@ -1109,7 +867,7 @@ def test_check_api_reuses_comparison_cache_until_index_mtime_changes(tmp_path, m
     assert calls == 2
 
 
-def test_check_api_cache_normalizes_scope_and_recovers_from_corrupt_entry(tmp_path, monkeypatch):
+def test_check_api_cache_recovers_from_corrupt_entry(tmp_path, monkeypatch):
     from backend.api.check import _comparison_cache_key
     from backend.database import init_db, register_file
 
@@ -1121,12 +879,12 @@ def test_check_api_cache_normalizes_scope_and_recovers_from_corrupt_entry(tmp_pa
     right = tmp_path / "right.xlsx"
     left.write_text("left", encoding="utf-8")
     right.write_text("right", encoding="utf-8")
-    left_id = register_file(str(left), "left.xlsx", "Excel", "id", 1)
-    right_id = register_file(str(right), "right.xlsx", "Excel", "id", 1)
+    left_id = register_file(str(left), 'left.xlsx', 'Excel', 1)
+    right_id = register_file(str(right), 'right.xlsx', 'Excel', 1)
 
     calls = 0
 
-    def fake_run(file_infos, comparison_scope="registered_table"):
+    def fake_run(file_infos):
         nonlocal calls
         calls += 1
         return {
@@ -1138,8 +896,8 @@ def test_check_api_cache_normalizes_scope_and_recovers_from_corrupt_entry(tmp_pa
 
     monkeypatch.setattr("backend.api.check.run_consistency_check", fake_run)
 
-    consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="registered_table"))
-    consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="version_history"))
+    consistency_check(CheckRequest(file_ids=[left_id, right_id]))
+    consistency_check(CheckRequest(file_ids=[left_id, right_id]))
 
     assert calls == 1
 
@@ -1165,6 +923,6 @@ def test_check_api_cache_normalizes_scope_and_recovers_from_corrupt_entry(tmp_pa
     conn.commit()
     conn.close()
 
-    consistency_check(CheckRequest(file_ids=[left_id, right_id], comparison_scope="registered_table"))
+    consistency_check(CheckRequest(file_ids=[left_id, right_id]))
 
     assert calls == 2

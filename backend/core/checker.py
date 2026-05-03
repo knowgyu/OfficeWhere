@@ -14,7 +14,7 @@ def _pop_compare_metadata(result: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[
     return result, metadata
 
 
-def run_consistency_check(file_infos: List[Dict[str, Any]], comparison_scope: str = "version_history") -> Dict[str, Any]:
+def run_consistency_check(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(file_infos) < 2:
         raise ValueError("정합성 검사는 최소 2개 파일이 필요합니다.")
 
@@ -24,7 +24,7 @@ def run_consistency_check(file_infos: List[Dict[str, Any]], comparison_scope: st
 
     file_type = next(iter(file_types))
     if file_type == "Excel":
-        excel_result, metadata = _pop_compare_metadata(compare_excel_files(file_infos, comparison_scope=comparison_scope))
+        excel_result, metadata = _pop_compare_metadata(compare_excel_files(file_infos))
         return {
             "mode": "excel",
             "metadata": metadata,

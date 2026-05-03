@@ -154,9 +154,7 @@ def file_info_from_row(row: Dict[str, Any]) -> FileInfo:
         name=row["name"],
         path=row["path"],
         file_type=row["file_type"],
-        key_column=row.get("key_column", ""),
         column_count=row["column_count"],
-        parser_config=row.get("parser_config", {}),
         created_at=row.get("created_at"),
         file_mtime=row.get("file_mtime"),
     )
@@ -243,20 +241,6 @@ def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
             "error_type": error_type,
             "error_hint": "문서의 부가 메타데이터가 비정상이라 이 파일만 건너뛰었습니다. 본문 파일은 수정하지 않았습니다.",
         }
-    if "parser_config" in message and ("row 범위" in message or "column 범위" in message):
-        return {
-            "error_code": "parser_config_out_of_range",
-            "error_stage": "parser_config",
-            "error_type": error_type,
-            "error_hint": "저장된 Excel 표 범위가 현재 시트 크기와 맞지 않습니다. 일반 문서 새로고침으로 자동 복구를 시도합니다.",
-        }
-    if "parser_config" in message and ("정수" in message or "invalid" in lower):
-        return {
-            "error_code": "parser_config_invalid_number",
-            "error_stage": "parser_config",
-            "error_type": error_type,
-            "error_hint": "저장된 Excel 표 범위 설정에 숫자가 아닌 값이 있습니다. 파일 관리에서 표 범위를 다시 선택해 주세요.",
-        }
     if isinstance(exc, IndexError) or "list index out of range" in lower:
         return {
             "error_code": "unsupported_or_corrupt_file",
@@ -266,8 +250,8 @@ def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
         }
     if "invalid literal" in lower and "int" in lower:
         return {
-            "error_code": "parser_config_invalid_number" if suffix in {".xls", ".xlsx"} else "office_parser_error",
-            "error_stage": "parser_config" if suffix in {".xls", ".xlsx"} else "office_parser",
+            "error_code": "office_parser_error",
+            "error_stage": "office_parser",
             "error_type": error_type,
             "error_hint": "문서 파서가 숫자 필드를 처리하지 못했습니다. 파일을 다시 저장한 뒤 새로고침하고, 반복되면 진단 ID와 함께 로그를 확인해 주세요.",
         }
@@ -605,11 +589,9 @@ def _rescan_library_impl(
                     path=path,
                     name=info["name"],
                     file_type=info["file_type"],
-                    key_column="",
                     column_count=len(info["columns"]),
                     chunks=chunks,
                     file_mtime=current_mtime,
-                    parser_config=None,
                     excel_sheets=info.get("excel_sheets"),
                     excel_cells=info.get("excel_cells"),
                     comparison_artifacts=info.get("comparison_artifacts"),

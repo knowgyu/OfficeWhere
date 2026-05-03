@@ -37,7 +37,7 @@ def test_index_and_search_excel(tmp_path):
     xlsx = str(tmp_path / "sample.xlsx")
     _make_excel(xlsx, {"과제명": ["DFBA 챗봇", "스마트팜"], "담당자": ["홍길동", "김철수"]})
 
-    file_id = register_file(xlsx, "sample.xlsx", "xlsx", "과제명", 2)
+    file_id = register_file(xlsx, 'sample.xlsx', 'xlsx', 2)
     chunk_count = index_file(file_id, xlsx)
 
     assert chunk_count > 0
@@ -51,7 +51,7 @@ def test_index_and_search_excel(tmp_path):
 def test_reindex_all_prunes_legacy_text_rows(tmp_path):
     txt = tmp_path / "legacy.txt"
     txt.write_text("old text", encoding="utf-8")
-    register_file(str(txt), "legacy.txt", "Text", "", 0)
+    register_file(str(txt), 'legacy.txt', 'Text', 0)
 
     stats = reindex_all()
 
@@ -64,7 +64,7 @@ def test_search_returns_location(tmp_path):
     xlsx = str(tmp_path / "loc.xlsx")
     _make_excel(xlsx, {"항목": ["알파", "베타"], "값": ["100", "200"]})
 
-    file_id = register_file(xlsx, "loc.xlsx", "xlsx", "항목", 2)
+    file_id = register_file(xlsx, 'loc.xlsx', 'xlsx', 2)
     index_file(file_id, xlsx)
 
     results = search("알파")
@@ -81,7 +81,7 @@ def test_index_and_search_excel_all_visible_sheets(tmp_path):
     detail["C3"] = "세컨드시트키워드"
     workbook.save(xlsx)
 
-    file_id = register_file(str(xlsx), "multi-sheet.xlsx", "Excel", "", 0)
+    file_id = register_file(str(xlsx), 'multi-sheet.xlsx', 'Excel', 0)
     chunk_count = index_file(file_id, str(xlsx))
 
     assert chunk_count == 2
@@ -93,7 +93,7 @@ def test_search_excel_header_uses_cell_location(tmp_path):
     xlsx = str(tmp_path / "header.xlsx")
     _make_excel(xlsx, {"항목": ["알파"], "담당자": ["홍길동"]})
 
-    file_id = register_file(xlsx, "header.xlsx", "xlsx", "항목", 2)
+    file_id = register_file(xlsx, 'header.xlsx', 'xlsx', 2)
     index_file(file_id, xlsx)
 
     results = search("담당자")
@@ -102,26 +102,11 @@ def test_search_excel_header_uses_cell_location(tmp_path):
     assert results[0]["location"] == "Sheet1 시트 | 1행 B열"
 
 
-def test_index_excel_uses_used_range_when_parser_config_is_stale(tmp_path):
+def test_index_excel_uses_used_range(tmp_path):
     xlsx = str(tmp_path / "stale.xlsx")
     _make_excel(xlsx, {"항목": ["알파"], "새열": ["범위밖키워드"]})
-    stale_parser_config = {
-        "sheet_name": "Sheet1",
-        "header_row": 1,
-        "start_col": 1,
-        "end_col": 99,
-        "end_row": 99,
-    }
-
-    file_id = register_file(
-        xlsx,
-        "stale.xlsx",
-        "Excel",
-        "항목",
-        1,
-        parser_config=stale_parser_config,
-    )
-    chunk_count = index_file(file_id, xlsx, parser_config=stale_parser_config)
+    file_id = register_file(xlsx, 'stale.xlsx', 'Excel', 1)
+    chunk_count = index_file(file_id, xlsx)
 
     assert chunk_count > 0
     results = search("범위밖키워드")
@@ -129,20 +114,12 @@ def test_index_excel_uses_used_range_when_parser_config_is_stale(tmp_path):
     assert results[0]["location"] == "Sheet1 시트 | 2행 B열"
 
 
-def test_inspect_and_chunk_recovers_stale_excel_parser_config(tmp_path):
+def test_inspect_and_chunk_indexes_used_range(tmp_path):
     xlsx = str(tmp_path / "recover.xlsx")
     _make_excel(xlsx, {"항목": ["알파"], "새열": ["복구키워드"]})
-    stale_parser_config = {
-        "sheet_name": "Sheet1",
-        "header_row": 1,
-        "start_col": 1,
-        "end_col": 99,
-        "end_row": 99,
-    }
+    info, chunks = inspect_and_chunk(xlsx)
 
-    info, chunks = inspect_and_chunk(xlsx, parser_config=stale_parser_config)
-
-    assert info["parser_config"]["end_col"] == 2
+    assert info["columns"] == ["항목", "새열"]
     assert any(chunk["content"] == "복구키워드" for chunk in chunks)
 
 
@@ -150,7 +127,7 @@ def test_search_no_results_for_missing_term(tmp_path):
     xlsx = str(tmp_path / "empty.xlsx")
     _make_excel(xlsx, {"항목": ["ABC"], "값": ["123"]})
 
-    file_id = register_file(xlsx, "empty.xlsx", "xlsx", "항목", 2)
+    file_id = register_file(xlsx, 'empty.xlsx', 'xlsx', 2)
     index_file(file_id, xlsx)
 
     results = search("존재하지않는단어XYZ")
@@ -160,7 +137,7 @@ def test_search_no_results_for_missing_term(tmp_path):
 def test_search_matches_korean_substrings_inside_words(tmp_path):
     doc_path = tmp_path / "meeting.docx"
 
-    file_id = register_file(str(doc_path), "meeting.docx", "Word", "", 0)
+    file_id = register_file(str(doc_path), 'meeting.docx', 'Word', 0)
     save_file_chunks(file_id, [{"location": "문단", "content": "주간 회의록 작성 후 공유"}])
 
     results = search("회의")
@@ -173,7 +150,7 @@ def test_search_matches_korean_substrings_inside_words(tmp_path):
 def test_search_no_longer_guarantees_hangul_choseong(tmp_path):
     doc_path = tmp_path / "meeting.docx"
 
-    file_id = register_file(str(doc_path), "meeting.docx", "Word", "", 0)
+    file_id = register_file(str(doc_path), 'meeting.docx', 'Word', 0)
     save_file_chunks(file_id, [{"location": "문단", "content": "주간 회의록 작성 후 공유"}])
 
     results = search("ㅎㅇㄹ")
@@ -184,7 +161,7 @@ def test_search_no_longer_guarantees_hangul_choseong(tmp_path):
 def test_search_matches_long_korean_substring_with_fast_path(tmp_path):
     doc_path = tmp_path / "project.docx"
 
-    file_id = register_file(str(doc_path), "project.docx", "Word", "", 0)
+    file_id = register_file(str(doc_path), 'project.docx', 'Word', 0)
     save_file_chunks(file_id, [{"location": "문단", "content": "프로젝트 상태 보고서"}])
 
     results = search("프로젝")
@@ -258,7 +235,7 @@ def test_init_db_migrates_legacy_base_file_search(tmp_path, monkeypatch):
     assert cursor.fetchall() == []
     conn.close()
 
-    file_id = register_file(str(tmp_path / "meeting.docx"), "meeting.docx", "Word", "", 0)
+    file_id = register_file(str(tmp_path / 'meeting.docx'), 'meeting.docx', 'Word', 0)
     save_file_chunks(file_id, [{"location": "문단", "content": "주간 회의록"}])
 
     conn = sqlite3.connect(DB_PATH)
@@ -271,7 +248,7 @@ def test_init_db_migrates_legacy_base_file_search(tmp_path, monkeypatch):
 def test_init_db_recreates_search_indexes_with_columnsize_zero(tmp_path):
     from backend.database import DB_PATH, set_setting
 
-    file_id = register_file(str(tmp_path / "meeting.docx"), "meeting.docx", "Word", "", 0)
+    file_id = register_file(str(tmp_path / 'meeting.docx'), 'meeting.docx', 'Word', 0)
     save_file_chunks(file_id, [{"location": "문단", "content": "주간 회의록"}])
 
     conn = sqlite3.connect(DB_PATH)
@@ -317,7 +294,7 @@ def test_reindex_on_file_change(tmp_path):
     xlsx = str(tmp_path / "change.xlsx")
     _make_excel(xlsx, {"항목": ["원래값"], "값": ["1"]})
 
-    file_id = register_file(xlsx, "change.xlsx", "xlsx", "항목", 1)
+    file_id = register_file(xlsx, 'change.xlsx', 'xlsx', 1)
     index_file(file_id, xlsx)
 
     assert search("원래값") != []
@@ -345,8 +322,7 @@ def test_index_performance_excel(tmp_path):
         "예산": [str(i * 1000) for i in range(500)],
     })
 
-    file_id = register_file(xlsx, "perf.xlsx", "xlsx", "과제명", 3)
-
+    file_id = register_file(xlsx, 'perf.xlsx', 'xlsx', 3)
     start = time.perf_counter()
     chunk_count = index_file(file_id, xlsx)
     elapsed = time.perf_counter() - start
@@ -363,7 +339,7 @@ def test_search_performance(tmp_path):
         "내용": [f"내용 데이터 {i} 테스트" for i in range(1000)],
     })
 
-    file_id = register_file(xlsx, "search_perf.xlsx", "xlsx", "항목", 2)
+    file_id = register_file(xlsx, 'search_perf.xlsx', 'xlsx', 2)
     index_file(file_id, xlsx)
 
     start = time.perf_counter()
@@ -376,8 +352,8 @@ def test_search_performance(tmp_path):
 def test_search_chunks_filters_file_type(tmp_path):
     from backend.database import save_file_chunks
 
-    doc_id = register_file(str(tmp_path / "note.docx"), "note.docx", "Word", "", 0)
-    ppt_id = register_file(str(tmp_path / "note.pptx"), "note.pptx", "PowerPoint", "", 0)
+    doc_id = register_file(str(tmp_path / 'note.docx'), 'note.docx', 'Word', 0)
+    ppt_id = register_file(str(tmp_path / 'note.pptx'), 'note.pptx', 'PowerPoint', 0)
     save_file_chunks(doc_id, [{"location": "문단", "content": "공통 키워드"}])
     save_file_chunks(ppt_id, [{"location": "슬라이드 1", "content": "공통 키워드"}])
 
@@ -391,8 +367,8 @@ def test_search_api_filters_filename_and_content(tmp_path):
     from backend.database import save_file_chunks
     from backend.models.schemas import SearchRequest
 
-    doc_id = register_file(str(tmp_path / "alpha.docx"), "alpha.docx", "Word", "", 0)
-    ppt_id = register_file(str(tmp_path / "alpha.pptx"), "alpha.pptx", "PowerPoint", "", 0)
+    doc_id = register_file(str(tmp_path / 'alpha.docx'), 'alpha.docx', 'Word', 0)
+    ppt_id = register_file(str(tmp_path / 'alpha.pptx'), 'alpha.pptx', 'PowerPoint', 0)
     save_file_chunks(doc_id, [{"location": "문단", "content": "검색 대상"}])
     save_file_chunks(ppt_id, [{"location": "슬라이드 1", "content": "검색 대상"}])
 
@@ -407,8 +383,8 @@ def test_search_api_default_scope_includes_filename_and_content(tmp_path):
     from backend.database import save_file_chunks
     from backend.models.schemas import SearchRequest
 
-    filename_id = register_file(str(tmp_path / "scope-key.docx"), "scope-key.docx", "Word", "", 0)
-    content_id = register_file(str(tmp_path / "content.docx"), "content.docx", "Word", "", 0)
+    filename_id = register_file(str(tmp_path / 'scope-key.docx'), 'scope-key.docx', 'Word', 0)
+    content_id = register_file(str(tmp_path / 'content.docx'), 'content.docx', 'Word', 0)
     save_file_chunks(filename_id, [{"location": "문단", "content": "다른 내용"}])
     save_file_chunks(content_id, [{"location": "문단", "content": "scope-key 본문"}])
 
@@ -423,8 +399,8 @@ def test_search_api_filename_scope_excludes_content_only_matches(tmp_path):
     from backend.database import save_file_chunks
     from backend.models.schemas import SearchRequest
 
-    filename_id = register_file(str(tmp_path / "onlyname.docx"), "onlyname.docx", "Word", "", 0)
-    content_id = register_file(str(tmp_path / "body.docx"), "body.docx", "Word", "", 0)
+    filename_id = register_file(str(tmp_path / 'onlyname.docx'), 'onlyname.docx', 'Word', 0)
+    content_id = register_file(str(tmp_path / 'body.docx'), 'body.docx', 'Word', 0)
     save_file_chunks(filename_id, [{"location": "문단", "content": "다른 내용"}])
     save_file_chunks(content_id, [{"location": "문단", "content": "onlyname 본문"}])
 
@@ -441,8 +417,8 @@ def test_search_api_content_scope_excludes_filename_only_matches(tmp_path):
     from backend.database import save_file_chunks
     from backend.models.schemas import SearchRequest
 
-    filename_id = register_file(str(tmp_path / "bodyonly.docx"), "bodyonly.docx", "Word", "", 0)
-    content_id = register_file(str(tmp_path / "note.docx"), "note.docx", "Word", "", 0)
+    filename_id = register_file(str(tmp_path / 'bodyonly.docx'), 'bodyonly.docx', 'Word', 0)
+    content_id = register_file(str(tmp_path / 'note.docx'), 'note.docx', 'Word', 0)
     save_file_chunks(filename_id, [{"location": "문단", "content": "다른 내용"}])
     save_file_chunks(content_id, [{"location": "문단", "content": "bodyonly 본문"}])
 
@@ -457,8 +433,8 @@ def test_search_api_filename_scope_respects_file_type_filter(tmp_path):
     from backend.api.search import search_files
     from backend.models.schemas import SearchRequest
 
-    register_file(str(tmp_path / "scope.docx"), "scope.docx", "Word", "", 0)
-    ppt_id = register_file(str(tmp_path / "scope.pptx"), "scope.pptx", "PowerPoint", "", 0)
+    register_file(str(tmp_path / 'scope.docx'), 'scope.docx', 'Word', 0)
+    ppt_id = register_file(str(tmp_path / 'scope.pptx'), 'scope.pptx', 'PowerPoint', 0)
 
     response = search_files(SearchRequest(query="scope", file_types=["pptx"], search_scope="filename"))
 
@@ -472,8 +448,8 @@ def test_search_api_content_scope_supports_excel_filter(tmp_path):
     from backend.database import save_file_chunks
     from backend.models.schemas import SearchRequest
 
-    excel_id = register_file(str(tmp_path / "sheet.xlsx"), "sheet.xlsx", "Excel", "", 0)
-    word_id = register_file(str(tmp_path / "sheet.docx"), "sheet.docx", "Word", "", 0)
+    excel_id = register_file(str(tmp_path / 'sheet.xlsx'), 'sheet.xlsx', 'Excel', 0)
+    word_id = register_file(str(tmp_path / 'sheet.docx'), 'sheet.docx', 'Word', 0)
     save_file_chunks(excel_id, [{"location": "Sheet1 행 1", "content": "엑셀검색 키워드"}])
     save_file_chunks(word_id, [{"location": "문단", "content": "엑셀검색 키워드"}])
 
@@ -494,7 +470,7 @@ def test_word_search_locations_use_page_labels(tmp_path):
     document.add_paragraph("두 번째 페이지 검색키워드")
     document.save(doc_path)
 
-    file_id = register_file(str(doc_path), "paged.docx", "Word", "", 0)
+    file_id = register_file(str(doc_path), 'paged.docx', 'Word', 0)
     index_file(file_id, str(doc_path))
 
     results = search("검색키워드")
@@ -514,7 +490,7 @@ def test_ppt_search_locations_hide_shape_details(tmp_path):
     textbox.text = "프로젝트 검색키워드"
     presentation.save(ppt_path)
 
-    file_id = register_file(str(ppt_path), "slides.pptx", "PowerPoint", "", 0)
+    file_id = register_file(str(ppt_path), 'slides.pptx', 'PowerPoint', 0)
     index_file(file_id, str(ppt_path))
 
     results = search("검색키워드")
@@ -529,8 +505,8 @@ def test_search_api_filters_by_file_modified_date(tmp_path):
     from backend.database import save_file_chunks, update_file_mtime
     from backend.models.schemas import SearchRequest
 
-    old_id = register_file(str(tmp_path / "old.docx"), "회의_old.docx", "Word", "", 0)
-    new_id = register_file(str(tmp_path / "new.docx"), "회의_new.docx", "Word", "", 0)
+    old_id = register_file(str(tmp_path / 'old.docx'), '회의_old.docx', 'Word', 0)
+    new_id = register_file(str(tmp_path / 'new.docx'), '회의_new.docx', 'Word', 0)
     save_file_chunks(old_id, [{"location": "문단", "content": "회의 자료"}])
     save_file_chunks(new_id, [{"location": "문단", "content": "회의 자료"}])
     update_file_mtime(old_id, datetime(2026, 3, 15).timestamp())
@@ -554,7 +530,7 @@ def test_search_api_caps_results_by_file_first(tmp_path):
     from backend.models.schemas import SearchRequest
 
     for index in range(25):
-        file_id = register_file(str(tmp_path / f"note-{index}.docx"), f"note-{index}.docx", "Word", "", 0)
+        file_id = register_file(str(tmp_path / f'note-{index}.docx'), f'note-{index}.docx', 'Word', 0)
         save_file_chunks(file_id, [{"location": "문단", "content": f"프로젝트 공통키워드 {index}"}])
 
     response = search_files(SearchRequest(query="공통키워드", search_scope="content", file_limit=20))
@@ -566,9 +542,9 @@ def test_search_api_caps_results_by_file_first(tmp_path):
 
 
 def test_content_search_orders_files_by_recent_mtime_and_chunks_by_document_order(tmp_path):
-    first_id = register_file(str(tmp_path / "old.docx"), "old.docx", "Word", "", 0)
-    second_id = register_file(str(tmp_path / "new.docx"), "new.docx", "Word", "", 0)
-    third_id = register_file(str(tmp_path / "middle.docx"), "middle.docx", "Word", "", 0)
+    first_id = register_file(str(tmp_path / 'old.docx'), 'old.docx', 'Word', 0)
+    second_id = register_file(str(tmp_path / 'new.docx'), 'new.docx', 'Word', 0)
+    third_id = register_file(str(tmp_path / 'middle.docx'), 'middle.docx', 'Word', 0)
     save_file_chunks(first_id, [{"location": "문단 1", "content": "프로젝트 공통키워드"}])
     save_file_chunks(
         second_id,
@@ -603,7 +579,7 @@ def test_search_api_allows_more_files_up_to_max(tmp_path):
     from backend.models.schemas import SearchRequest
 
     for index in range(105):
-        file_id = register_file(str(tmp_path / f"bulk-{index}.docx"), f"bulk-{index}.docx", "Word", "", 0)
+        file_id = register_file(str(tmp_path / f'bulk-{index}.docx'), f'bulk-{index}.docx', 'Word', 0)
         save_file_chunks(file_id, [{"location": "문단", "content": f"프로젝트 대량검색 {index}"}])
         update_file_mtime(file_id, float(index))
 

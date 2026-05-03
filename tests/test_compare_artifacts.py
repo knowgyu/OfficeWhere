@@ -35,19 +35,7 @@ def _index_file(path: Path):
     from backend.database import save_indexed_file
 
     info, chunks = inspect_and_chunk(str(path))
-    return save_indexed_file(
-        path=str(path),
-        name=info["name"],
-        file_type=info["file_type"],
-        key_column="",
-        column_count=len(info["columns"]),
-        chunks=chunks,
-        file_mtime=path.stat().st_mtime,
-        parser_config=None,
-        excel_sheets=info.get("excel_sheets"),
-        excel_cells=info.get("excel_cells"),
-        comparison_artifacts=info.get("comparison_artifacts"),
-    )
+    return save_indexed_file(path=str(path), name=info['name'], file_type=info['file_type'], column_count=len(info['columns']), chunks=chunks, file_mtime=path.stat().st_mtime, excel_sheets=info.get('excel_sheets'), excel_cells=info.get('excel_cells'), comparison_artifacts=info.get('comparison_artifacts'))
 
 
 def _file_infos(file_ids):
@@ -127,24 +115,8 @@ def test_artifact_version_mismatch_falls_back_with_warning(tmp_path, monkeypatch
     right = tmp_path / "right.docx"
     _write_word(left, "본문 버전 A")
     _write_word(right, "본문 버전 B")
-    left_id = save_indexed_file(
-        path=str(left),
-        name=left.name,
-        file_type="Word",
-        key_column="",
-        column_count=0,
-        chunks=[],
-        file_mtime=left.stat().st_mtime,
-    )
-    right_id = save_indexed_file(
-        path=str(right),
-        name=right.name,
-        file_type="Word",
-        key_column="",
-        column_count=0,
-        chunks=[],
-        file_mtime=right.stat().st_mtime,
-    )
+    left_id = save_indexed_file(path=str(left), name=left.name, file_type='Word', column_count=0, chunks=[], file_mtime=left.stat().st_mtime)
+    right_id = save_indexed_file(path=str(right), name=right.name, file_type='Word', column_count=0, chunks=[], file_mtime=right.stat().st_mtime)
     save_comparison_artifact(
         left_id,
         file_type="Word",

@@ -684,7 +684,6 @@ function ExcelDiffGridSummary({
         <Chip label={`최신 파일 값 기준 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
         <Chip label={`${selectedSheetName || data.sheet_name} 시트`} tone="neutral" as="span" />
         <Chip label={`${data.row_count}행 × ${data.column_count}열`} tone="neutral" as="span" />
-        {data.key_column && <Chip label={`행 기준 · ${data.key_column}`} tone="secondary" as="span" />}
       </div>
 
       {sheetNames.length > 1 && (

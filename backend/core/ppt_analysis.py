@@ -277,8 +277,6 @@ def _extract_ppt_slides_with_package(path: str) -> List[Dict[str, Any]]:
 def inspect_ppt_slides(slides: List[Dict[str, Any]]) -> Dict[str, Any]:
     sample = [[slide["slide_number"], slide["title"], len(slide["items"])] for slide in slides[:5]]
     return {
-        "parser_config": {},
-        "table_candidates": [],
         "columns": ["slide_number", "title", "item_count"],
         "sample": sample,
         "slide_count": len(slides),

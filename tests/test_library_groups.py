@@ -12,13 +12,7 @@ def _setup_db(tmp_path, monkeypatch):
 
 
 def _register(path: str, name: str, file_type: str):
-    return register_file(
-        path=path,
-        name=name,
-        file_type=file_type,
-        key_column="id" if file_type == "Excel" else "",
-        column_count=3,
-    )
+    return register_file(path=path, name=name, file_type=file_type, column_count=3)
 
 
 def _indexed_file_row(file_id: int, name: str, *, path: str | None = None, file_type: str = "Word"):
@@ -30,17 +24,7 @@ def _indexed_file_row(file_id: int, name: str, *, path: str | None = None, file_
         "path": path,
         "exact_key": name.lower(),
         "version_key": name.rsplit(".", 1)[0],
-        "file_json": {
-            "id": file_id,
-            "name": name,
-            "path": path,
-            "file_type": file_type,
-            "key_column": "",
-            "column_count": 0,
-            "parser_config": {},
-            "created_at": "2026-04-30T00:00:00",
-            "file_mtime": 1000 + file_id,
-        },
+        "file_json": {'id': file_id, 'name': name, 'path': path, 'file_type': file_type, 'column_count': 0, 'created_at': '2026-04-30T00:00:00', 'file_mtime': 1000 + file_id},
         "file_signature": f"sig-{file_id}",
     }
 
@@ -312,15 +296,7 @@ def test_library_group_incremental_refresh_updates_only_affected_key(tmp_path, m
     _register("/tmp/a/다른문서_v2.docx", "다른문서_v2.docx", "Word")
 
     assert list_file_groups(kind="version_family", limit=10).total == 2
-    new_id = save_indexed_file(
-        path="/tmp/a/다른문서_v3.docx",
-        name="다른문서_v3.docx",
-        file_type="Word",
-        key_column="",
-        column_count=0,
-        chunks=[],
-        file_mtime=3.0,
-    )
+    new_id = save_indexed_file(path='/tmp/a/다른문서_v3.docx', name='다른문서_v3.docx', file_type='Word', column_count=0, chunks=[], file_mtime=3.0)
 
     calls = 0
     real_build_for_keys = library._build_group_index_rows_for_keys

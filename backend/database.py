@@ -248,14 +248,14 @@ def _registered_files_columns(cursor: sqlite3.Cursor) -> set[str]:
     return {str(row[1]) for row in cursor.fetchall()}
 
 
-def _reset_legacy_join_schema_if_needed(cursor: sqlite3.Cursor) -> bool:
-    """Drop app-owned index tables when the legacy Join metadata schema exists.
+def _reset_legacy_excel_table_schema_if_needed(cursor: sqlite3.Cursor) -> bool:
+    """Drop app-owned index tables when legacy Excel table metadata exists.
 
-    OfficeWhere 0.6 removes persisted Excel Join/table metadata from the
-    production search/version domain.  SQLite cannot drop columns cheaply, and
-    stale file IDs/cache entries would be misleading after the contract change,
-    so the app-owned index tables are rebuilt on next launch/rescan.  Source
-    Office documents and settings are not touched.
+    Older app databases may still have registration-time table/range columns.
+    SQLite cannot drop columns cheaply, and stale file IDs/cache entries would
+    be misleading after the contract change, so the app-owned index tables are
+    rebuilt on next launch/rescan. Source Office documents and settings are not
+    touched.
     """
     existing_columns = _registered_files_columns(cursor)
     if not existing_columns or not {"key_column", "parser_config"}.intersection(existing_columns):
@@ -272,7 +272,7 @@ def _reset_legacy_join_schema_if_needed(cursor: sqlite3.Cursor) -> bool:
     cursor.execute("DROP TABLE IF EXISTS registered_files")
     log_index_perf(
         "db_schema_reset",
-        reason="remove_excel_join_metadata",
+        reason="remove_legacy_excel_table_metadata",
         legacy_columns=sorted(existing_columns),
     )
     return True
@@ -293,6 +293,21 @@ def _ensure_file_chunks_columns(cursor: sqlite3.Cursor):
         cursor.execute("ALTER TABLE file_chunks ADD COLUMN search_text TEXT NOT NULL DEFAULT ''")
     if "trigram_text" not in existing_columns:
         cursor.execute("ALTER TABLE file_chunks ADD COLUMN trigram_text TEXT NOT NULL DEFAULT ''")
+
+
+def _reset_legacy_comparison_cache_schema_if_needed(cursor: sqlite3.Cursor) -> None:
+    """Drop app-owned comparison cache rows when the old cache mode column exists."""
+    cursor.execute("PRAGMA table_info(comparison_cache)")
+    existing_columns = {str(row[1]) for row in cursor.fetchall()}
+    if "comparison_scope" not in existing_columns:
+        return
+
+    cursor.execute("DROP TABLE IF EXISTS comparison_cache")
+    log_index_perf(
+        "db_schema_reset",
+        reason="remove_legacy_comparison_scope_cache",
+        legacy_columns=sorted(existing_columns),
+    )
 
 
 def _refresh_search_text(cursor: sqlite3.Cursor):
@@ -350,17 +365,6 @@ def _set_library_group_index_state_with_cursor(
     _set_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_STATE_KEY, state)
     _set_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_UPDATED_AT_KEY, now)
     _set_setting_with_cursor(cursor, LIBRARY_GROUP_INDEX_ERROR_KEY, error)
-
-
-def _normalize_file_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Return file rows with transitional API fields synthesized.
-
-    The DB no longer persists Join-only metadata, but older renderer/test code
-    may still tolerate these keys while the UI is simplified.
-    """
-    row.setdefault("key_column", "")
-    row["parser_config"] = {}
-    return row
 
 
 def _normalize_fingerprint_text(value: Any) -> str:
@@ -481,11 +485,9 @@ def prepare_indexed_file(
     path: str,
     name: str,
     file_type: str,
-    key_column: str,
     column_count: int,
     chunks: Sequence[Dict[str, str]],
     file_mtime: float,
-    parser_config: Optional[Dict[str, Any]] = None,
     excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
     excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
     comparison_artifacts: Optional[Sequence[Dict[str, Any]]] = None,
@@ -947,12 +949,13 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
         ON excel_cell_index(file_id, sheet_index, row_number, column_index)
         """
     )
+    _reset_legacy_comparison_cache_schema_if_needed(cursor)
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS comparison_cache (
             cache_key TEXT PRIMARY KEY,
             file_ids TEXT NOT NULL,
-            comparison_scope TEXT NOT NULL,
+            comparison_mode TEXT NOT NULL,
             result_json TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
@@ -1130,7 +1133,7 @@ def init_db():
     with _write_connection() as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
-        legacy_reset = _reset_legacy_join_schema_if_needed(cursor)
+        legacy_reset = _reset_legacy_excel_table_schema_if_needed(cursor)
         _create_schema(cursor, create_search_triggers=True)
         if legacy_reset:
             _set_setting_with_cursor(
@@ -1139,7 +1142,7 @@ def init_db():
                 json.dumps(
                     {
                         "at": datetime.now().isoformat(),
-                        "reason": "remove_excel_join_metadata",
+                        "reason": "remove_legacy_excel_table_metadata",
                     },
                     ensure_ascii=False,
                 ),
@@ -1585,9 +1588,7 @@ def register_file(
     path: str,
     name: str,
     file_type: str,
-    key_column: str,
     column_count: int,
-    parser_config: Optional[Dict[str, Any]] = None,
 ) -> int:
     with _write_connection() as conn:
         cursor = conn.cursor()
@@ -1626,11 +1627,9 @@ def save_indexed_file(
     path: str,
     name: str,
     file_type: str,
-    key_column: str,
     column_count: int,
     chunks: List[Dict[str, str]],
     file_mtime: float,
-    parser_config: Optional[Dict[str, Any]] = None,
     excel_sheets: Optional[Sequence[Dict[str, Any]]] = None,
     excel_cells: Optional[Sequence[Dict[str, Any]]] = None,
     comparison_artifacts: Optional[Sequence[Dict[str, Any]]] = None,
@@ -1640,11 +1639,9 @@ def save_indexed_file(
         path=path,
         name=name,
         file_type=file_type,
-        key_column=key_column,
         column_count=column_count,
         chunks=chunks,
         file_mtime=file_mtime,
-        parser_config=parser_config,
         excel_sheets=excel_sheets,
         excel_cells=excel_cells,
         comparison_artifacts=comparison_artifacts,
@@ -1726,7 +1723,7 @@ def get_all_files() -> List[Dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM registered_files ORDER BY created_at DESC")
         rows = cursor.fetchall()
-    return [_normalize_file_row(dict(row)) for row in rows]
+    return [dict(row) for row in rows]
 
 
 def get_registered_files_signature() -> str:
@@ -1805,7 +1802,7 @@ def list_files_page(
             [*params, limit, offset],
         )
         rows = cursor.fetchall()
-    return [_normalize_file_row(dict(row)) for row in rows]
+    return [dict(row) for row in rows]
 
 
 def count_files(
@@ -1845,7 +1842,7 @@ def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM registered_files WHERE id=?", (file_id,))
         row = cursor.fetchone()
-    return _normalize_file_row(dict(row)) if row else None
+    return dict(row) if row else None
 
 
 def get_excel_sheet_index(file_ids: Sequence[int]) -> Dict[int, List[Dict[str, Any]]]:
@@ -2005,7 +2002,7 @@ def search_file_names(
             params,
         )
         rows = cursor.fetchall()
-    return [_normalize_file_row(dict(row)) for row in rows]
+    return [dict(row) for row in rows]
 
 
 def delete_file(file_id: int) -> bool:
@@ -2237,25 +2234,25 @@ def prune_comparison_cache(
 def save_cached_comparison_result(
     cache_key: str,
     file_ids: Sequence[int],
-    comparison_scope: str,
+    comparison_mode: str,
     result: Dict[str, Any],
 ) -> None:
     with _write_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO comparison_cache (cache_key, file_ids, comparison_scope, result_json, created_at)
+            INSERT INTO comparison_cache (cache_key, file_ids, comparison_mode, result_json, created_at)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(cache_key) DO UPDATE SET
                 file_ids=excluded.file_ids,
-                comparison_scope=excluded.comparison_scope,
+                comparison_mode=excluded.comparison_mode,
                 result_json=excluded.result_json,
                 created_at=excluded.created_at
             """,
             (
                 cache_key,
                 json.dumps([int(file_id) for file_id in file_ids], ensure_ascii=False),
-                comparison_scope,
+                comparison_mode,
                 json.dumps(result, ensure_ascii=False),
                 datetime.now().isoformat(),
             ),

@@ -9,7 +9,7 @@ import type {
   SchemaResetState,
   UpdateCheckResult,
 } from './transport'
-import type { CellValue, CompareMode, ExcelParserConfig, FileInfo, FileType, ParserConfig } from './shared'
+import type { CellValue, CompareMode, FileInfo, FileType } from './shared'
 
 export { getBackendBaseUrl, getOfficeWhereBridge } from './transport'
 export type {
@@ -25,7 +25,7 @@ export type {
   UpdateCheckResult,
   UpdateDownloadResult,
 } from './transport'
-export type { CellValue, CompareMode, ExcelParserConfig, FileInfo, FileType, ParserConfig } from './shared'
+export type { CellValue, CompareMode, FileInfo, FileType } from './shared'
 export { getLibraryGroups } from './library'
 export type {
   LibraryGroupDetail,
@@ -90,15 +90,6 @@ export interface PreviewTable {
   rows: string[][]
 }
 
-export interface ExcelTableCandidate {
-  id: string
-  label: string
-  summary: string[]
-  parserConfig: ParserConfig
-  table: PreviewTable
-  score?: number
-}
-
 export interface NormalizedPreview {
   mode: CompareMode
   table: PreviewTable
@@ -113,10 +104,6 @@ export interface FileInspectResponse {
   file_type: string
   compare_mode?: CompareMode | string
   comparison_mode?: CompareMode | string
-  suggested_key_column?: string | null
-  parser_config?: ParserConfig | null
-  parser_candidates?: unknown[]
-  table_candidates?: unknown[]
   preview?: unknown
   summary?: unknown
   columns?: string[]
@@ -129,11 +116,6 @@ export interface NormalizedFileInspect {
   name: string
   fileType: FileType
   compareMode: CompareMode
-  keyRequired: boolean
-  suggestedKey: string
-  keyOptions: string[]
-  parserConfig: ParserConfig
-  parserCandidates: ExcelTableCandidate[]
   preview: NormalizedPreview
   capabilitySummary: string[]
 }
@@ -145,15 +127,12 @@ export interface FilePickResponse {
 
 export interface FileRegisterRequest {
   path: string
-  key_column?: string
-  parser_config?: ParserConfig
 }
 
 export interface FileRegisterResponse {
   id: number
   name: string
   file_type?: string
-  parser_config?: ParserConfig | null
   columns?: string[]
 }
 
@@ -161,7 +140,6 @@ export interface SchemaResponse {
   file_type?: string
   compare_mode?: CompareMode | string
   comparison_mode?: CompareMode | string
-  parser_config?: ParserConfig | null
   preview?: unknown
   summary?: unknown
   columns?: string[]
@@ -171,26 +149,8 @@ export interface SchemaResponse {
   [key: string]: unknown
 }
 
-export interface JoinFileSpec {
-  file_id: number
-  columns: string[]
-}
-
-export interface JoinRequest {
-  files: JoinFileSpec[]
-  join_type: 'left' | 'outer' | 'inner'
-  base_file_id?: number
-}
-
-export interface JoinResponse {
-  columns: string[]
-  data: string[][]
-  total_rows: number
-}
-
 export interface CheckRequest {
   file_ids: number[]
-  comparison_scope?: 'registered_table' | 'version_history'
 }
 
 export type ExcelDiffHighlight = 'added' | 'removed' | 'changed'
@@ -223,7 +183,6 @@ export interface ExcelDiffGridColumn {
   index: number
   letter: string
   name: string
-  is_key: boolean
 }
 
 export interface ExcelDiffGridCell {
@@ -242,7 +201,6 @@ export interface ExcelDiffGridRow {
   sheet_name?: string
   row_index: number
   row_number: number
-  key_value: string
   cells: ExcelDiffGridCell[]
 }
 
@@ -267,7 +225,6 @@ export interface ExcelDiffGridResponse {
   }
   row_count: number
   column_count: number
-  key_column: string
   sheet_name: string
   partial: boolean
   omitted_focus_count: number
@@ -394,8 +351,6 @@ export interface FolderScanResponse {
 
 export interface BulkRegisterItem {
   path: string
-  key_column?: string
-  parser_config?: ParserConfig
 }
 
 export interface BulkRegisterRequest {
@@ -572,50 +527,6 @@ export function getFileTypeLabel(fileType: unknown): string {
   return toStringValue(fileType) || 'Unknown'
 }
 
-export function isExcelFile(fileType: unknown): boolean {
-  return normalizeFileType(fileType) === 'Excel'
-}
-
-export function formatColumnIndex(column: number): string {
-  let current = Math.max(1, column)
-  let output = ''
-
-  while (current > 0) {
-    const remainder = (current - 1) % 26
-    output = String.fromCharCode(65 + remainder) + output
-    current = Math.floor((current - 1) / 26)
-  }
-
-  return output || '-'
-}
-
-export function formatParserConfigSummary(parserConfig: ParserConfig | null | undefined): string[] {
-  if (!isRecord(parserConfig) || !('sheet_name' in parserConfig) || !('header_row' in parserConfig)) {
-    return []
-  }
-
-  const sheetName = toStringValue(parserConfig.sheet_name) || '시트 미상'
-  const headerRow = toNumberValue(parserConfig.header_row, 1)
-  const startColValue = toNumberValue(parserConfig.start_col, 1)
-  const endColValue = toNumberValue(parserConfig.end_col, startColValue)
-  const endRowValue =
-    parserConfig.end_row === null || parserConfig.end_row === undefined
-      ? null
-      : toNumberValue(parserConfig.end_row, 0)
-  const startCol = formatColumnIndex(startColValue)
-  const endCol = formatColumnIndex(endColValue)
-  const rowSummary =
-    endRowValue && endRowValue > 0
-      ? `${startCol}${headerRow}:${endCol}${endRowValue}`
-      : `${startCol}:${endCol}`
-
-  return [
-    `${sheetName} 시트`,
-    `헤더 ${headerRow}행`,
-    `영역 ${rowSummary}`,
-  ]
-}
-
 function buildCapabilitySummary(mode: CompareMode, _fileType: FileType): string[] {
   if (mode === 'excel') return ['Excel 문서', '검색 및 비교 가능', '표 내용 확인 가능']
   if (mode === 'word') return ['Word 문서', '2개 문서 비교', '문단/표 행 변경 확인']
@@ -699,80 +610,24 @@ function normalizeTable(value: unknown): PreviewTable {
   return { columns, rows }
 }
 
-function normalizeParserConfig(value: unknown): ParserConfig {
-  if (!isRecord(value)) return {}
-
-  if ('sheet_name' in value || 'header_row' in value || 'start_col' in value || 'end_col' in value) {
-    return {
-      sheet_name: toStringValue(value.sheet_name),
-      header_row: toNumberValue(value.header_row, 1),
-      start_col: toNumberValue(value.start_col, 1),
-      end_col: toNumberValue(value.end_col, toNumberValue(value.start_col, 1)),
-      end_row:
-        value.end_row === null || value.end_row === undefined ? null : toNumberValue(value.end_row, 0),
-    } satisfies ExcelParserConfig
-  }
-
-  return { ...value }
-}
-
-function buildCandidateLabel(index: number, parserConfig: ParserConfig): string {
-  const summary = formatParserConfigSummary(parserConfig)
-  return summary[0] ? `후보 ${index + 1} · ${summary.join(' · ')}` : `후보 ${index + 1}`
-}
-
-function normalizeExcelCandidates(value: unknown): ExcelTableCandidate[] {
-  if (!Array.isArray(value)) return []
-
-  return value.map((entry, index) => {
-    const record = isRecord(entry) ? entry : {}
-    const parserConfig = normalizeParserConfig(record.parser_config ?? record.config ?? record)
-    const table = normalizeTable(record.preview ?? record)
-    const summary = uniqueStrings([
-      ...formatParserConfigSummary(parserConfig),
-      record.score !== undefined ? `점수 ${toNumberValue(record.score).toFixed(1)}` : '',
-    ])
-
-    return {
-      id: toStringValue(record.id) || `candidate-${index}`,
-      label: toStringValue(record.label) || buildCandidateLabel(index, parserConfig),
-      summary,
-      parserConfig,
-      table,
-      score: record.score === undefined ? undefined : toNumberValue(record.score),
-    }
-  })
-}
-
-function normalizePreview(
-  payload: unknown,
-  mode: CompareMode,
-  parserCandidates: ExcelTableCandidate[],
-  parserConfig: ParserConfig
-): NormalizedPreview {
+function normalizePreview(payload: unknown, mode: CompareMode): NormalizedPreview {
   const record = isRecord(payload) ? payload : {}
 
   const table = normalizeTable(record.preview ?? record)
   const summary = uniqueStrings([
     ...toStringArray(record.summary),
     ...toStringArray(record.highlights),
-    ...formatParserConfigSummary(parserConfig),
   ])
   const blocks = normalizePreviewBlocks(record.blocks ?? record.items ?? record.preview_blocks)
   const slides = normalizeSlides(record.slides ?? record.preview_slides)
 
   if (mode === 'excel') {
-    const fallbackTable = parserCandidates[0]?.table ?? table
-    const fallbackSummary = parserCandidates[0]?.summary ?? summary
     return {
       mode,
-      table: {
-        columns: fallbackTable.columns.length > 0 ? fallbackTable.columns : table.columns,
-        rows: fallbackTable.rows.length > 0 ? fallbackTable.rows : table.rows,
-      },
+      table,
       blocks: [],
       slides: [],
-      summary: summary.length > 0 ? summary : fallbackSummary,
+      summary,
     }
   }
 
@@ -788,18 +643,7 @@ function normalizePreview(
 export function normalizeFileInspect(payload: FileInspectResponse): NormalizedFileInspect {
   const fileType = normalizeFileType(payload.file_type)
   const compareMode = getCompareMode(payload.compare_mode ?? payload.comparison_mode, fileType)
-  const parserCandidates = normalizeExcelCandidates(payload.table_candidates ?? payload.parser_candidates)
-  const parserConfig =
-    normalizeParserConfig(payload.parser_config) ||
-    parserCandidates[0]?.parserConfig ||
-    {}
-  const preview = normalizePreview(payload.preview ?? payload, compareMode, parserCandidates, parserConfig)
-  const fallbackColumns = preview.table.columns
-  const keyOptions = uniqueStrings([
-    ...fallbackColumns,
-    ...toStringArray(payload.columns),
-    ...parserCandidates.flatMap((candidate) => candidate.table.columns),
-  ])
+  const preview = normalizePreview(payload.preview ?? payload, compareMode)
   const capabilitySummary = uniqueStrings([
     ...toStringArray(payload.summary),
     ...toStringArray(payload.compare_capabilities),
@@ -811,14 +655,6 @@ export function normalizeFileInspect(payload: FileInspectResponse): NormalizedFi
     name: payload.name,
     fileType,
     compareMode,
-    keyRequired: false,
-    suggestedKey: toStringValue(payload.suggested_key_column),
-    keyOptions,
-    parserConfig:
-      Object.keys(parserConfig).length > 0
-        ? parserConfig
-        : parserCandidates[0]?.parserConfig ?? {},
-    parserCandidates,
     preview,
     capabilitySummary,
   }
@@ -830,12 +666,8 @@ export function normalizeSchemaResponse(
 ): NormalizedPreview {
   const normalizedType = normalizeFileType(payload.file_type ?? fileType)
   const compareMode = getCompareMode(payload.compare_mode ?? payload.comparison_mode, normalizedType)
-  const parserConfig = normalizeParserConfig(payload.parser_config)
-  const parserCandidates = normalizeExcelCandidates(
-    payload.table_candidates ?? payload.parser_candidates
-  )
 
-  return normalizePreview(payload.preview ?? payload, compareMode, parserCandidates, parserConfig)
+  return normalizePreview(payload.preview ?? payload, compareMode)
 }
 
 export function getSchemaColumns(payload: SchemaResponse, fileType: unknown): string[] {
@@ -909,7 +741,7 @@ function normalizeExcelIssues(value: unknown): ExcelCheckIssue[] {
       ...normalizeExcelFileRefs(record.present_in, columnGroup, '있음'),
       ...normalizeExcelFileRefs(record.missing_in, columnGroup, '누락'),
     ]
-    const key = toStringValue(record.key_normalized ?? record.key ?? record.key_value)
+    const key = toStringValue(record.key_normalized ?? record.key)
 
     return {
       id: toStringValue(record.id) || `excel-issue-${index}`,
@@ -1273,10 +1105,6 @@ export const api = {
     delete: async (id: number) => axios.delete(await apiPath(`/api/files/${id}`)),
     deleteAll: async () => axios.delete<ClearRegisteredFilesResult>(await apiPath('/api/files')),
     schema: async (id: number) => axios.get<SchemaResponse>(await apiPath(`/api/files/${id}/schema`)),
-    suggestKey: (id: number) =>
-      apiPath(`/api/files/${id}/suggest-key`).then((url) =>
-        axios.get<{ columns?: string[]; suggested_key_column?: string }>(url)
-      ),
     pickFolder: pickFolderWithBestAvailableDialog,
     scanFolder: (data: FolderScanRequest) =>
       apiPath('/api/files/scan-folder').then((url) => axios.post<FolderScanResponse>(url, data)),
@@ -1296,12 +1124,6 @@ export const api = {
       }
       return axios.post(await apiPath(`/api/files/${id}/show-in-folder`))
     },
-  },
-  query: {
-    join: (data: JoinRequest) =>
-      apiPath('/api/query/join').then((url) => axios.post<JoinResponse>(url, data)),
-    export: (data: JoinRequest) =>
-      apiPath('/api/query/export').then((url) => axios.post(url, data, { responseType: 'blob' })),
   },
   check: {
     run: (data: CheckRequest) =>

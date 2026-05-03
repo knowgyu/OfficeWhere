@@ -105,8 +105,6 @@ def extract_word_blocks(path: str) -> List[Dict[str, Any]]:
 def inspect_word_blocks(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
     sample = [[block["block_type"], block["text"]] for block in blocks[:5]]
     return {
-        "parser_config": {},
-        "table_candidates": [],
         "columns": ["block_type", "text"],
         "sample": sample,
         "block_count": len(blocks),

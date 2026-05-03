@@ -92,7 +92,6 @@ def test_excel_inspect_uses_first_non_empty_visible_sheet(tmp_path):
 
     result = inspect_file_path(str(path))
 
-    assert result["parser_config"]["sheet_name"] == "데이터"
     assert result["columns"] == ["항목", "값"]
     assert result["sample"][0] == ["중요", "세컨드시트"]
 
@@ -116,16 +115,18 @@ def test_extract_excel_used_ranges_reads_all_visible_sheets_and_skips_hidden(tmp
     assert ranges[1].non_empty_cell_count == 1
 
 
-def test_excel_discovery_keeps_full_end_row_when_scan_is_bounded(tmp_path):
+def test_excel_discovery_keeps_full_used_range_for_large_sheet(tmp_path):
     path = tmp_path / "large.xlsx"
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.append(["과제명", "담당자"])
-    for idx in range(excel_analysis.HEADER_SCAN_ROW_BUDGET + 20):
+    rows = 180
+    for idx in range(rows):
         worksheet.append([f"A{idx}", "Kim"])
     workbook.save(path)
 
     result = inspect_file_path(str(path))
+    ranges = excel_analysis.extract_excel_used_ranges(str(path))
 
-    assert result["parser_config"]["end_row"] == excel_analysis.HEADER_SCAN_ROW_BUDGET + 21
+    assert ranges[0].row_count == rows + 1
     assert result["sample"][0] == ["A0", "Kim"]

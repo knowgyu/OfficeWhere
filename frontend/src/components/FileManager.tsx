@@ -13,9 +13,7 @@ import {
   NormalizedFileInspect,
   NormalizedPreview,
   SchemaResponse,
-  formatParserConfigSummary,
   getOfficeWhereBridge,
-  isExcelFile,
   normalizeFileInspect,
   normalizeSchemaResponse,
 } from '../api/client'
@@ -207,9 +205,7 @@ export default function FileManager({
   const [loading, setLoading] = useState(false)
 
   const [filePath, setFilePath] = useState('')
-  const [keyColumn, setKeyColumn] = useState('')
   const [inspectedFile, setInspectedFile] = useState<NormalizedFileInspect | null>(null)
-  const [selectedCandidateId, setSelectedCandidateId] = useState('')
   const [inspecting, setInspecting] = useState(false)
   const [picking, setPicking] = useState(false)
   const [registering, setRegistering] = useState(false)
@@ -660,44 +656,16 @@ export default function FileManager({
 
   const resetInspection = () => {
     setInspectedFile(null)
-    setSelectedCandidateId('')
-    setKeyColumn('')
   }
 
   const applyInspection = (payload: FileInspectResponse) => {
     const normalized = normalizeFileInspect(payload)
-    const firstCandidateId = normalized.parserCandidates[0]?.id ?? ''
 
     setInspectedFile(normalized)
     setFilePath(normalized.path)
-    setSelectedCandidateId(firstCandidateId)
-    setKeyColumn(
-      normalized.keyRequired ? normalized.suggestedKey || normalized.keyOptions[0] || '' : '',
-    )
   }
 
-  const selectedCandidate = useMemo(() => {
-    if (!inspectedFile || inspectedFile.compareMode !== 'excel') return null
-    return (
-      inspectedFile.parserCandidates.find((candidate) => candidate.id === selectedCandidateId) ??
-      inspectedFile.parserCandidates[0] ??
-      null
-    )
-  }, [inspectedFile, selectedCandidateId])
-
-  const effectivePreview = useMemo(() => {
-    if (!inspectedFile) return null
-    if (!selectedCandidate) return inspectedFile.preview
-    return {
-      ...inspectedFile.preview,
-      table: selectedCandidate.table,
-      summary:
-        selectedCandidate.summary.length > 0 ? selectedCandidate.summary : inspectedFile.preview.summary,
-    }
-  }, [inspectedFile, selectedCandidate])
-
-  const availableColumns = selectedCandidate?.table.columns ?? inspectedFile?.keyOptions ?? []
-  const keyRequired = inspectedFile?.keyRequired ?? false
+  const effectivePreview = inspectedFile?.preview ?? null
   const normalizedFolderDraft = folderPathDraft.trim()
   const hasPendingNewFolder =
     Boolean(normalizedFolderDraft) &&
@@ -758,24 +726,6 @@ export default function FileManager({
     }
   }
 
-  const handleCandidateChange = (candidateId: string) => {
-    if (!inspectedFile || inspectedFile.compareMode !== 'excel') return
-    const candidate =
-      inspectedFile.parserCandidates.find((item) => item.id === candidateId) ??
-      inspectedFile.parserCandidates[0]
-
-    setSelectedCandidateId(candidateId)
-    if (!candidate) return
-
-    const nextColumns = candidate.table.columns
-    if (nextColumns.length === 0) return
-
-    if (!nextColumns.includes(keyColumn)) {
-      const nextKey = inspectedFile.suggestedKey
-      setKeyColumn(nextKey && nextColumns.includes(nextKey) ? nextKey : nextColumns[0] ?? '')
-    }
-  }
-
   const handleRegister = async () => {
     if (!filePath.trim()) {
       snackbar.warn('파일 경로를 입력해 주세요.')
@@ -785,11 +735,6 @@ export default function FileManager({
       snackbar.warn('먼저 파일 검사를 실행해 주세요.')
       return
     }
-    if (keyRequired && !keyColumn.trim()) {
-      snackbar.warn('Excel 등록 옵션을 선택해 주세요.')
-      return
-    }
-
     setRegistering(true)
     try {
       await api.files.register({ path: filePath.trim() })
@@ -1167,12 +1112,7 @@ export default function FileManager({
             {inspectedFile && (
               <InspectionCard
                 inspectedFile={inspectedFile}
-                selectedCandidateId={selectedCandidateId}
                 effectivePreview={effectivePreview}
-                keyColumn={keyColumn}
-                onKeyColumn={setKeyColumn}
-                onCandidateChange={handleCandidateChange}
-                availableColumns={availableColumns}
                 onRegister={handleRegister}
                 registering={registering}
               />
@@ -1470,12 +1410,6 @@ export default function FileManager({
           <div className="space-y-4">
             <div className="flex gap-2 flex-wrap">
               <FileTypeBadge fileType={previewFile.file_type} />
-              {isExcelFile(previewFile.file_type) && previewFile.key_column && (
-                <Chip label={`행 기준 ${previewFile.key_column}`} tone="primary" as="span" />
-              )}
-              {formatParserConfigSummary(previewFile.parser_config ?? undefined).map((item) => (
-                <Chip key={item} label={item} tone="neutral" as="span" />
-              ))}
             </div>
 
             {schemaLoading ? (
@@ -1578,28 +1512,15 @@ export default function FileManager({
 
 function InspectionCard({
   inspectedFile,
-  selectedCandidateId,
   effectivePreview,
-  keyColumn,
-  onKeyColumn,
-  onCandidateChange,
-  availableColumns,
   onRegister,
   registering,
 }: {
   inspectedFile: NormalizedFileInspect
-  selectedCandidateId: string
   effectivePreview: NormalizedPreview | null
-  keyColumn: string
-  onKeyColumn: (value: string) => void
-  onCandidateChange: (id: string) => void
-  availableColumns: string[]
   onRegister: () => void
   registering: boolean
 }) {
-  const parserSummary: string[] = []
-  const keyRequired = inspectedFile.keyRequired
-
   return (
     <div className="rounded-md bg-[var(--md-sys-color-primary-container)] p-5 space-y-5 animate-slide-up">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -1628,124 +1549,18 @@ function InspectionCard({
         </div>
       </div>
 
-      {inspectedFile.compareMode === 'excel' && inspectedFile.parserCandidates.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <p className="type-title-sm text-[var(--md-sys-color-on-primary-container)]">
-              표 후보 영역
-            </p>
-            <p className="type-body-sm text-[var(--md-sys-color-on-primary-container)] opacity-80">
-              실제 데이터 표로 사용할 영역을 선택하세요. 선택값은 다음 검색/비교 때 그대로 사용됩니다.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {inspectedFile.parserCandidates.map((candidate) => {
-              const active = candidate.id === selectedCandidateId
-              return (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  onClick={() => onCandidateChange(candidate.id)}
-                  aria-pressed={active}
-                  className={`text-left rounded-md p-4 border-2 transition-all state-host relative ${
-                    active
-                      ? 'bg-[var(--md-sys-color-surface-container-lowest)] border-[var(--md-sys-color-primary)] shadow-elev-2'
-                      : 'bg-[var(--md-sys-color-surface-container-lowest)]/60 border-transparent hover:border-[var(--md-sys-color-outline-variant)]'
-                  }`}
-                >
-                  <span className="state-layer" />
-                  <div className="flex items-center gap-2">
-                    <Icon
-                      name={active ? 'check_circle' : 'grid_on'}
-                      size={18}
-                      filled={active}
-                      className={
-                        active
-                          ? 'text-[var(--md-sys-color-primary)]'
-                          : 'text-[var(--md-sys-color-on-surface-variant)]'
-                      }
-                    />
-                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                      {candidate.label}
-                    </p>
-                  </div>
-                  {candidate.summary.length > 0 && (
-                    <div className="mt-3 flex gap-1.5 flex-wrap">
-                      {candidate.summary.map((item) => (
-                        <Chip key={item} label={item} tone="neutral" as="span" />
-                      ))}
-                    </div>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,280px)_1fr] gap-4">
         <div className="space-y-3">
-          <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-3">
+          <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-2">
             <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
-              등록 옵션
+              등록 안내
             </p>
-            {keyRequired ? (
-              <div className="space-y-2">
-                {availableColumns.length > 0 ? (
-                  <SelectField
-                    label="행을 맞출 기준"
-                    value={keyColumn}
-                    onChange={(event) => onKeyColumn(event.target.value)}
-                  >
-                    <option value="">행 기준 선택</option>
-                    {availableColumns.map((column) => (
-                      <option key={column} value={column}>
-                        {column}
-                        {column === inspectedFile.suggestedKey ? ' (추천)' : ''}
-                      </option>
-                    ))}
-                  </SelectField>
-                ) : (
-                  <TextField
-                    label="행을 맞출 기준"
-                    placeholder="예: ID, 사번, 과제명"
-                    value={keyColumn}
-                    onChange={(event) => onKeyColumn(event.target.value)}
-                  />
-                )}
-                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  추천 기준 · <strong>{inspectedFile.suggestedKey || '없음'}</strong>
-                </p>
-                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  여러 Excel 파일을 비교할 때 같은 항목의 행을 맞추는 데 사용됩니다.
-                </p>
-              </div>
-            ) : (
-              <div className="rounded-md bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 space-y-1">
-                <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
-                  이 형식은 별도 행 기준 없이 등록됩니다.
-                </p>
-                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  검색과 2개 파일 변경 비교에 사용할 수 있습니다.
-                </p>
-              </div>
-            )}
-
-            {parserSummary.length > 0 && (
-              <div className="space-y-1">
-                <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
-                  저장될 표 읽기 설정
-                </p>
-                {parserSummary.map((item) => (
-                  <p
-                    key={item}
-                    className="type-body-sm text-[var(--md-sys-color-on-surface)] font-mono"
-                  >
-                    {item}
-                  </p>
-                ))}
-              </div>
-            )}
+            <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
+              원본 문서는 수정하지 않고 앱 목록과 검색 준비 데이터에만 등록합니다.
+            </p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              등록 후 파일명·문서 내용 검색과 같은 형식의 변경 비교에 사용할 수 있습니다.
+            </p>
           </div>
 
           <Button
@@ -1755,7 +1570,7 @@ function InspectionCard({
             loading={registering}
             fullWidth
           >
-            현재 설정으로 등록
+            문서 등록
           </Button>
         </div>
 

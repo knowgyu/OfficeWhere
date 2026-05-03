@@ -219,14 +219,14 @@ def test_library_rescan_request_rejects_invalid_mode():
         LibraryRescanRequest(mode="turbo")
 
 
-def test_classify_index_error_parser_config_out_of_range():
+def test_classify_index_error_invalid_number_is_user_safe():
     from backend.core.library import classify_index_error
 
-    diagnostic = classify_index_error(ValueError("parser_config row 범위가 시트 크기를 벗어났습니다."), "bad.xlsx")
+    diagnostic = classify_index_error(ValueError("invalid literal for int() with base 10: 'abc'"), "bad.xlsx")
 
-    assert diagnostic["error_code"] == "parser_config_out_of_range"
-    assert diagnostic["error_stage"] == "parser_config"
-    assert "표 범위" in diagnostic["error_hint"]
+    assert diagnostic["error_code"] == "office_parser_error"
+    assert diagnostic["error_stage"] == "office_parser"
+    assert "traceback" not in diagnostic["error_hint"].lower()
 
 
 def test_classify_index_error_index_error_is_user_safe():
@@ -495,8 +495,8 @@ def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch,
 
     monkeypatch.setattr(library, "_collect_supported_paths_with_stats", lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(target)]))
 
-    def fail_inspect(_path, parser_config=None):
-        raise ValueError("parser_config row 범위가 시트 크기를 벗어났습니다.")
+    def fail_inspect(_path):
+        raise IndexError("list index out of range")
 
     monkeypatch.setattr(library, "inspect_and_chunk", fail_inspect)
 
@@ -505,12 +505,12 @@ def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch,
     assert response.failed == 1
     result = response.results[0]
     assert result.diagnostic_id
-    assert result.error_code == "parser_config_out_of_range"
+    assert result.error_code == "unsupported_or_corrupt_file"
     assert result.error_hint
     assert result.diagnostic_id in caplog.text
 
 
-def test_rescan_excel_indexes_used_range_without_parser_config(tmp_path, monkeypatch):
+def test_rescan_excel_indexes_used_range(tmp_path, monkeypatch):
     import os
     import time
 
@@ -530,25 +530,6 @@ def test_rescan_excel_indexes_used_range_without_parser_config(tmp_path, monkeyp
     first = library.rescan_library()
     assert first.failed == 0
     assert first.registered == 1
-    first_row = get_all_files()[0]
-    assert first_row["parser_config"] == {}
-
-    stale_parser_config = {
-        "sheet_name": "Sheet1",
-        "header_row": 1,
-        "start_col": 1,
-        "end_col": 99,
-        "end_row": 99,
-    }
-    register_file(str(target), target.name, "Excel", "ID", 99, parser_config=stale_parser_config)
-
-    repaired = library.rescan_library()
-
-    assert repaired.failed == 0
-    assert repaired.skipped == 1
-    repaired_row = get_all_files()[0]
-    assert repaired_row["parser_config"] == {}
-
     _write_excel(target, {"ID": ["A"], "담당자": ["Kim"], "새열": ["새값"]})
     next_mtime = time.time() + 3
     os.utime(target, (next_mtime, next_mtime))
@@ -557,12 +538,10 @@ def test_rescan_excel_indexes_used_range_without_parser_config(tmp_path, monkeyp
 
     assert second.failed == 0
     assert second.updated == 1
-    updated_row = get_all_files()[0]
-    assert updated_row["parser_config"] == {}
     assert search("새값")[0]["location"] == "Sheet1 시트 | 2행 C열"
 
 
-def test_rescan_ignores_legacy_stale_excel_config_for_unchanged_files(tmp_path, monkeypatch):
+def test_rescan_skips_unchanged_excel_without_registration_metadata(tmp_path, monkeypatch):
     from backend.core import library
 
     monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
@@ -578,25 +557,14 @@ def test_rescan_ignores_legacy_stale_excel_config_for_unchanged_files(tmp_path, 
     first = library.rescan_library(mode="normal")
     assert first.registered == 1
 
-    stale_parser_config = {
-        "sheet_name": "Sheet1",
-        "header_row": 1,
-        "start_col": 1,
-        "end_col": 99,
-        "end_row": 99,
-    }
-    register_file(str(target), target.name, "Excel", "ID", 99, parser_config=stale_parser_config)
-
     fast = library.rescan_library(mode="fast")
     assert fast.skipped == 1
-    assert get_all_files()[0]["parser_config"] == {}
 
     repaired = library.rescan_library(mode="normal")
     assert repaired.skipped == 1
-    assert get_all_files()[0]["parser_config"] == {}
 
 
-def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path, monkeypatch):
+def test_rescan_registers_excel_without_registration_key_metadata(tmp_path, monkeypatch):
     from backend.core import library
 
     monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
@@ -613,13 +581,8 @@ def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
-        lambda _path, parser_config=None: (
-            {
-                "name": target.name,
-                "file_type": "Excel",
-                "columns": [],
-                "parser_config": {},
-            },
+        lambda _path: (
+            {'name': target.name, 'file_type': 'Excel', 'columns': []},
             [{"location": "Sheet1 시트 | 1행 A열", "content": "표가 아닌 메모"}],
         ),
     )
@@ -628,8 +591,7 @@ def test_rescan_registers_excel_without_detected_key_for_version_review(tmp_path
 
     assert response.failed == 0
     assert response.registered == 1
-    row = get_all_files()[0]
-    assert row["key_column"] == ""
+    assert get_all_files()[0]["name"] == target.name
 
 
 def test_parallel_indexed_file_saves_do_not_compete_for_sqlite_writer(tmp_path, monkeypatch):
@@ -642,16 +604,7 @@ def test_parallel_indexed_file_saves_do_not_compete_for_sqlite_writer(tmp_path, 
     init_db()
 
     def save_one(index: int) -> int:
-        return save_indexed_file(
-            path=str(tmp_path / f"note-{index}.docx"),
-            name=f"note-{index}.docx",
-            file_type="Word",
-            key_column="",
-            column_count=0,
-            chunks=[{"location": "문단", "content": f"동시 저장 샘플 {index}"}],
-            file_mtime=float(index),
-            parser_config={},
-        )
+        return save_indexed_file(path=str(tmp_path / f'note-{index}.docx'), name=f'note-{index}.docx', file_type='Word', column_count=0, chunks=[{'location': '문단', 'content': f'동시 저장 샘플 {index}'}], file_mtime=float(index))
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         file_ids = list(executor.map(save_one, range(40)))
@@ -669,16 +622,7 @@ def test_save_indexed_files_batch_indexes_multiple_files_in_one_commit(tmp_path,
     init_db()
 
     payloads = [
-        prepare_indexed_file(
-            path=str(tmp_path / f"note-{index}.docx"),
-            name=f"note-{index}.docx",
-            file_type="Word",
-            key_column="",
-            column_count=0,
-            chunks=[{"location": "문단", "content": f"배치 저장 샘플 {index}"}],
-            file_mtime=float(index),
-            parser_config={},
-        )
+        prepare_indexed_file(path=str(tmp_path / f'note-{index}.docx'), name=f'note-{index}.docx', file_type='Word', column_count=0, chunks=[{'location': '문단', 'content': f'배치 저장 샘플 {index}'}], file_mtime=float(index))
         for index in range(3)
     ]
 
@@ -698,29 +642,11 @@ def test_save_indexed_files_batch_replaces_chunks_and_fingerprint(tmp_path, monk
     init_db()
 
     target = tmp_path / "note.docx"
-    first_payload = prepare_indexed_file(
-        path=str(target),
-        name=target.name,
-        file_type="Word",
-        key_column="",
-        column_count=0,
-        chunks=[{"location": "문단", "content": "처음전용 배치 내용"}],
-        file_mtime=1.0,
-        parser_config={},
-    )
+    first_payload = prepare_indexed_file(path=str(target), name=target.name, file_type='Word', column_count=0, chunks=[{'location': '문단', 'content': '처음전용 배치 내용'}], file_mtime=1.0)
     [file_id] = save_indexed_files_batch([first_payload])
     first_fingerprint = get_file_fingerprints()[file_id]["content_hash"]
 
-    updated_payload = prepare_indexed_file(
-        path=str(target),
-        name=target.name,
-        file_type="Word",
-        key_column="",
-        column_count=0,
-        chunks=[{"location": "문단", "content": "교체전용 배치 내용"}],
-        file_mtime=2.0,
-        parser_config={},
-    )
+    updated_payload = prepare_indexed_file(path=str(target), name=target.name, file_type='Word', column_count=0, chunks=[{'location': '문단', 'content': '교체전용 배치 내용'}], file_mtime=2.0)
     [updated_file_id] = save_indexed_files_batch([updated_payload])
     updated_fingerprint = get_file_fingerprints()[updated_file_id]
 
@@ -756,13 +682,8 @@ def test_library_rescan_flushes_prepared_files_in_batches(tmp_path, monkeypatch)
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
-        lambda path, parser_config=None: (
-            {
-                "name": Path(path).name,
-                "file_type": "Word",
-                "columns": [],
-                "parser_config": {},
-            },
+        lambda path: (
+            {'name': Path(path).name, 'file_type': 'Word', 'columns': []},
             [{"location": "문단", "content": f"{path} 배치 색인"}],
         ),
     )
@@ -817,13 +738,8 @@ def test_initial_rescan_stages_bulk_index_and_preserves_settings(tmp_path, monke
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
-        lambda path, parser_config=None: (
-            {
-                "name": Path(path).name,
-                "file_type": "Word",
-                "columns": [],
-                "parser_config": {},
-            },
+        lambda path: (
+            {'name': Path(path).name, 'file_type': 'Word', 'columns': []},
             [{"location": "문단", "content": f"{Path(path).stem} 초기 스테이징 색인"}],
         ),
     )
@@ -873,13 +789,8 @@ def test_library_rescan_flushes_by_chunk_count_and_emits_saving_stage(tmp_path, 
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
-        lambda path, parser_config=None: (
-            {
-                "name": Path(path).name,
-                "file_type": "Word",
-                "columns": [],
-                "parser_config": {},
-            },
+        lambda path: (
+            {'name': Path(path).name, 'file_type': 'Word', 'columns': []},
             [
                 {"location": "문단 1", "content": f"{path} 청크 1"},
                 {"location": "문단 2", "content": f"{path} 청크 2"},
@@ -915,7 +826,7 @@ def test_rescan_prunes_legacy_text_and_markdown_rows_without_source_delete(tmp_p
 
     legacy = tmp_path / "legacy.txt"
     legacy.write_text("남아있는 원본", encoding="utf-8")
-    legacy_id = register_file(str(legacy), legacy.name, "Text", "", 0)
+    legacy_id = register_file(str(legacy), legacy.name, 'Text', 0)
     save_file_chunks(legacy_id, [{"location": "본문", "content": "예전 텍스트 색인"}])
 
     target = tmp_path / "current.docx"
@@ -931,13 +842,8 @@ def test_rescan_prunes_legacy_text_and_markdown_rows_without_source_delete(tmp_p
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
-        lambda path, parser_config=None: (
-            {
-                "name": target.name,
-                "file_type": "Word",
-                "columns": [],
-                "parser_config": {},
-            },
+        lambda path: (
+            {'name': target.name, 'file_type': 'Word', 'columns': []},
             [{"location": "문단", "content": "현재 워드 색인"}],
         ),
     )
@@ -973,13 +879,8 @@ def test_library_rescan_logs_single_large_file_flush_reason(tmp_path, monkeypatc
     monkeypatch.setattr(
         library,
         "inspect_and_chunk",
-        lambda path, parser_config=None: (
-            {
-                "name": target.name,
-                "file_type": "Word",
-                "columns": [],
-                "parser_config": {},
-            },
+        lambda path: (
+            {'name': target.name, 'file_type': 'Word', 'columns': []},
             [{"location": f"문단 {index}", "content": f"큰 파일 청크 {index}"} for index in range(4)],
         ),
     )

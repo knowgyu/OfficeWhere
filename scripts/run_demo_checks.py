@@ -23,22 +23,8 @@ def run_excel_demo() -> None:
     file_v2 = OUTPUT_DIR / "excel_budget_v2.xlsx"
     compare_result = run_consistency_check(
         [
-            {
-                "id": 1,
-                "path": str(file_v1),
-                "name": file_v1.name,
-                "file_type": "Excel",
-                "key_column": "",
-                "parser_config": {},
-            },
-            {
-                "id": 2,
-                "path": str(file_v2),
-                "name": file_v2.name,
-                "file_type": "Excel",
-                "key_column": "",
-                "parser_config": {},
-            },
+            {'id': 1, 'path': str(file_v1), 'name': file_v1.name, 'file_type': 'Excel'},
+            {'id': 2, 'path': str(file_v2), 'name': file_v2.name, 'file_type': 'Excel'},
         ]
     )
     print("[excel] compare issues:", len(compare_result["excel"]["issues"]))
@@ -49,8 +35,8 @@ def run_word_demo() -> None:
     file_v2 = OUTPUT_DIR / "proposal_note_v2.docx"
     result = run_consistency_check(
         [
-            {"id": 1, "path": str(file_v1), "name": file_v1.name, "file_type": "Word", "key_column": "", "parser_config": {}},
-            {"id": 2, "path": str(file_v2), "name": file_v2.name, "file_type": "Word", "key_column": "", "parser_config": {}},
+            {'id': 1, 'path': str(file_v1), 'name': file_v1.name, 'file_type': 'Word'},
+            {'id': 2, 'path': str(file_v2), 'name': file_v2.name, 'file_type': 'Word'},
         ]
     )
     print("[word] diff changes:", len(result["word"]["changes"]))
@@ -61,8 +47,8 @@ def run_ppt_demo() -> None:
     file_v2 = OUTPUT_DIR / "status_review_v2.pptx"
     result = run_consistency_check(
         [
-            {"id": 1, "path": str(file_v1), "name": file_v1.name, "file_type": "PowerPoint", "key_column": "", "parser_config": {}},
-            {"id": 2, "path": str(file_v2), "name": file_v2.name, "file_type": "PowerPoint", "key_column": "", "parser_config": {}},
+            {'id': 1, 'path': str(file_v1), 'name': file_v1.name, 'file_type': 'PowerPoint'},
+            {'id': 2, 'path': str(file_v2), 'name': file_v2.name, 'file_type': 'PowerPoint'},
         ]
     )
     print("[ppt] slide changes:", len(result["ppt"]["changes"]))

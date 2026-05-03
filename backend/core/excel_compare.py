@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, List
-
-if TYPE_CHECKING:
-    import pandas as pd
+from typing import Any, Dict, List
 
 from ..database import get_excel_cell_index, get_excel_sheet_index
 from .excel_analysis import extract_excel_used_ranges
-from .normalizer import normalize_key, values_equal
+from .normalizer import values_equal
 
 
 EXCEL_PREVIEW_ROW_LIMIT = 25
@@ -44,13 +41,6 @@ def _unique_in_order(values: List[Any]) -> List[Any]:
         if value not in unique:
             unique.append(value)
     return unique
-
-
-def _public_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [
-        {key: value for key, value in entry.items() if not key.startswith("_")}
-        for entry in entries
-    ]
 
 
 def _default_compare_metadata() -> Dict[str, Any]:
@@ -125,161 +115,6 @@ def _presence_status_by_file(
         item["info"]["id"]: "내용 있음" if item["info"]["id"] in present_ids else "내용 없음"
         for item in prepared_files
     }
-
-
-def _excel_location_metadata(
-    rows: "pd.DataFrame",
-    column: str,
-    parser_config: Dict[str, Any],
-    column_positions: Dict[str, int],
-) -> Dict[str, Any]:
-    """Return best-effort Excel coordinates for the compared column cells.
-
-    `extract_excel_table` resets the raw table slice index before dropping blank
-    rows, so the remaining DataFrame index preserves each row's data offset
-    below the header even when blank rows were filtered out.
-    """
-    if column not in column_positions or column not in rows.columns:
-        return {
-            "row_numbers": [],
-            "column_letters": [],
-            "cell_refs": [],
-            "row_count": 0,
-        }
-
-    excel_col = int(parser_config["start_col"]) + column_positions[column]
-    column_letter = _column_letter(excel_col)
-
-    row_numbers: List[int] = []
-    cell_refs: List[str] = []
-    for dataframe_index, _ in rows.iterrows():
-        excel_row = int(parser_config["header_row"]) + 1 + int(dataframe_index)
-        row_numbers.append(excel_row)
-        cell_refs.append(f"{column_letter}{excel_row}")
-
-    return {
-        "row_numbers": _unique_in_order(row_numbers),
-        "column_letters": [column_letter] if cell_refs else [],
-        "cell_refs": _unique_in_order(cell_refs),
-        "row_count": len(row_numbers),
-    }
-
-
-def _excel_row_metadata(
-    rows: "pd.DataFrame",
-    parser_config: Dict[str, Any],
-) -> Dict[str, Any]:
-    row_numbers: List[int] = []
-    row_values: List[List[str]] = []
-    for dataframe_index, row in rows.iterrows():
-        excel_row = int(parser_config["header_row"]) + 1 + int(dataframe_index)
-        row_numbers.append(excel_row)
-        row_values.append([_stringify_cell(row[column]) for column in rows.columns])
-
-    return {
-        "columns": [str(column) for column in rows.columns],
-        "row_numbers": _unique_in_order(row_numbers),
-        "column_letters": [],
-        "cell_refs": [],
-        "row_count": len(row_numbers),
-        "row_values": row_values,
-    }
-
-
-def _excel_column_metadata(
-    rows: "pd.DataFrame",
-    column: str,
-    key_column: str,
-    parser_config: Dict[str, Any],
-    column_positions: Dict[str, int],
-) -> Dict[str, Any]:
-    if column not in column_positions or column not in rows.columns:
-        return {
-            "columns": [key_column, column] if key_column else [column],
-            "row_numbers": [],
-            "column_letters": [],
-            "cell_refs": [],
-            "row_count": 0,
-            "row_values": [],
-        }
-
-    excel_col = int(parser_config["start_col"]) + column_positions[column]
-    column_letter = _column_letter(excel_col)
-    row_numbers: List[int] = []
-    cell_refs: List[str] = []
-    row_values: List[List[str]] = []
-    value_count = 0
-
-    for dataframe_index, row in rows.iterrows():
-        key_value = _stringify_cell(row[key_column]) if key_column in rows.columns else ""
-        cell_value = _stringify_cell(row[column])
-        if not key_value and not cell_value:
-            continue
-        value_count += 1
-        if len(row_values) >= EXCEL_PREVIEW_ROW_LIMIT:
-            continue
-        excel_row = int(parser_config["header_row"]) + 1 + int(dataframe_index)
-        row_numbers.append(excel_row)
-        cell_refs.append(f"{column_letter}{excel_row}")
-        row_values.append([key_value or EMPTY_VALUE_LABEL, cell_value or EMPTY_VALUE_LABEL])
-
-    return {
-        "columns": [key_column, column] if key_column else [column],
-        "row_numbers": _unique_in_order(row_numbers),
-        "column_letters": [column_letter] if row_values else [],
-        "cell_refs": _unique_in_order(cell_refs),
-        "row_count": value_count,
-        "row_values": row_values,
-    }
-
-
-def _distinct_non_empty(values: List[Any]) -> List[str]:
-    distinct: List[str] = []
-    for value in values:
-        if _is_missing(value):
-            continue
-        text = str(value).strip()
-        if not text:
-            continue
-        if not any(values_equal(text, existing) for existing in distinct):
-            distinct.append(text)
-    return distinct
-
-
-def _missing_row_message(key: str, prepared_files: List[Dict[str, Any]], present_files: List[Dict[str, Any]]) -> str:
-    present_ids = {item["info"]["id"] for item in present_files}
-    if len(prepared_files) == 2:
-        left, right = prepared_files
-        left_has = left["info"]["id"] in present_ids
-        right_has = right["info"]["id"] in present_ids
-        if not left_has and right_has:
-            return f'기준값 "{key}" 관련 내용이 추가되었습니다.'
-        if left_has and not right_has:
-            return f'기준값 "{key}" 관련 내용이 삭제되었습니다.'
-    return f'기준값 "{key}" 관련 내용이 일부 파일에만 있습니다.'
-
-
-def _missing_column_message(
-    column: str,
-    prepared_files: List[Dict[str, Any]],
-    present_files: List[Dict[str, Any]],
-) -> str:
-    present_ids = {item["info"]["id"] for item in present_files}
-    if len(prepared_files) == 2:
-        left, right = prepared_files
-        left_has = left["info"]["id"] in present_ids
-        right_has = right["info"]["id"] in present_ids
-        if not left_has and right_has:
-            return f'"{column}" 관련 내용이 추가되었습니다.'
-        if left_has and not right_has:
-            return f'"{column}" 관련 내용이 삭제되었습니다.'
-    return f'"{column}" 관련 내용이 일부 파일에만 있습니다.'
-
-
-def _cell_value_at(rows: "pd.DataFrame", row_index: int, column_index: int) -> str:
-    if row_index >= len(rows.index) or column_index >= len(rows.columns):
-        return ""
-    return _stringify_cell(rows.iat[row_index, column_index])
 
 
 def _version_cell_issue_type(before: str, after: str) -> str:
@@ -524,11 +359,5 @@ def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[st
     }
 
 
-def compare_excel_files(file_infos: List[Dict[str, Any]], comparison_scope: str = "version_history") -> Dict[str, Any]:
-    """Compare Excel versions by source cell coordinates.
-
-    The previous registered-table/key-column comparison belonged to the
-    disabled Excel Join flow.  Version Management now always uses the visible
-    used range so stale table metadata cannot block comparisons.
-    """
+def compare_excel_files(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
     return compare_excel_versions_by_cells(file_infos)

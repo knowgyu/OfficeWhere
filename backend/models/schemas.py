@@ -9,8 +9,6 @@ from ..file_constants import DEFAULT_EXCLUDED_FOLDER_NAMES
 
 class FileRegisterRequest(BaseModel):
     path: str
-    key_column: str = ""
-    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FileInfo(BaseModel):
@@ -18,9 +16,7 @@ class FileInfo(BaseModel):
     name: str
     path: str
     file_type: str
-    key_column: str
     column_count: int
-    parser_config: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[str] = None
     file_mtime: Optional[float] = None
 
@@ -38,7 +34,6 @@ class FileRegisterResponse(BaseModel):
     name: str
     file_type: str
     columns: List[str]
-    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FilesDeleteAllResponse(BaseModel):
@@ -49,7 +44,6 @@ class FilesDeleteAllResponse(BaseModel):
 class SchemaResponse(BaseModel):
     columns: List[str]
     sample: List[List[Any]]
-    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FileInspectRequest(BaseModel):
@@ -62,9 +56,6 @@ class FileInspectResponse(BaseModel):
     file_type: str
     columns: List[str]
     sample: List[List[Any]]
-    suggested_key_column: Optional[str] = None
-    parser_config: Dict[str, Any] = Field(default_factory=dict)
-    table_candidates: List[Dict[str, Any]] = Field(default_factory=list)
     comparison_mode: str
 
 
@@ -73,26 +64,8 @@ class FilePickResponse(BaseModel):
     file: Optional[FileInspectResponse] = None
 
 
-class JoinFileSpec(BaseModel):
-    file_id: int
-    columns: List[str]
-
-
-class JoinRequest(BaseModel):
-    files: List[JoinFileSpec]
-    join_type: str = "outer"
-    base_file_id: Optional[int] = None
-
-
-class JoinResponse(BaseModel):
-    columns: List[str]
-    data: List[List[Any]]
-    total_rows: int
-
-
 class CheckRequest(BaseModel):
     file_ids: List[int]
-    comparison_scope: Literal["registered_table", "version_history"] = "version_history"
 
 
 class ExcelDiffFocusHistory(BaseModel):
@@ -128,7 +101,6 @@ class ExcelDiffGridColumn(BaseModel):
     index: int
     letter: str
     name: str
-    is_key: bool = False
 
 
 class ExcelDiffGridCell(BaseModel):
@@ -147,7 +119,6 @@ class ExcelDiffGridRow(BaseModel):
     sheet_name: str = ""
     row_index: int
     row_number: int
-    key_value: str = ""
     cells: List[ExcelDiffGridCell]
 
 
@@ -169,7 +140,6 @@ class ExcelDiffGridResponse(BaseModel):
     latest_file: FileRef
     row_count: int
     column_count: int
-    key_column: str
     sheet_name: str
     partial: bool = False
     omitted_focus_count: int = 0
@@ -293,9 +263,6 @@ class ScannedFileInfo(BaseModel):
     file_type: str
     columns: List[str]
     sample: List[List[Any]]
-    suggested_key_column: Optional[str] = None
-    parser_config: Dict[str, Any] = Field(default_factory=dict)
-    table_candidates: List[Dict[str, Any]] = Field(default_factory=list)
     comparison_mode: str
     error: Optional[str] = None
 
@@ -313,8 +280,6 @@ class FolderPickResponse(BaseModel):
 
 class BulkRegisterItem(BaseModel):
     path: str
-    key_column: str = ""
-    parser_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BulkRegisterRequest(BaseModel):

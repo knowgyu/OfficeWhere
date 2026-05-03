@@ -450,7 +450,6 @@ export default function ConsistencyCheck({
       try {
         const response = await api.check.run({
           file_ids: [transition.fromFile.id, transition.toFile.id],
-          comparison_scope: 'version_history',
         })
         if (!isCurrentRun()) return
         const normalized = normalizeCheckResponse(response.data)

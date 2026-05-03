@@ -18,13 +18,7 @@ def _setup_db(tmp_path, monkeypatch):
 
 
 def _register_word(path: str, name: str = "보고서.docx") -> int:
-    return register_file(
-        path=path,
-        name=name,
-        file_type="Word",
-        key_column="",
-        column_count=0,
-    )
+    return register_file(path=path, name=name, file_type='Word', column_count=0)
 
 
 def test_init_db_creates_document_fingerprint_table_and_index(tmp_path, monkeypatch):

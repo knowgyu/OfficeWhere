@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from backend.database import init_db, prune_comparison_cache
 
 
-def test_init_db_resets_legacy_join_metadata_schema(tmp_path, monkeypatch):
+def test_init_db_resets_legacy_excel_table_metadata_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     source = tmp_path / "source.xlsx"
     source.write_text("source", encoding="utf-8")
@@ -68,7 +68,7 @@ def test_comparison_cache_prune_keeps_newest_floor(tmp_path, monkeypatch):
     for index in range(5):
         conn.execute(
             """
-            INSERT INTO comparison_cache (cache_key, file_ids, comparison_scope, result_json, created_at)
+            INSERT INTO comparison_cache (cache_key, file_ids, comparison_mode, result_json, created_at)
             VALUES (?, '[]', 'version_history', ?, ?)
             """,
             (f"cache-{index}", '{"ok": true}', (old_base + timedelta(seconds=index)).isoformat()),

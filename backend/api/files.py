@@ -63,9 +63,7 @@ def _file_info_from_row(row: dict) -> FileInfo:
         name=row["name"],
         path=row["path"],
         file_type=row["file_type"],
-        key_column=row.get("key_column", ""),
         column_count=row["column_count"],
-        parser_config=row.get("parser_config", {}),
         created_at=row["created_at"],
         file_mtime=row.get("file_mtime"),
     )
@@ -207,11 +205,9 @@ def register(req: FileRegisterRequest):
             path=path,
             name=info["name"],
             file_type=info["file_type"],
-            key_column="",
             column_count=len(info["columns"]),
             chunks=chunks,
             file_mtime=stat_result.st_mtime,
-            parser_config=None,
             excel_sheets=info.get("excel_sheets"),
             excel_cells=info.get("excel_cells"),
             comparison_artifacts=info.get("comparison_artifacts"),
@@ -235,7 +231,6 @@ def register(req: FileRegisterRequest):
         name=info["name"],
         file_type=info["file_type"],
         columns=info["columns"],
-        parser_config={},
     )
 
 
@@ -287,7 +282,7 @@ def get_schema(file_id: int):
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {exc}")
 
-    return SchemaResponse(columns=schema["columns"], sample=schema["sample"], parser_config={})
+    return SchemaResponse(columns=schema["columns"], sample=schema["sample"])
 
 
 @router.delete("/{file_id}")
@@ -338,21 +333,6 @@ def show_registered_file_in_folder(file_id: int):
         raise HTTPException(status_code=500, detail=f"폴더를 열지 못했습니다: {exc}")
 
     return {"message": "폴더 열기 요청을 보냈습니다."}
-
-
-@router.get("/{file_id}/suggest-key")
-def suggest_key(file_id: int):
-    file_row = get_file_by_id(file_id)
-    if not file_row:
-        raise HTTPException(status_code=404, detail="등록되지 않은 파일입니다.")
-
-    try:
-        schema = get_file_schema(file_row["path"])
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"파일 파싱 실패: {exc}")
-
-    columns = schema["columns"]
-    return {"columns": columns, "suggested_key_column": None}
 
 
 @router.post("/pick-folder", response_model=FolderPickResponse)
@@ -407,11 +387,9 @@ def bulk_register(req: BulkRegisterRequest):
                     path=path,
                     name=info["name"],
                     file_type=info["file_type"],
-                    key_column="",
                     column_count=len(info["columns"]),
                     chunks=chunks,
                     file_mtime=stat_result.st_mtime,
-                    parser_config=None,
                     excel_sheets=info.get("excel_sheets"),
                     excel_cells=info.get("excel_cells"),
                     comparison_artifacts=info.get("comparison_artifacts"),

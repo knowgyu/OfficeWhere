@@ -18,7 +18,7 @@ from ..models.schemas import CheckRequest, CheckResponse, ExcelDiffGridRequest, 
 router = APIRouter(prefix="/api/check", tags=["check"])
 
 
-def _comparison_cache_key(file_infos: List[Dict[str, Any]], comparison_scope: str) -> str:
+def _comparison_cache_key(file_infos: List[Dict[str, Any]], comparison_mode: str) -> str:
     files: List[Dict[str, Any]] = []
     for info in file_infos:
         files.append(
@@ -31,7 +31,7 @@ def _comparison_cache_key(file_infos: List[Dict[str, Any]], comparison_scope: st
         )
     payload = {
         "version": COMPARISON_CACHE_VERSION,
-        "comparison_scope": comparison_scope,
+        "comparison_mode": comparison_mode,
         "files": files,
     }
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
@@ -119,7 +119,7 @@ def consistency_check(req: CheckRequest):
     if len(req.file_ids) < 2:
         raise HTTPException(status_code=400, detail="정합성 검사는 최소 2개 파일을 선택해야 합니다.")
 
-    comparison_scope = "version_history"
+    comparison_mode = "version_history"
     file_infos = []
     for file_id in req.file_ids:
         file_row = get_file_by_id(file_id)
@@ -144,7 +144,7 @@ def consistency_check(req: CheckRequest):
     if len(file_types) != 1:
         raise HTTPException(status_code=400, detail="서로 다른 파일 형식은 함께 비교할 수 없습니다.")
 
-    cache_key = _comparison_cache_key(file_infos, comparison_scope)
+    cache_key = _comparison_cache_key(file_infos, comparison_mode)
     source_metadata = _source_stat_metadata(file_infos)
     cached = get_cached_comparison_result(cache_key)
     if cached is not None:
@@ -155,7 +155,7 @@ def consistency_check(req: CheckRequest):
             cached = None
 
     try:
-        result = run_consistency_check(file_infos, comparison_scope=comparison_scope)
+        result = run_consistency_check(file_infos)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -163,7 +163,7 @@ def consistency_check(req: CheckRequest):
 
     result["metadata"] = _merge_metadata(result.get("metadata"), source_metadata)
     response = CheckResponse(**result)
-    save_cached_comparison_result(cache_key, req.file_ids, comparison_scope, response.model_dump())
+    save_cached_comparison_result(cache_key, req.file_ids, comparison_mode, response.model_dump())
     return response
 
 

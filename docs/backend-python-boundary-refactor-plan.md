@@ -3,7 +3,7 @@
 작성일: 2026-04-29
 
 상태: **0.6 구조 정리 반영 중**. 2026-04-29 작업에서 검색/버전 관리 중심으로
-Excel Join 메타데이터 의존성을 제거하는 1차 구조 변경을 적용했다.
+미완성 등록 표 메타데이터 의존성을 제거하는 구조 변경을 적용했다.
 
 검색/버전관리 hot path의 후속 성능 결정은
 `docs/search-version-performance-roadmap.md`에 모아 둔다.
@@ -40,9 +40,8 @@ FastAPI routers
 ## 0.6에서 먼저 적용한 결정
 
 - 제품 hot path를 **검색 + 버전 관리**로 좁혔다.
-- Excel Join/key-column/parser_config 기반 등록 표 비교는 비활성화했다.
-- Join 탭은 미래 기능 placeholder만 남기고 backend `/api/query/*`는 410으로 막는다.
-- `registered_files` DB schema에서 Join-only `key_column`, `parser_config` persisted field를 제거했다.
+- 미완성 등록 표 비교 UI와 해당 backend 라우터를 제거했다.
+- `registered_files` DB schema에서 과거 등록 표 metadata persisted field를 제거했다.
 - legacy DB에서 해당 column이 감지되면 app-owned 등록/index/cache table을 재생성한다. 원본 문서는 건드리지 않는다.
 - Excel indexing/registration/rescan은 table 후보 탐색 대신 used-range/cell-coordinate extraction만 사용한다.
 - Excel version comparison은 항상 used-range cell diff를 사용한다.
@@ -187,7 +186,7 @@ class ComparableDocumentAdapter(DocumentAdapter, Protocol):
 ```
 
 중요: adapter는 DB를 몰라야 한다. adapter는 파일 경로와 추출 옵션만 받아 추출 결과만 반환한다.
-Excel Join/table extraction이 다시 필요해지면 검색/버전 adapter와 별도 feature adapter로 설계한다.
+Excel 표 병합 같은 별도 기능이 다시 필요해지면 검색/버전 adapter와 분리된 feature adapter로 설계한다.
 
 ### Storage repositories
 
@@ -310,7 +309,7 @@ POST /api/check
 - [ ] Excel/Word/PPT adapter wrapper만 추가하고 기존 parser 함수는 facade로 유지.
 - [ ] `get_file_type`/extension dispatch 중복을 registry로 흡수.
 - [ ] adapter는 DB import 금지.
-- [x] 0.6: 검색/버전 경로에서 Excel parser_config recovery 대신 used-range extraction으로 단순화했다.
+- [x] 0.6: 검색/버전 경로를 used-range extraction으로 단순화했다.
 
 ### Phase 4 — indexing/library pipeline split
 
