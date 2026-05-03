@@ -1,6 +1,6 @@
 # OfficeWhere TODO
 
-Last updated: 2026-05-02
+Last updated: 2026-05-03
 
 This file tracks follow-up work that is not part of the formal release checklist. Keep `docs/release-test-checklist.md` for release validation steps.
 
@@ -17,8 +17,7 @@ This file tracks follow-up work that is not part of the formal release checklist
   - Durable decision record: `docs/search-version-performance-roadmap.md`.
   - Already landed in 0.6.x: Excel sparse diff + warnings, SQL-backed group list filtering/paging, PPT similarity guard, Word/PPT compressed comparison artifacts.
   - v0.6.8 scanner boundary work: default discovery now has an `os.scandir`/snapshot-cache direction with fallback-on-doubt.
-  - v0.7.0 candidate work: optional Everything SDK path discovery auto-detects app-owned SDK resources, with filesystem fallback on doubt.
-  - Remaining release gate: do not tag/release Everything support until Windows manual validation passes and SDK/license/redistribution checks decide whether to bundle any DLL/ES artifact.
+  - Do not pursue Everything/ES as a current accelerator. The integration attempt added setup/diagnostic burden while improving only the file-path discovery slice; keep the default scanner/cache path.
   - Treat this as the source of truth instead of duplicating the same performance notes across `.omx/context`, `.omx/wiki`, or session notes.
 
 - [ ] Continue architecture cleanup only as scoped follow-up waves, not as a big-bang rewrite.
@@ -38,7 +37,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 ## Completed / user-owned for now
 
 - External architecture review P0-P3 first implementation wave and second responsibility-boundary refactor wave are complete enough for this pass; only scoped follow-up slices remain.
-- v0.6.8 default scanner improvement is complete enough for release prep; Everything is implemented only as a v0.7.0 candidate and remains pending Windows manual validation before release.
+- v0.6.8 default scanner improvement is complete enough for release prep; Everything/ES acceleration is not a current release candidate.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
 - Embedded-Python Windows packaging has been checked on DRM-policy PCs.
 - In-app update notice and portable zip update flow are implemented.

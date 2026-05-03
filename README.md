@@ -50,8 +50,6 @@ setup.bat
 dev-web.bat
 ```
 
-Windows에서 Everything을 설치해 실행 중이면 OfficeWhere가 자동으로 파일 탐색 가속에 사용합니다. repo에 필요한 SDK DLL이 포함되어 있으므로 DLL 경로를 따로 지정할 필요가 없습니다. Everything이 없거나 꺼져 있으면 기존 폴더 스캔 방식으로 계속 동작합니다.
-
 포트를 바꾸려면:
 
 ```bat
@@ -111,7 +109,6 @@ build.bat
 
 - `dist/electron/` 아래 Windows zip 생성
 - zip에는 OfficeWhere 전용 embedded Python runtime과 backend source가 함께 포함됨
-- zip에는 Everything 연동용 SDK DLL과 라이선스 고지가 함께 포함됨
 - zip 압축 해제 후 `OfficeWhere.exe` 실행
 
 ### Linux / macOS

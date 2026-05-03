@@ -56,7 +56,7 @@ Derived tables and artifacts are **rebuildable caches**, not source of truth. If
 - Do not migrate to PostgreSQL/Tantivy/Meilisearch/DuckDB as the first response. The version-management bottleneck is data shape and hot-path breadth, not just the DB engine.
 - Do not normalize the whole version-group model into many relational tables first. A hybrid derived summary plus serialized detail is enough for the current app.
 - Do not perform a frontend mega-refactor before user-visible performance work. Instead, create small landing zones exactly where new logic will be added.
-- Do not require Everything/ES. It can be an optional accelerator only.
+- Do not require an external file indexer. OfficeWhere should remain on its own scanner/cache path unless fresh profiling proves file-path discovery is the dominant bottleneck.
 - Do not add live source fingerprint checks to every compare. Freshness belongs to refresh/indexing; normal UI should avoid source I/O.
 
 ## Final roadmap
@@ -235,28 +235,15 @@ Test focus:
 - Compressed payload round-trips across app restarts.
 - Source-modified-after-index warning is shown as a warning only.
 
-### P5 — Optional Everything/ES discovery accelerator
+### P5 — External file-index accelerator rejected for now
 
-Goal: speed up file candidate discovery on Windows when the user already has Everything/ES available, while keeping OfficeWhere fully functional without it.
+Decision:
 
-Scope:
+- Do not pursue Everything/ES as a current OfficeWhere accelerator.
+- The attempted integration improved only the file-path discovery slice, while adding setup, packaging, IPC, diagnostics, and user-explanation burden.
+- Keep the built-in scanner plus snapshot-cache path as the default strategy.
 
-- Use Everything/ES only to collect candidate Office file paths under watched folders.
-- Do not use Everything for OfficeWhere content search, choseong search, version grouping, or comparison.
-- Keep OfficeWhere’s own SQLite/FTS/search/choseong pipeline.
-
-Rules:
-
-- Windows-only optional path.
-- Detect `es.exe` separately; `Everything.exe` being installed does not mean the CLI exists.
-- Require Everything service/app to be usable, or fail fast.
-- Apply OfficeWhere exclude-folder and supported-extension rules after receiving candidates.
-- Add timeouts and automatic fallback to the current Python filesystem scan.
-- Do not require users in locked-down corporate environments to install or enable it.
-
-Licensing/package note:
-
-- Treat ES as an optional external/bundled helper only after checking its current license and redistribution terms before packaging. Do not make it a hard runtime dependency.
+Reopen only if fresh profiling on 500~2,000 document libraries shows file-path discovery, not Office parsing/indexing/database work, is the dominant bottleneck.
 
 Test focus:
 
@@ -295,5 +282,5 @@ Likely landing zones:
 2. Group SQL hybrid list/filter/sort/page path.
 3. PPT similarity guard for large decks.
 4. Word/PPT compressed comparison artifacts tied to indexed state.
-5. Optional Everything/ES discovery accelerator.
+5. Re-profile scanner/cache only if real traces show file-path discovery is the bottleneck.
 6. Continue gradual component/module cleanup only where it supports the above work.

@@ -22,11 +22,6 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-EVERYTHING_SDK_DIR="$ROOT_DIR/resources/everything-sdk"
-if [[ -z "${OW_EVERYTHING_RESOURCES_DIR:-}" && -d "$EVERYTHING_SDK_DIR" ]]; then
-  export OW_EVERYTHING_RESOURCES_DIR="$EVERYTHING_SDK_DIR"
-fi
-
 cleanup() {
   if [[ -n "${BACKEND_PID:-}" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
     echo ""

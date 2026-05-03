@@ -71,7 +71,7 @@ This document is the source of truth for the 2026-04-30 external architecture re
 | List virtualization dependency | Existing list/group pages are bounded. Add a new virtual-list dependency only after DOM/render profiling shows it is the bottleneck. |
 | Frontend test framework | Valuable before deeper UI refactors, but Vitest/RTL introduces new dev dependencies and maintenance surface. Plan separately. |
 | DB engine replacement / async FastAPI rewrite | Current bottlenecks are data shape and hot-path breadth, not proof that SQLite/FastAPI sync routes are the main issue. |
-| Mandatory Everything/ES dependency | ES can be an optional Windows discovery accelerator only; OfficeWhere must remain fully functional without it. |
+| Mandatory external file-index dependency | OfficeWhere must remain fully functional with its own scanner/cache path. |
 | Full migration backup by default | Useful for destructive app-owned DB migrations, but it has disk/privacy complexity. Prefer bounded one-generation backup only for risky migrations. |
 
 ## Current roadmap / TODO order
@@ -143,10 +143,10 @@ Deferred scope:
 
 ### P4 — Optional product/performance follow-ups
 
-1. Optional Everything SDK discovery accelerator is prepared as a v0.7.0 candidate, but remains release-gated on Windows validation plus SDK/license/redistribution decisions before any DLL/ES bundling.
+1. Do not reopen external file-index accelerators unless profiling shows the default scanner/cache path is the dominant bottleneck.
 2. List virtualization or hand-rolled viewport rendering only if profiling shows bounded paging is insufficient.
 3. Bounded app-owned DB backup only for risky schema migrations, with pruning and reset cleanup rules.
-4. Local AI Agent integration remains a later security/architecture task.
+4. Local AI/MCP integration is not a primary product direction unless a non-generic document workflow emerges.
 
 ## Non-goals
 

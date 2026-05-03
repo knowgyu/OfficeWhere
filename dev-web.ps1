@@ -14,10 +14,6 @@ if (Test-Path $VenvPython) {
 }
 
 $BackendUrl = "http://$HostAddress`:$BackendPort"
-$EverythingSdkDir = Join-Path $RootDir 'resources\everything-sdk'
-if (-not $env:OW_EVERYTHING_RESOURCES_DIR -and (Test-Path $EverythingSdkDir)) {
-  $env:OW_EVERYTHING_RESOURCES_DIR = $EverythingSdkDir
-}
 Write-Host "[officewhere] backend 시작: $BackendUrl"
 $BackendProcess = Start-Process `
   -FilePath $PythonBin `

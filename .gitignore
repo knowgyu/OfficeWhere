@@ -72,6 +72,3 @@ examples/demo_cases/
 
 .omx/
 .pytest_cache/
-
-# Optional local Everything SDK zip cache (DLLs are intentionally tracked for Windows one-step builds)
-resources/everything-sdk/*.zip

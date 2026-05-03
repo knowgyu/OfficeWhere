@@ -925,13 +925,9 @@ async function startBackend(port: number) {
   const indexPerfLogPath = path.join(logDir, 'index-performance.log')
 
   const command = getBackendCommand(port, dataDir)
-  const everythingSdkDir = getEverythingSdkResourceDir(command.cwd)
   const logStream = fs.createWriteStream(backendLogPath, { flags: 'a' })
   logStream.write(`[officewhere] command: ${command.file} ${command.args.join(' ')}\n`)
   logStream.write(`[officewhere] index performance log: ${indexPerfLogPath}\n`)
-  if (everythingSdkDir) {
-    logStream.write(`[officewhere] everything sdk resources: ${everythingSdkDir}\n`)
-  }
 
   let spawnError: Error | null = null
   let exited = false
@@ -944,7 +940,6 @@ async function startBackend(port: number) {
       OW_HOST: HOST,
       OW_PORT: String(port),
       OW_INDEX_PERF_LOG_PATH: indexPerfLogPath,
-      ...(everythingSdkDir ? { OW_EVERYTHING_RESOURCES_DIR: everythingSdkDir } : {}),
       PYTHONUTF8: '1',
       PYTHONPYCACHEPREFIX: pythonCacheDir,
     },
@@ -1022,27 +1017,6 @@ function getPythonExecutable(repoRoot: string): string {
   if (fs.existsSync(venvPython)) return venvPython
 
   return process.platform === 'win32' ? 'python' : 'python3'
-}
-
-function getEverythingSdkResourceDir(backendCwd: string): string {
-  const candidates = app.isPackaged
-    ? [path.join(process.resourcesPath, 'everything-sdk')]
-    : [
-        path.join(path.resolve(app.getAppPath(), '..'), 'resources', 'everything-sdk'),
-        path.join(backendCwd, 'resources', 'everything-sdk'),
-      ]
-
-  for (const candidate of candidates) {
-    if (hasEverythingSdkDll(candidate)) return candidate
-  }
-  return ''
-}
-
-function hasEverythingSdkDll(directory: string): boolean {
-  return (
-    fs.existsSync(path.join(directory, 'Everything64.dll')) ||
-    fs.existsSync(path.join(directory, 'Everything32.dll'))
-  )
 }
 
 function stopBackend() {
