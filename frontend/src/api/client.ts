@@ -23,7 +23,6 @@ export type {
   SchemaResetState,
   UpdateAssetInfo,
   UpdateCheckResult,
-  UpdateDownloadResult,
   UpdateInstallResult,
 } from './transport'
 export type { CellValue, CompareMode, FileInfo, FileType } from './shared'
@@ -1181,11 +1180,6 @@ export const api = {
         }
       }
       return { data: await electron.checkForUpdates() }
-    },
-    downloadUpdate: async () => {
-      const electron = electronApi()
-      if (!electron?.downloadUpdate) desktopError('Electron 앱에서만 업데이트 zip을 다운로드할 수 있습니다.')
-      return { data: await electron.downloadUpdate() }
     },
     installUpdate: async () => {
       const electron = electronApi()

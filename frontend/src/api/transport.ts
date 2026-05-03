@@ -53,13 +53,6 @@ export interface UpdateCheckResult {
   asset?: UpdateAssetInfo
 }
 
-export interface UpdateDownloadResult {
-  success: boolean
-  path: string
-  fileName: string
-  sizeBytes: number
-}
-
 export interface UpdateInstallResult {
   success: boolean
   latestVersion: string
@@ -87,7 +80,6 @@ declare global {
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
     getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
     checkForUpdates?: () => Promise<UpdateCheckResult>
-    downloadUpdate?: () => Promise<UpdateDownloadResult>
     installUpdate?: () => Promise<UpdateInstallResult>
     openReleasePage?: () => Promise<void>
     showItemInFolder?: (filePath: string) => Promise<void>

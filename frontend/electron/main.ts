@@ -77,13 +77,6 @@ type UpdateCheckResult = {
   asset?: UpdateAsset
 }
 
-type UpdateDownloadResult = {
-  success: boolean
-  path: string
-  fileName: string
-  sizeBytes: number
-}
-
 type UpdateInstallResult = {
   success: boolean
   latestVersion: string
@@ -167,7 +160,6 @@ function registerIpcHandlers() {
   ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
   ipcMain.handle('app:get-example-library-path', () => getExampleLibraryPath())
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
-  ipcMain.handle('app:download-update', () => downloadLatestUpdate())
   ipcMain.handle('app:install-update', () => installLatestUpdate())
   ipcMain.handle('app:open-release-page', () => openLatestReleasePage())
   ipcMain.handle('app:show-item-in-folder', (_event, payload: unknown) => showItemInFolder(payload))
@@ -238,6 +230,11 @@ function sanitizeUpdateFileName(name: string): string {
   return baseName
 }
 
+function expectedWindowsZipName(version: string): string {
+  const normalized = version.trim().replace(/^v/i, '').toLowerCase()
+  return `officewhere-${normalized}-windows-x64.zip`
+}
+
 function requestJson<T>(urlString: string, redirects = 3): Promise<T> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlString)
@@ -287,13 +284,15 @@ function requestJson<T>(urlString: string, redirects = 3): Promise<T> {
 function findSha256AssetForZip(assets: unknown, zipName: string): string | undefined {
   if (!Array.isArray(assets)) return undefined
 
-  const zipBaseName = zipName.replace(/\.zip$/i, '').toLowerCase()
+  const expectedShaNames = new Set([
+    `${zipName}.sha256.txt`.toLowerCase(),
+    `${zipName}.sha256`.toLowerCase(),
+  ])
   for (const item of assets as GitHubReleaseAsset[]) {
     const name = typeof item.name === 'string' ? item.name : ''
     const url = typeof item.browser_download_url === 'string' ? item.browser_download_url : ''
     const lowerName = name.toLowerCase()
-    if (!lowerName.endsWith('.sha256.txt') && !lowerName.endsWith('.sha256')) continue
-    if (!lowerName.startsWith(zipBaseName)) continue
+    if (!expectedShaNames.has(lowerName)) continue
     if (!isAllowedUpdateUrl(url)) continue
     return url
   }
@@ -301,14 +300,13 @@ function findSha256AssetForZip(assets: unknown, zipName: string): string | undef
   return undefined
 }
 
-function findWindowsZipAsset(assets: unknown): UpdateAsset | undefined {
+function findWindowsZipAsset(assets: unknown, latestVersion: string): UpdateAsset | undefined {
   if (!Array.isArray(assets)) return undefined
+  const expectedName = expectedWindowsZipName(latestVersion)
   for (const item of assets as GitHubReleaseAsset[]) {
     const name = typeof item.name === 'string' ? item.name : ''
     const url = typeof item.browser_download_url === 'string' ? item.browser_download_url : ''
-    const lowerName = name.toLowerCase()
-    if (!lowerName.endsWith('.zip')) continue
-    if (!lowerName.includes('windows') || !lowerName.includes('x64')) continue
+    if (name.toLowerCase() !== expectedName) continue
     if (!isAllowedUpdateUrl(url)) continue
     return {
       name,
@@ -331,22 +329,10 @@ async function checkForUpdates(): Promise<UpdateCheckResult> {
     latestVersion,
     updateAvailable: compareVersions(latestVersion, currentVersion) > 0,
     releaseUrl,
-    asset: findWindowsZipAsset(release.assets),
+    asset: findWindowsZipAsset(release.assets, latestVersion),
   }
   cachedUpdateCheck = result
   return result
-}
-
-function uniqueDownloadPath(fileName: string): string {
-  const downloadsDir = app.getPath('downloads')
-  const parsed = path.parse(fileName)
-  let candidate = path.join(downloadsDir, fileName)
-  let index = 1
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(downloadsDir, `${parsed.name} (${index})${parsed.ext}`)
-    index += 1
-  }
-  return candidate
 }
 
 function downloadToFile(urlString: string, destination: string, redirects = 5): Promise<number> {
@@ -573,6 +559,7 @@ async function createPortableUpdateScript(
   tempDir: string,
   target: PortableUpdateTarget,
   newRoot: string,
+  readyPath: string,
 ): Promise<{ scriptPath: string; logPath: string }> {
   const logDir = app.getPath('logs')
   await fs.promises.mkdir(logDir, { recursive: true })
@@ -584,7 +571,8 @@ param(
   [Parameter(Mandatory = $true)][string]$NewRoot,
   [Parameter(Mandatory = $true)][string]$ExeName,
   [Parameter(Mandatory = $true)][int]$ParentPid,
-  [Parameter(Mandatory = $true)][string]$LogPath
+  [Parameter(Mandatory = $true)][string]$LogPath,
+  [Parameter(Mandatory = $true)][string]$ReadyPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -595,6 +583,7 @@ function Write-UpdateLog([string]$Message) {
 }
 
 try {
+  Set-Content -LiteralPath $ReadyPath -Value "ready" -Encoding Ascii
   Write-UpdateLog "Waiting for OfficeWhere process $ParentPid to exit."
   try {
     Wait-Process -Id $ParentPid -Timeout 90 -ErrorAction Stop
@@ -648,36 +637,82 @@ function launchPortableUpdateHelper(
   target: PortableUpdateTarget,
   newRoot: string,
   logPath: string,
-): void {
-  const child = spawn(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      scriptPath,
-      '-CurrentDir',
-      target.currentDir,
-      '-NewRoot',
-      newRoot,
-      '-ExeName',
-      target.exeName,
-      '-ParentPid',
-      String(process.pid),
-      '-LogPath',
-      logPath,
-    ],
-    {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    },
-  )
-  child.unref()
+  readyPath: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        scriptPath,
+        '-CurrentDir',
+        target.currentDir,
+        '-NewRoot',
+        newRoot,
+        '-ExeName',
+        target.exeName,
+        '-ParentPid',
+        String(process.pid),
+        '-LogPath',
+        logPath,
+        '-ReadyPath',
+        readyPath,
+      ],
+      {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      },
+    )
+
+    let settled = false
+    let pollTimer: NodeJS.Timeout | undefined
+    let timeoutTimer: NodeJS.Timeout | undefined
+
+    const cleanup = () => {
+      if (pollTimer) clearInterval(pollTimer)
+      if (timeoutTimer) clearTimeout(timeoutTimer)
+      child.off('error', onError)
+      child.off('exit', onExit)
+    }
+
+    const settle = (callback: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback()
+    }
+
+    const onError = (error: Error) => {
+      settle(() => reject(new Error(`업데이트 helper를 시작하지 못했습니다. (${error.message})`)))
+    }
+
+    const onExit = (code: number | null) => {
+      settle(() => reject(new Error(`업데이트 helper가 너무 일찍 종료되었습니다. (code: ${code ?? 'unknown'})`)))
+    }
+
+    child.once('error', onError)
+    child.once('exit', onExit)
+
+    pollTimer = setInterval(() => {
+      if (fs.existsSync(readyPath)) {
+        settle(() => {
+          child.unref()
+          resolve()
+        })
+      }
+    }, 100)
+
+    timeoutTimer = setTimeout(() => {
+      settle(() => reject(new Error('업데이트 helper 시작 확인 시간이 초과되었습니다.')))
+    }, 5_000)
+  })
 }
 
-async function downloadUpdateToDirectory(
+async function fetchInstallZipToDirectory(
   update: UpdateCheckResult,
   directory: string,
 ): Promise<{ path: string; fileName: string; sizeBytes: number }> {
@@ -688,22 +723,6 @@ async function downloadUpdateToDirectory(
   const destination = path.join(directory, fileName)
   const sizeBytes = await downloadToFile(update.asset.url, destination)
   return {
-    path: destination,
-    fileName,
-    sizeBytes,
-  }
-}
-
-async function downloadLatestUpdate(): Promise<UpdateDownloadResult> {
-  const update = cachedUpdateCheck ?? (await checkForUpdates())
-  if (!update.updateAvailable || !update.asset) {
-    throw new Error('다운로드할 새 Windows zip 릴리즈가 없습니다.')
-  }
-  const fileName = sanitizeUpdateFileName(update.asset.name)
-  const destination = uniqueDownloadPath(fileName)
-  const sizeBytes = await downloadToFile(update.asset.url, destination)
-  return {
-    success: true,
     path: destination,
     fileName,
     sizeBytes,
@@ -730,7 +749,7 @@ async function installLatestUpdate(): Promise<UpdateInstallResult> {
 
     const target = await assertPortableUpdateTarget()
     tempDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), 'officewhere-update-'))
-    const downloaded = await downloadUpdateToDirectory(update, tempDir)
+    const downloaded = await fetchInstallZipToDirectory(update, tempDir)
 
     const expectedSha256 = parseExpectedSha256(await requestUpdateText(update.asset.sha256Url))
     const actualSha256 = await hashFileSha256(downloaded.path)
@@ -741,9 +760,10 @@ async function installLatestUpdate(): Promise<UpdateInstallResult> {
     const extractDir = path.join(tempDir, 'extracted')
     await extractZipToDirectory(downloaded.path, extractDir)
     const newRoot = await resolveExtractedAppRoot(extractDir, target.exeName)
-    const { scriptPath, logPath } = await createPortableUpdateScript(tempDir, target, newRoot)
+    const readyPath = path.join(tempDir, 'helper-ready.txt')
+    const { scriptPath, logPath } = await createPortableUpdateScript(tempDir, target, newRoot, readyPath)
 
-    launchPortableUpdateHelper(scriptPath, target, newRoot, logPath)
+    await launchPortableUpdateHelper(scriptPath, target, newRoot, logPath, readyPath)
     helperStarted = true
 
     setTimeout(() => requestAppQuit(), 450)
