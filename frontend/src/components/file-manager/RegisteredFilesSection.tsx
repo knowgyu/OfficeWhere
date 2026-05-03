@@ -83,7 +83,7 @@ export default function RegisteredFilesSection({
   onPage,
 }: RegisteredFilesSectionProps) {
   return (
-    <Card variant="outlined" className="overflow-hidden">
+    <Card variant="outlined" className="console-panel overflow-hidden">
       <header
         className="px-6 py-4 space-y-4 border-b border-[var(--md-sys-color-outline-variant)]"
         onKeyDown={onRegisteredFilesKeyDown}

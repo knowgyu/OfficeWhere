@@ -38,7 +38,7 @@ export default function AppDataManagementSection({
   onOpenSelectedDelete,
 }: AppDataManagementSectionProps) {
   return (
-    <Card variant="outlined">
+    <Card variant="outlined" className="console-panel">
       <CardSection
         title="앱 데이터 관리"
         description="문제 해결이 필요할 때만 검색 준비 데이터와 앱 설정을 초기화합니다. 원본 문서는 삭제하지 않습니다."

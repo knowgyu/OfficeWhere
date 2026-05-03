@@ -197,7 +197,7 @@ export default function FileManager({
   onReplayOnboarding?: () => void
 }) {
   const snackbar = useSnackbar()
-  const { textSize, setTextSize } = useDisplaySettings()
+  const { textSize, setTextSize, themeMode, resolvedTheme, setThemeMode } = useDisplaySettings()
   const [files, setFiles] = useState<FileInfo[]>([])
   const [fileTotal, setFileTotal] = useState(0)
   const [fileCountsByType, setFileCountsByType] = useState<Record<string, number>>({})
@@ -837,14 +837,17 @@ export default function FileManager({
     <div className="space-y-6">
       <GeneralSettingsSection
         textSize={textSize}
+        themeMode={themeMode}
+        resolvedTheme={resolvedTheme}
         closeBehavior={closeBehavior}
         closeBehaviorLabels={CLOSE_BEHAVIOR_LABELS}
         closeBehaviorAvailable={closeBehaviorAvailable}
         closeBehaviorLoading={closeBehaviorLoading}
         onTextSizeChange={setTextSize}
+        onThemeModeChange={setThemeMode}
         onCloseBehaviorChange={(behavior) => void handleUpdateCloseBehavior(behavior)}
       />
-      <Card variant="elevated">
+      <Card variant="elevated" className="console-panel">
         <CardSection
           title="대상 폴더"
           description="자주 쓰는 문서 폴더를 등록하면 검색과 버전 관리에 사용합니다. 앱은 원본 문서를 읽기만 하며, 파일을 수정하거나 이동하지 않습니다."
@@ -1070,7 +1073,45 @@ export default function FileManager({
         </CardSection>
       </Card>
 
-      <Card variant="elevated">
+      <RegisteredFilesSection
+        files={files}
+        fileTotal={fileTotal}
+        fileOffset={fileOffset}
+        pageSize={REGISTERED_FILE_PAGE_SIZE}
+        fileQuery={fileQuery}
+        fileQueryDraft={fileQueryDraft}
+        fileTypeCounts={fileTypeCounts}
+        loading={loading}
+        deletingFiles={deletingFiles}
+        selectedFileIds={selectedFileIds}
+        selectedFiles={selectedFiles}
+        selectedCount={selectedCount}
+        selectionMode={selectionMode}
+        selectionVisible={selectionVisible}
+        visibleFileStart={visibleFileStart}
+        visibleFileEnd={visibleFileEnd}
+        hasPreviousFilePage={hasPreviousFilePage}
+        hasNextFilePage={hasNextFilePage}
+        onToggleSelectionMode={() => {
+          setSelectionMode((value) => !value)
+          if (selectionMode) setSelectedFileIds(new Set())
+        }}
+        onOpenDeleteConfirm={openDeleteConfirm}
+        onOpenClearAllFilesConfirm={openClearAllFilesConfirm}
+        onRefresh={() => void fetchFiles(fileOffset, fileQuery)}
+        onQueryDraftChange={setFileQueryDraft}
+        onSearch={handleFileSearch}
+        onClearSearch={clearFileSearch}
+        onRegisteredFilesKeyDown={handleRegisteredFilesKeyDown}
+        onFileFocus={setFocusedFileId}
+        onFilePointerDown={handleFileRowPointerDown}
+        onFilePointerEnter={handleFileRowPointerEnter}
+        onToggleRegisteredFileSelection={toggleRegisteredFileSelection}
+        onPreview={(file) => void handlePreview(file)}
+        onPage={goToFilePage}
+      />
+
+      <Card variant="elevated" className="console-panel">
         <CardSection
           title="개별 파일 추가"
           description="대상 폴더 밖에 있는 파일만 수동으로 추가하세요. 등록한 파일은 검색과 문서 비교에 사용할 수 있습니다."
@@ -1131,44 +1172,6 @@ export default function FileManager({
           </p>
         </CardSection>
       </Card>
-
-      <RegisteredFilesSection
-        files={files}
-        fileTotal={fileTotal}
-        fileOffset={fileOffset}
-        pageSize={REGISTERED_FILE_PAGE_SIZE}
-        fileQuery={fileQuery}
-        fileQueryDraft={fileQueryDraft}
-        fileTypeCounts={fileTypeCounts}
-        loading={loading}
-        deletingFiles={deletingFiles}
-        selectedFileIds={selectedFileIds}
-        selectedFiles={selectedFiles}
-        selectedCount={selectedCount}
-        selectionMode={selectionMode}
-        selectionVisible={selectionVisible}
-        visibleFileStart={visibleFileStart}
-        visibleFileEnd={visibleFileEnd}
-        hasPreviousFilePage={hasPreviousFilePage}
-        hasNextFilePage={hasNextFilePage}
-        onToggleSelectionMode={() => {
-          setSelectionMode((value) => !value)
-          if (selectionMode) setSelectedFileIds(new Set())
-        }}
-        onOpenDeleteConfirm={openDeleteConfirm}
-        onOpenClearAllFilesConfirm={openClearAllFilesConfirm}
-        onRefresh={() => void fetchFiles(fileOffset, fileQuery)}
-        onQueryDraftChange={setFileQueryDraft}
-        onSearch={handleFileSearch}
-        onClearSearch={clearFileSearch}
-        onRegisteredFilesKeyDown={handleRegisteredFilesKeyDown}
-        onFileFocus={setFocusedFileId}
-        onFilePointerDown={handleFileRowPointerDown}
-        onFilePointerEnter={handleFileRowPointerEnter}
-        onToggleRegisteredFileSelection={toggleRegisteredFileSelection}
-        onPreview={(file) => void handlePreview(file)}
-        onPage={goToFilePage}
-      />
 
       {onReplayOnboarding && (
         <Card variant="outlined" className="overflow-hidden">

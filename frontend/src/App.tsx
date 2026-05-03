@@ -106,20 +106,6 @@ const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
   'excel-table-history': 'done',
 }
 
-const TUTORIAL_REVIEW_DELAY_MS: Partial<Record<TutorialStep, number>> = {
-  'search-review': 720,
-  'version-ppt-detail': 760,
-  'version-excel-review': 760,
-  'excel-table-history': 820,
-}
-
-const TUTORIAL_GENTLE_TARGET_STEPS = new Set<TutorialStep>([
-  'version-excel',
-  'excel-table',
-  'excel-table-cell',
-  'excel-table-history',
-])
-
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
     eyebrow: '예제 폴더',
@@ -136,7 +122,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   search: {
     eyebrow: '문서 검색',
     title: '프로젝트로 검색해 보세요',
-    description: '예제 문서의 파일명과 내용을 함께 찾습니다.',
+    description: '검색어를 직접 입력하고 찾기 버튼을 눌러 예제 문서의 파일명과 내용을 함께 찾습니다.',
     icon: 'search',
   },
   'search-results': {
@@ -172,7 +158,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'version-excel-search': {
     eyebrow: 'Excel 찾기',
     title: '사업예산을 찾아보세요',
-    description: '검색어는 넣어뒀어요. 찾기 버튼을 누르면 됩니다.',
+    description: '검색어를 직접 입력하고 찾기 버튼을 눌러 Excel 예제 묶음을 좁혀보세요.',
     icon: 'search',
   },
   'version-excel': {
@@ -320,7 +306,7 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState('')
   const [updateError, setUpdateError] = useState('')
   const [updateDownloadedPath, setUpdateDownloadedPath] = useState('')
-  const { textSize, increaseTextSize, decreaseTextSize, resetTextSize } = useDisplaySettings()
+  const { textSize, increaseTextSize, decreaseTextSize, resetTextSize, resetThemeMode } = useDisplaySettings()
   const tutorialCleanupPathRef = useRef('')
   const tutorialCleanupInFlightRef = useRef<Promise<void> | null>(null)
 
@@ -342,6 +328,7 @@ export default function App() {
 
         clearOfficeWhereLocalState()
         resetTextSize()
+        resetThemeMode()
         setExampleLibraryPath('')
         setTutorialStep(null)
         setOnboardingReplay(false)
@@ -357,7 +344,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [resetTextSize, snackbar])
+  }, [resetTextSize, resetThemeMode, snackbar])
 
   useEffect(() => {
     let cancelled = false
@@ -578,20 +565,9 @@ export default function App() {
   }, [cleanupTutorialLibrary, tutorialStep])
 
   useEffect(() => {
-    if (!tutorialStep) return undefined
-    if (tutorialStep === 'done') {
-      void cleanupTutorialLibrary(true)
-      return undefined
-    }
-    const nextStep = TUTORIAL_REVIEW_ADVANCE[tutorialStep]
-    if (!nextStep) return undefined
-
-    const delay = TUTORIAL_REVIEW_DELAY_MS[tutorialStep] ?? 700
-    const timer = window.setTimeout(() => {
-      setTutorialStep((current) => (current === tutorialStep ? nextStep : current))
-    }, delay)
-
-    return () => window.clearTimeout(timer)
+    if (tutorialStep !== 'done') return undefined
+    void cleanupTutorialLibrary(true)
+    return undefined
   }, [cleanupTutorialLibrary, tutorialStep])
 
   return (
@@ -644,6 +620,7 @@ export default function App() {
         step={tutorialStep}
         activeTab={activeTab}
         targetTab={tutorialTargetTab}
+        onAdvance={(next) => setTutorialStep(next)}
         onCloseDone={() => setTutorialStep(null)}
         onReplayOnboarding={() => {
           setTutorialStep(null)
@@ -797,22 +774,24 @@ function GuidedTourHud({
   step,
   activeTab,
   targetTab,
+  onAdvance,
   onCloseDone,
   onReplayOnboarding,
 }: {
   step: TutorialStep | null
   activeTab: Tab
   targetTab: Tab | null
+  onAdvance: (step: TutorialStep) => void
   onCloseDone: () => void
   onReplayOnboarding: () => void
 }) {
   const [pointer, setPointer] = useState<Point>(getInitialPointer)
   const [viewport, setViewport] = useState(getViewport)
   const [targetRect, setTargetRect] = useState<TourRect | null>(null)
-  const scrolledKeyRef = useRef('')
   const primaryButtonRef = useRef<HTMLButtonElement>(null)
 
   const content = useMemo(() => getTutorialCopy(step, activeTab), [activeTab, step])
+  const nextCheckpoint = step ? TUTORIAL_REVIEW_ADVANCE[step] : undefined
 
   useEffect(() => {
     if (!step) return undefined
@@ -846,13 +825,11 @@ function GuidedTourHud({
   useEffect(() => {
     if (!step) {
       setTargetRect(null)
-      scrolledKeyRef.current = ''
       return undefined
     }
 
     let frame = 0
-    let settleRead = 0
-    const readTarget = (shouldScroll: boolean) => {
+    const readTarget = () => {
       if (step === 'done') {
         setTargetRect(null)
         return
@@ -871,42 +848,24 @@ function GuidedTourHud({
         width: rect.width,
         height: rect.height,
       })
-
-      const key = `${step}:${activeTab}:${target.textContent?.trim() ?? target.tagName}`
-      const shouldGentlyPointOnly = TUTORIAL_GENTLE_TARGET_STEPS.has(step)
-      if (shouldScroll && !shouldGentlyPointOnly && activeTab === targetTab && scrolledKeyRef.current !== key) {
-        scrolledKeyRef.current = key
-        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
-        window.clearTimeout(settleRead)
-        settleRead = window.setTimeout(() => {
-          const nextRect = target.getBoundingClientRect()
-          setTargetRect({
-            left: nextRect.left,
-            top: nextRect.top,
-            width: nextRect.width,
-            height: nextRect.height,
-          })
-        }, 420)
-      }
     }
 
     const scheduleRead = () => {
       window.cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(() => readTarget(false))
+      frame = window.requestAnimationFrame(readTarget)
     }
     const handleResize = () => {
       setViewport(getViewport())
       scheduleRead()
     }
 
-    const firstRead = window.setTimeout(() => readTarget(activeTab === targetTab), 80)
-    const retryRead = window.setInterval(() => readTarget(activeTab === targetTab), 360)
+    const firstRead = window.setTimeout(readTarget, 80)
+    const retryRead = window.setInterval(readTarget, 360)
     window.addEventListener('scroll', scheduleRead, true)
     window.addEventListener('resize', handleResize)
 
     return () => {
       window.clearTimeout(firstRead)
-      window.clearTimeout(settleRead)
       window.clearInterval(retryRead)
       window.cancelAnimationFrame(frame)
       window.removeEventListener('scroll', scheduleRead, true)
@@ -1040,11 +999,21 @@ function GuidedTourHud({
                     )
                   })}
                 </div>
-                <div className="flex items-center gap-3 pt-2">
+                <div className="flex items-center gap-3 pt-2 flex-wrap">
                   <span className="tour-hud-kbd">
                     <kbd>Esc</kbd>
                     <span>그만보기</span>
                   </span>
+                  {nextCheckpoint && (
+                    <button
+                      type="button"
+                      className="tour-hud-btn tour-hud-btn-ghost"
+                      onClick={() => onAdvance(nextCheckpoint)}
+                    >
+                      <Icon name="arrow_forward" size={16} />
+                      <span>다음 안내</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1067,7 +1036,7 @@ function NavigationRail({
   tutorialTargetTab?: Tab | null
 }) {
   return (
-    <aside className="sticky top-0 self-start flex flex-col items-center gap-2 w-24 min-h-screen py-4 bg-[var(--md-sys-color-surface-container-lowest)]/82 backdrop-blur-xl border-r border-[var(--md-sys-color-outline-variant)] shadow-[1px_0_0_rgba(255,255,255,0.7)_inset]">
+    <aside className="sticky top-0 self-start flex flex-col items-center gap-2 w-24 min-h-screen py-4 bg-[var(--md-sys-color-surface-container-lowest)]/88 backdrop-blur-xl border-r border-[var(--md-sys-color-outline-variant)] shadow-[1px_0_0_var(--ow-inset-highlight)_inset]">
       <div className="flex items-center justify-center py-3">
         <img
           src={LOGO_SRC}
@@ -1094,7 +1063,7 @@ function NavigationRail({
               <span
                 className={`relative inline-flex items-center justify-center h-9 w-14 rounded-full transition-all ${
                   active
-                    ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-primary)] shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]'
+                    ? 'bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-primary)] shadow-[0_1px_0_var(--ow-inset-highlight)_inset]'
                     : 'text-[var(--md-sys-color-on-surface-variant)]'
                 }`}
               >

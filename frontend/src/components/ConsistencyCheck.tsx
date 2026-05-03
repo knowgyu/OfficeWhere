@@ -23,7 +23,7 @@ import {
   TextField,
   useSnackbar,
 } from '../ui'
-import { EXAMPLE_EXCEL_QUERY, EXAMPLE_PPT_QUERY, TutorialStep } from '../tutorial'
+import { TutorialStep } from '../tutorial'
 import {
   CompareMetadataWarnings,
   ExcelCheckResult,
@@ -132,7 +132,6 @@ export default function ConsistencyCheck({
   const [pendingScrollGroupId, setPendingScrollGroupId] = useState<string | null>(null)
   const [excelGridModal, setExcelGridModal] = useState<ExcelGridModalState | null>(null)
   const historyRunRef = useRef(0)
-  const tutorialAppliedGroupFiltersRef = useRef(false)
   const groupRefreshTimerRef = useRef<number | null>(null)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
@@ -196,8 +195,10 @@ export default function ConsistencyCheck({
       setGroupFileType(nextFileType)
       setGroupSort(nextSort)
       setShowDuplicateGroups(nextShowDuplicates)
+      return { total: response.data.total, groups: response.data.groups }
     } catch {
       /* silent */
+      return { total: 0, groups: [] }
     } finally {
       setGroupsLoading(false)
     }
@@ -219,37 +220,6 @@ export default function ConsistencyCheck({
     void fetchFiles(0, fileQuery)
     void fetchGroups(0, groupFilter, groupQuery, groupFileType, groupSort, showDuplicateGroups)
   }, [libraryDataRevision])
-
-  useEffect(() => {
-    if (tutorialStep !== 'version-ppt') return
-    tutorialAppliedGroupFiltersRef.current = true
-    setGroupQueryDraft(EXAMPLE_PPT_QUERY)
-    setActiveGroupDetail(null)
-    setHistoryState(null)
-    void fetchGroups(0, 'version_family', EXAMPLE_PPT_QUERY, 'PowerPoint', 'recent', false)
-  }, [tutorialStep])
-
-  useEffect(() => {
-    if (tutorialStep !== 'version-excel-search') return
-    tutorialAppliedGroupFiltersRef.current = true
-    setGroupQueryDraft(EXAMPLE_EXCEL_QUERY)
-    setGroupFilter('version_family')
-    setGroupFileType('Excel')
-    setGroupSort('recent')
-    setShowDuplicateGroups(false)
-    setActiveGroupDetail(null)
-    setHistoryState(null)
-  }, [tutorialStep])
-
-  useEffect(() => {
-    if (tutorialStep !== 'done' && tutorialStep !== null) return
-    if (!tutorialAppliedGroupFiltersRef.current) return
-    tutorialAppliedGroupFiltersRef.current = false
-    setGroupQueryDraft('')
-    setActiveGroupDetail(null)
-    setHistoryState(null)
-    void fetchGroups(0, 'all', '', 'all', 'recent', false)
-  }, [tutorialStep])
 
   useEffect(() => {
     if (!pendingScrollGroupId || activeGroupDetail?.id !== pendingScrollGroupId) return
@@ -535,7 +505,7 @@ export default function ConsistencyCheck({
 
     const detail = await loadGroupDetail(group)
     if (!detail) return false
-    setPendingScrollGroupId(detail.id)
+    if (!tutorialStep) setPendingScrollGroupId(detail.id)
     await runHistoryDiffs(detail, compareSelections[detail.id])
     return true
   }
@@ -713,12 +683,13 @@ export default function ConsistencyCheck({
     const nextQuery = groupQueryDraft.trim()
     setActiveGroupDetail(null)
     setHistoryState(null)
-    const nextFilter = tutorialStep === 'version-excel-search' ? 'version_family' : groupFilter
-    const nextFileType = tutorialStep === 'version-excel-search' ? 'Excel' : groupFileType
-    const nextSort = tutorialStep === 'version-excel-search' ? 'recent' : groupSort
-    const nextShowDuplicates = tutorialStep === 'version-excel-search' ? false : showDuplicateGroups
-    void fetchGroups(0, nextFilter, nextQuery, nextFileType, nextSort, nextShowDuplicates).then(() => {
-      if (tutorialStep === 'version-excel-search') onTutorialStep?.('version-excel')
+    void fetchGroups(0, groupFilter, nextQuery, groupFileType, groupSort, showDuplicateGroups).then((response) => {
+      if (tutorialStep !== 'version-excel-search') return
+      if (response.groups.some((group) => normalizeFileType(group.file_type) === 'Excel')) {
+        onTutorialStep?.('version-excel')
+      } else {
+        snackbar.warn('예제 Excel 묶음을 찾지 못했습니다. 검색어를 확인하거나 필터를 초기화해 주세요.')
+      }
     })
   }
 

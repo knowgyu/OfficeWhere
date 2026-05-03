@@ -559,11 +559,16 @@ export function ExcelDiffGridModal({
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
     document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [])
+  }, [onClose])
 
   useEffect(() => {
     if (!modal.data || sheetNames.length === 0) {
@@ -581,7 +586,7 @@ export function ExcelDiffGridModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center overflow-hidden overscroll-contain bg-black/45 backdrop-blur-sm p-2 sm:p-4"
+      className="fixed inset-0 z-[140] flex items-center justify-center overflow-hidden overscroll-contain bg-[var(--ow-dialog-backdrop)] backdrop-blur-md p-2 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Excel 표로 보기"
@@ -596,7 +601,7 @@ export function ExcelDiffGridModal({
       }}
     >
       <div
-        className="flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface)] shadow-2xl"
+        className="flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--ow-dialog-surface)] shadow-elev-5"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="shrink-0 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/96">
@@ -731,7 +736,7 @@ function ExcelDiffGridSummary({
       </p>
 
       {data.partial && (
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 type-body-sm text-amber-950">
+        <p className="rounded-lg border border-[var(--md-sys-color-warning)]/45 bg-[var(--md-sys-color-warning-container)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-warning-container)]">
           표가 커서 전체를 한 번에 표시하지 않고 변경 셀 주변 구간만 보여줍니다.
           {data.omitted_focus_count > 0 && ` 전체 변경 범위에서 위치를 찾지 못한 변경 ${data.omitted_focus_count}건은 표에 표시하지 못했습니다.`}
         </p>
@@ -918,13 +923,13 @@ function ExcelDiffGridCellDetail({
             <div className="mt-2 space-y-1.5">
               <div className="grid grid-cols-[4.5rem,minmax(0,1fr)] items-start gap-2">
                 <span className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">수정 전</span>
-                <span className="min-w-0 rounded-md border border-red-200 bg-red-50 px-2 py-1 font-mono type-body-sm text-red-950 whitespace-pre-wrap break-words">
+                <span className="min-w-0 rounded-md border px-2 py-1 font-mono type-body-sm whitespace-pre-wrap break-words excel-diff-cell-removed">
                   {displayExcelGridValue(history.before)}
                 </span>
               </div>
               <div className="grid grid-cols-[4.5rem,minmax(0,1fr)] items-start gap-2">
                 <span className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">수정 후</span>
-                <span className="min-w-0 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono type-body-sm text-emerald-950 whitespace-pre-wrap break-words">
+                <span className="min-w-0 rounded-md border px-2 py-1 font-mono type-body-sm whitespace-pre-wrap break-words excel-diff-cell-added">
                   {displayExcelGridValue(history.after)}
                 </span>
               </div>

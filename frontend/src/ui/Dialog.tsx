@@ -50,7 +50,7 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden overscroll-contain p-4 bg-black/40 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[130] flex items-center justify-center overflow-hidden overscroll-contain bg-[var(--ow-dialog-backdrop)] p-4 backdrop-blur-md animate-fade-in"
       onMouseDown={(event) => {
         if (dismissOnBackdrop && event.target === event.currentTarget) onClose()
       }}
@@ -66,7 +66,7 @@ export function Dialog({
       aria-modal="true"
     >
       <div
-        className={`w-full ${SIZE[size]} max-h-[88vh] flex flex-col rounded-xl bg-[var(--md-sys-color-surface-container-high)] shadow-elev-5 animate-scale-in overflow-hidden overscroll-contain`}
+        className={`w-full ${SIZE[size]} max-h-[88vh] flex flex-col rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--ow-dialog-surface)] shadow-elev-5 animate-scale-in overflow-hidden overscroll-contain`}
       >
         <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4">
           <div className="flex items-start gap-3 min-w-0">
@@ -95,7 +95,7 @@ export function Dialog({
         </div>
         <div className="flex-1 overflow-auto overscroll-contain px-6 pb-4">{children}</div>
         {actions && (
-          <div className="px-6 py-4 border-t border-[var(--md-sys-color-outline-variant)] flex justify-end gap-2">
+          <div className="px-6 py-4 border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/82 flex justify-end gap-2">
             {actions}
           </div>
         )}

@@ -16,8 +16,7 @@ import {
   TextField,
   useSnackbar,
 } from '../ui'
-import { EXAMPLE_SEARCH_QUERY, TutorialStep } from '../tutorial'
-
+import { TutorialStep } from '../tutorial'
 
 const FILE_TYPE_FILTERS = [
   { label: '.xlsx', value: 'xlsx', icon: 'table_chart' },
@@ -222,13 +221,6 @@ export default function FileSearch({
       setSettingsDraft(response.data)
     })
   }, [])
-
-  useEffect(() => {
-    if (tutorialStep !== 'search') return
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    setQuery(EXAMPLE_SEARCH_QUERY)
-    setSearchScope('filename_content')
-  }, [tutorialStep])
 
   const buildModifiedDateParams = useCallback(
     (
@@ -448,6 +440,7 @@ export default function FileSearch({
   }
 
   const toggleContentMatches = (fileKey: string) => {
+    const willExpand = !expandedContentFiles.has(fileKey)
     setExpandedContentFiles((current) => {
       const next = new Set(current)
       if (next.has(fileKey)) {
@@ -457,6 +450,7 @@ export default function FileSearch({
       }
       return next
     })
+    if (willExpand && tutorialStep === 'search-results') onTutorialStep?.('search-review')
   }
 
   const handleReindex = async () => {
@@ -564,20 +558,6 @@ export default function FileSearch({
     if (tutorialStep === 'search-results') onTutorialStep?.('search-review')
   }
 
-  useEffect(() => {
-    if (tutorialStep !== 'search-results') return
-    if (!searched || loading || !hasResults) return
-    if (contentFileKeys.length === 0 || allContentMatchesExpanded) onTutorialStep?.('search-review')
-  }, [
-    allContentMatchesExpanded,
-    contentFileKeys.length,
-    hasResults,
-    loading,
-    onTutorialStep,
-    searched,
-    tutorialStep,
-  ])
-
   const collapseAllContentMatches = () => {
     setExpandedContentFiles(new Set())
   }
@@ -618,7 +598,7 @@ export default function FileSearch({
               placeholder="파일 안의 단어를 검색 (예: 회의록, 예산안, 실험 결과)"
               value={query}
               onChange={(event) => handleQueryChange(event.target.value)}
-              className="h-12 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_rgba(255,255,255,0.95)_inset,0_0_0_1px_rgba(15,23,42,0.05)]"
+              className="h-12 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_var(--ow-inset-highlight)_inset,0_0_0_1px_color-mix(in_srgb,var(--md-sys-color-outline-variant)_55%,transparent)]"
               trailing={
                 query ? (
                   <IconButton
@@ -628,20 +608,20 @@ export default function FileSearch({
                     onClick={() => {
                       if (debounceRef.current) clearTimeout(debounceRef.current)
                       searchRequestSeq.current += 1
-	                      setQuery('')
-	                      setResults([])
-	                      setSearchMeta({
-	                        fileCount: 0,
-	                        fileLimit: INITIAL_SEARCH_FILE_LIMIT,
-	                        hasMore: false,
-	                      })
-	                      setSearched(false)
-	                      setExpandedContentFiles(new Set())
-	                      setLoading(false)
-	                      setLoadingMore(false)
-	                      setPrefetching(false)
-	                      prefetchedSearchRef.current = null
-	                    }}
+                      setQuery('')
+                      setResults([])
+                      setSearchMeta({
+                        fileCount: 0,
+                        fileLimit: INITIAL_SEARCH_FILE_LIMIT,
+                        hasMore: false,
+                      })
+                      setSearched(false)
+                      setExpandedContentFiles(new Set())
+                      setLoading(false)
+                      setLoadingMore(false)
+                      setPrefetching(false)
+                      prefetchedSearchRef.current = null
+                    }}
                   />
                 ) : null
               }
