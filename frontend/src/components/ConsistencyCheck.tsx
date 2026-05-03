@@ -87,9 +87,11 @@ const groupSummaryFromDetail = (detail: LibraryGroupDetail): LibraryGroupSummary
 
 export default function ConsistencyCheck({
   tutorialStep,
+  libraryDataRevision = 0,
   onTutorialStep,
 }: {
   tutorialStep?: TutorialStep | null
+  libraryDataRevision?: number
   onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const snackbar = useSnackbar()
@@ -208,6 +210,15 @@ export default function ConsistencyCheck({
       if (groupRefreshTimerRef.current !== null) window.clearTimeout(groupRefreshTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (libraryDataRevision === 0) return
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    setSelectedIds(new Set())
+    void fetchFiles(0, fileQuery)
+    void fetchGroups(0, groupFilter, groupQuery, groupFileType, groupSort, showDuplicateGroups)
+  }, [libraryDataRevision])
 
   useEffect(() => {
     if (tutorialStep !== 'version-ppt') return

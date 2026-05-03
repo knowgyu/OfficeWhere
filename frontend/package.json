@@ -62,10 +62,6 @@
       {
         "from": "../backend_server.py",
         "to": "backend-source/backend_server.py"
-      },
-      {
-        "from": "../examples/officewhere_test_library",
-        "to": "examples/officewhere_test_library"
       }
     ],
     "win": {

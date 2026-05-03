@@ -181,9 +181,11 @@ function SearchResultListItem({
 
 export default function FileSearch({
   tutorialStep,
+  libraryDataRevision = 0,
   onTutorialStep,
 }: {
   tutorialStep?: TutorialStep | null
+  libraryDataRevision?: number
   onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const snackbar = useSnackbar()
@@ -511,6 +513,22 @@ export default function FileSearch({
       snackbar.error('폴더를 열지 못했습니다. 파일 경로가 바뀌었는지 확인해 주세요.')
     }
   }
+
+  useEffect(() => {
+    if (libraryDataRevision === 0) return
+    if (!query.trim()) {
+      setResults([])
+      setSearchMeta({
+        fileCount: 0,
+        fileLimit: INITIAL_SEARCH_FILE_LIMIT,
+        hasMore: false,
+      })
+      setSearched(false)
+      setExpandedContentFiles(new Set())
+      return
+    }
+    void doSearch(query)
+  }, [libraryDataRevision])
 
   const grouped = useMemo(() => {
     const map = new Map<string, { fileName: string; items: SearchResult[] }>()

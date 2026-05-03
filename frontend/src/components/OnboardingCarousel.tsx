@@ -41,9 +41,9 @@ const slides: Slide[] = [
     metric: '파일명 + 내용',
     chips: ['프로젝트 검색', '본문 미리보기', '내 PC에서 확인'],
     rows: [
-      { icon: 'description', title: '주간보고_v4.0_260517.docx', meta: '회의 액션아이템 · 본문 일치', state: 'Word' },
-      { icon: 'slideshow', title: '프로젝트상태_v4.0_260517.pptx', meta: '릴리즈 후보 준비 · 슬라이드 2', state: 'PPT' },
-      { icon: 'table_chart', title: '사업예산_v4.0_260517.xlsx', meta: 'Excel 표 안의 값까지 검색', state: 'Excel' },
+      { icon: 'description', title: '주간보고_v4.0_260517.docx', meta: '본문 일치 · "프로젝트" 12회', state: 'Word' },
+      { icon: 'slideshow', title: '프로젝트상태_v4.0_260517.pptx', meta: '슬라이드 2 · 본문 일치', state: 'PPT' },
+      { icon: 'table_chart', title: '사업예산_v4.0_260517.xlsx', meta: '시트 "예산총괄" · 셀 12개', state: 'Excel' },
     ],
   },
   {
@@ -57,25 +57,25 @@ const slides: Slide[] = [
     metric: '변경점 중심',
     chips: ['변경점 보기', 'PPT 변경', '최신 지정'],
     rows: [
-      { icon: 'task_alt', title: 'v4.0 → v3.0', meta: '주요 변경점 슬라이드 추가', state: '+3' },
-      { icon: 'sync_alt', title: 'v3.0 → v2.0', meta: '위험 요소 문구 수정', state: '수정' },
-      { icon: 'history', title: 'v2.0 → v1.1', meta: '일정 항목 2개 변경', state: '추적' },
+      { icon: 'add_circle', title: 'v4.0 ← v3.0', meta: '슬라이드 1장 추가', state: '+1' },
+      { icon: 'edit_note', title: 'v3.0 ← v2.0', meta: '"리스크" 문구 3곳 수정', state: '수정' },
+      { icon: 'compare_arrows', title: 'v2.0 ← v1.1', meta: '셀 D7, E9 값 변경', state: '값' },
     ],
   },
   {
     eyebrow: '첫 실행',
     title: '예제로 핵심만 둘러보세요',
     description: '강조된 곳을 따라가며 검색, 버전 차이, 셀 변경을 확인합니다.',
-    proof: '준비된 예제로 확인하며 원본 문서는 수정하지 않습니다.',
+    proof: '튜토리얼 동안만 임시 예제를 만들고, 끝나면 정리합니다.',
     accent: '#146c2e',
     previewTitle: '예제 둘러보기 경로',
     previewSubtitle: '핵심 흐름 안내 · 직접 클릭',
     metric: '짧은 체험',
     chips: ['프로젝트 검색', '문서 새로고침', '표로 보기'],
     rows: [
-      { icon: 'folder_open', title: '예제 폴더 지정', meta: '예제 문서 폴더', state: '1' },
-      { icon: 'search', title: '프로젝트 검색', meta: '검색 결과를 확인하고 버전으로 이동', state: '2' },
-      { icon: 'grid_on', title: 'Excel 표로 보기', meta: '셀 단위 변경점을 표에서 확인', state: '3' },
+      { icon: 'folder_open', title: '1. 임시 예제 폴더 추가', meta: '튜토리얼 완료 후 자동 정리', state: '준비' },
+      { icon: 'search', title: '2. "프로젝트"로 검색', meta: '파일명·본문 동시 검색', state: '검색' },
+      { icon: 'grid_on', title: '3. Excel 표에서 셀 차이 확인', meta: 'D7 셀 클릭 시 이력 펼침', state: '비교' },
     ],
   },
 ]
@@ -91,6 +91,27 @@ export default function OnboardingCarousel({
   useEffect(() => {
     if (open) setIndex(0)
   }, [open, replay])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement
+      if (target.closest('input, textarea, [contenteditable]')) return
+      if (event.key === 'ArrowRight' || event.key === 'PageDown') {
+        setIndex((i) => Math.min(i + 1, slides.length - 1))
+      } else if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        setIndex((i) => Math.max(i - 1, 0))
+      } else if (event.key === 'Home') {
+        setIndex(0)
+      } else if (event.key === 'End') {
+        setIndex(slides.length - 1)
+      } else if (event.key === 'Escape') {
+        onStartOwnFolder()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open, onStartOwnFolder])
 
   if (!open) return null
 
@@ -108,6 +129,14 @@ export default function OnboardingCarousel({
       style={accentStyle}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_18%,rgba(83,58,253,0.24),transparent_24rem),radial-gradient(circle_at_86%_16%,rgba(20,108,46,0.18),transparent_24rem),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_35%)]" />
+      <button
+        type="button"
+        aria-label="둘러보기 닫기"
+        onClick={onStartOwnFolder}
+        className="onboarding-close-btn absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.14] bg-white/[0.06] text-white/80 backdrop-blur-md hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/70"
+      >
+        <Icon name="close" size={18} />
+      </button>
       <div className="relative w-full max-w-6xl overflow-hidden rounded-[1.75rem] border border-white/[0.12] bg-[#f7f8ff] shadow-[0_34px_90px_rgba(0,0,0,0.42)]">
         <div className="grid min-h-[660px] grid-cols-1 lg:grid-cols-[0.92fr_1.08fr]">
           <section className="relative flex flex-col justify-between gap-8 p-7 md:p-10 lg:p-12 lg:pr-10">
@@ -119,7 +148,10 @@ export default function OnboardingCarousel({
                   <span className="h-1.5 w-1.5 rounded-full bg-[var(--ow-onboarding-accent)]" />
                   {replay ? '처음 둘러보기 다시 보기' : 'OfficeWhere 시작하기'}
                 </div>
-                <span className="rounded-md border border-[#e5edf5] bg-white/70 px-2.5 py-1 text-[0.72rem] font-medium text-[#64748d]">
+                <span
+                  key={index}
+                  className="tour-step-pop tabular-nums rounded-md border border-[#e5edf5] bg-white/70 px-2.5 py-1 text-[0.72rem] font-medium text-[#64748d]"
+                >
                   {index + 1} / {slides.length}
                 </span>
               </div>

@@ -30,6 +30,16 @@ export interface ExampleLibraryPathResponse {
   available: boolean
   path: string
   reason?: string
+  temporary?: boolean
+  fileCount?: number
+}
+
+export interface TutorialLibraryCleanupResult {
+  success: boolean
+  removed: string[]
+  deletedFileRecords: number
+  removedWatchedFolders: number
+  failed: { path: string; error: string }[]
 }
 
 export interface SchemaResetState {

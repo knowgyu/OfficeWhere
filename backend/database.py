@@ -2119,6 +2119,45 @@ def delete_files_by_extensions(extensions: Sequence[str]) -> int:
         return len(file_ids)
 
 
+def _path_is_under(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def delete_files_under_paths(paths: Sequence[str | os.PathLike[str]]) -> int:
+    """Remove app-owned registrations/indexes whose source path is under a root.
+
+    This only deletes OfficeWhere DB/index rows. It never touches the source
+    document files themselves; callers that remove app-owned temporary files
+    must do that explicitly after constraining the target root.
+    """
+    roots = [
+        Path(path).expanduser().resolve(strict=False)
+        for path in paths
+        if str(path or "").strip()
+    ]
+    if not roots:
+        return 0
+
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, path FROM registered_files")
+        file_ids: List[int] = []
+        for file_id, source_path in cursor.fetchall():
+            candidate = Path(str(source_path)).expanduser().resolve(strict=False)
+            if any(candidate == root or _path_is_under(candidate, root) for root in roots):
+                file_ids.append(int(file_id))
+        if not file_ids:
+            return 0
+
+        _delete_registered_file_ids_with_cursor(cursor, file_ids, repair_reason="delete_files_under_paths")
+        conn.commit()
+        return len(file_ids)
+
+
 def delete_all_files() -> int:
     """Remove all app-owned registrations and indexes without touching source files."""
     with _write_connection() as conn:

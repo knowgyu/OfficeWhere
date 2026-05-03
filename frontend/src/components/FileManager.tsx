@@ -186,11 +186,13 @@ function normalizeExcludedFolderNames(values: string[]) {
 export default function FileManager({
   tutorialStep,
   exampleLibraryPath = '',
+  libraryDataRevision = 0,
   onTutorialStep,
   onReplayOnboarding,
 }: {
   tutorialStep?: TutorialStep | null
   exampleLibraryPath?: string
+  libraryDataRevision?: number
   onTutorialStep?: (step: TutorialStep | null) => void
   onReplayOnboarding?: () => void
 }) {
@@ -324,6 +326,12 @@ export default function FileManager({
   }, [rescanCompletionKey])
 
   useEffect(() => {
+    if (libraryDataRevision === 0) return
+    void fetchFiles(0, fileQuery)
+    void fetchLibrarySettings()
+  }, [libraryDataRevision])
+
+  useEffect(() => {
     if (tutorialStep !== 'example-folder' || !exampleLibraryPath) return
     setFolderPathDraft(exampleLibraryPath)
     setFolderRecursive(true)
@@ -450,7 +458,7 @@ export default function FileManager({
     setFolderPathDraft('')
     if (tutorialStep === 'example-folder') {
       onTutorialStep?.('document-refresh')
-      snackbar.success('예제 폴더를 추가했습니다. 문서 새로고침을 한 번 눌러 확인해 보세요.')
+      snackbar.success('임시 예제 폴더를 추가했습니다. 문서 새로고침을 한 번 눌러 확인해 보세요.')
       return
     }
     await startRescan('added', 'fast')
@@ -882,7 +890,7 @@ export default function FileManager({
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') void handleAddWatchedFolder()
                 }}
-                helper={tutorialStep === 'example-folder' ? '예제 폴더 경로가 미리 입력되어 있습니다.' : undefined}
+                helper={tutorialStep === 'example-folder' ? '튜토리얼용 임시 폴더 경로가 미리 입력되어 있습니다.' : undefined}
               />
             </div>
             <Button
@@ -1167,7 +1175,7 @@ export default function FileManager({
           <CardSection
             className="p-3"
             title="처음 둘러보기"
-            description="예제 문서로 핵심 흐름을 다시 확인합니다."
+            description="튜토리얼 동안만 임시 예제 문서를 만들어 핵심 흐름을 다시 확인합니다."
             trailing={
               <Button variant="tonal" size="sm" leadingIcon="auto_awesome" onClick={onReplayOnboarding}>
                 다시 보기

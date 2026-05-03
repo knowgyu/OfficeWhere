@@ -876,6 +876,207 @@ body,
   }
 }
 
+/* ── 온보딩 close 버튼 ─────────────────────────────────────────── */
+.onboarding-close-btn {
+  transition:
+    background-color 160ms var(--md-motion-standard),
+    color 160ms var(--md-motion-standard),
+    transform 160ms var(--md-motion-standard);
+}
+.onboarding-close-btn:hover {
+  transform: scale(1.06);
+}
+.onboarding-close-btn:active {
+  transform: scale(0.96);
+}
+
+/* ── 슬라이드 카운터 chip pop ──────────────────────────────────── */
+@keyframes tour-step-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(0) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.tour-step-pop {
+  animation: tour-step-pop 380ms var(--md-motion-standard);
+}
+
+/* ── HUD meta row (섹션 레이블 + 카운터) ──────────────────────── */
+.tour-hud-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+.tour-hud-section {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--md-sys-color-on-surface-variant);
+}
+.tour-hud-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 70%, white);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.85) inset;
+}
+
+/* ── 진행 바 ──────────────────────────────────────────────────── */
+.tour-hud-progress {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.6rem;
+}
+.tour-hud-progress-seg {
+  position: relative;
+  height: 4px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--md-sys-color-outline-variant) 70%, white);
+}
+.tour-hud-progress-seg.is-active {
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 84%, white);
+}
+.tour-hud-progress-fill {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--md-sys-color-primary) 92%, white),
+    color-mix(in srgb, var(--md-sys-color-primary) 70%, white)
+  );
+  transition: width 360ms var(--md-motion-standard);
+}
+@keyframes tour-progress-fill {
+  from {
+    transform: scaleX(0.6);
+    transform-origin: left;
+  }
+  to {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+
+/* ── 버블 pointer-events 수정 (버튼 클릭 수신용) ─────────────── */
+.tour-hud-bubble {
+  pointer-events: auto;
+}
+
+/* ── 완료(done) 화면 ──────────────────────────────────────────── */
+.tour-hud-done {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  animation: tour-done-rise 460ms var(--md-motion-standard);
+}
+.tour-hud-done-icon {
+  align-self: flex-start;
+  display: inline-flex;
+  width: 3rem;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--md-sys-color-primary);
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.95), transparent 38%),
+    color-mix(in srgb, var(--md-sys-color-primary-container) 80%, white);
+  box-shadow:
+    0 14px 30px color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent),
+    0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+}
+.tour-hud-summary {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.85rem;
+  background: color-mix(
+    in srgb,
+    var(--md-sys-color-surface-container-lowest) 84%,
+    var(--md-sys-color-primary) 4%
+  );
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 86%, white);
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+}
+.tour-hud-summary li {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.78rem;
+  color: var(--md-sys-color-on-surface);
+}
+.tour-hud-summary li > .material-symbol {
+  color: var(--md-sys-color-primary);
+}
+.tour-hud-done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.tour-hud-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  transition:
+    background-color 160ms var(--md-motion-standard),
+    box-shadow 160ms var(--md-motion-standard),
+    transform 160ms var(--md-motion-standard);
+}
+.tour-hud-btn-primary {
+  color: var(--md-sys-color-on-primary);
+  background: var(--md-sys-color-primary);
+  box-shadow:
+    0 12px 24px color-mix(in srgb, var(--md-sys-color-primary) 32%, transparent),
+    0 1px 0 rgba(255, 255, 255, 0.5) inset;
+}
+.tour-hud-btn-primary:hover {
+  transform: translateY(-1px);
+}
+.tour-hud-btn-primary:active {
+  transform: translateY(0);
+}
+.tour-hud-btn-ghost {
+  color: var(--md-sys-color-on-surface);
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 88%, white);
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 80%, white);
+}
+.tour-hud-btn-ghost:hover {
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 88%, white);
+}
+@keyframes tour-done-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tour-hud-bubble,
   .tour-hud-line,
@@ -884,7 +1085,14 @@ body,
   .tour-review-target::before,
   .tour-review-target::after,
   .tour-evidence-note,
-  .tour-version-evidence-card::after {
+  .tour-version-evidence-card::after,
+  .tour-step-pop,
+  .tour-hud-progress-fill,
+  .tour-hud-done,
+  .onboarding-close-btn {
     animation: none;
+  }
+  .tour-hud-progress-fill {
+    transition: none;
   }
 }

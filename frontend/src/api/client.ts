@@ -7,6 +7,7 @@ import type {
   ExampleLibraryPathResponse,
   FolderPickResponse,
   SchemaResetState,
+  TutorialLibraryCleanupResult,
   UpdateCheckResult,
 } from './transport'
 import type { CellValue, CompareMode, FileInfo, FileType } from './shared'
@@ -21,6 +22,7 @@ export type {
   ExampleLibraryPathResponse,
   FolderPickResponse,
   SchemaResetState,
+  TutorialLibraryCleanupResult,
   UpdateAssetInfo,
   UpdateCheckResult,
   UpdateInstallResult,
@@ -1226,6 +1228,12 @@ export const api = {
             },
       }
     },
+    createTutorialLibrary: async () =>
+      axios.post<ExampleLibraryPathResponse>(await apiPath('/api/app/tutorial-library')),
+    cleanupTutorialLibrary: async (path?: string) =>
+      axios.delete<TutorialLibraryCleanupResult>(await apiPath('/api/app/tutorial-library'), {
+        data: { path },
+      }),
     consumeSchemaResetState: async () => {
       try {
         return await axios.get<SchemaResetState>(await apiPath('/api/app/schema-reset-state'))

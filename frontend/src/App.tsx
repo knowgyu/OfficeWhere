@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
 
 import FileManager from './components/FileManager'
 import ConsistencyCheck from './components/ConsistencyCheck'
@@ -9,7 +9,13 @@ import { Button, Dialog, Icon, Spinner } from './ui'
 import { useSnackbar } from './ui'
 import { useLibraryRescan } from './contexts/LibraryRescanContext'
 import { useDisplaySettings } from './contexts/DisplaySettingsContext'
-import { TutorialStep } from './tutorial'
+import {
+  TutorialStep,
+  TUTORIAL_TOTAL_STEPS,
+  TUTORIAL_SECTIONS,
+  getTutorialStepIndex,
+  getTutorialSection,
+} from './tutorial'
 
 type Tab = 'search' | 'check' | 'files'
 
@@ -101,10 +107,10 @@ const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
 }
 
 const TUTORIAL_REVIEW_DELAY_MS: Partial<Record<TutorialStep, number>> = {
-  'search-review': 2520,
-  'version-ppt-detail': 3300,
-  'version-excel-review': 3640,
-  'excel-table-history': 3600,
+  'search-review': 720,
+  'version-ppt-detail': 760,
+  'version-excel-review': 760,
+  'excel-table-history': 820,
 }
 
 const TUTORIAL_GENTLE_TARGET_STEPS = new Set<TutorialStep>([
@@ -116,25 +122,25 @@ const TUTORIAL_GENTLE_TARGET_STEPS = new Set<TutorialStep>([
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
-    eyebrow: 'Step 1 · 예제 폴더',
-    title: '예제 폴더를 추가하세요',
-    description: '경로는 채워졌어요. 대상 추가만 누르면 됩니다.',
+    eyebrow: '예제 폴더',
+    title: '임시 예제 폴더를 추가하세요',
+    description: '튜토리얼용으로 방금 만든 폴더입니다. 대상 추가만 누르면 됩니다.',
     icon: 'drive_folder_upload',
   },
   'document-refresh': {
-    eyebrow: 'Step 2 · 문서 준비',
+    eyebrow: '문서 준비',
     title: '문서 새로고침을 눌러보세요',
     description: '파일이 바뀌었을 때 이 버튼으로 다시 확인합니다.',
     icon: 'sync',
   },
   search: {
-    eyebrow: 'Step 3 · 문서 검색',
+    eyebrow: '문서 검색',
     title: '프로젝트로 검색해 보세요',
     description: '예제 문서의 파일명과 내용을 함께 찾습니다.',
     icon: 'search',
   },
   'search-results': {
-    eyebrow: 'Step 3 · 본문 매칭',
+    eyebrow: '본문 매칭',
     title: '본문 매칭을 펼치세요',
     description: '어디에서 검색됐는지 바로 확인합니다.',
     icon: 'unfold_more',
@@ -146,7 +152,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     icon: 'visibility',
   },
   'version-ppt': {
-    eyebrow: 'Step 4 · PPT 버전',
+    eyebrow: 'PPT 버전',
     title: 'PPT 변경 증거를 엽니다',
     description: '변경점 보기로 바뀐 슬라이드를 확인합니다.',
     icon: 'timeline',
@@ -158,19 +164,19 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     icon: 'unfold_more',
   },
   'version-ppt-detail': {
-    eyebrow: 'PPT 변경',
+    eyebrow: 'PPT 변경 상세',
     title: '실제 변경 내용입니다',
     description: '슬라이드별로 바뀐 텍스트만 펼쳐서 확인합니다.',
     icon: 'visibility',
   },
   'version-excel-search': {
-    eyebrow: 'Step 5 · Excel 찾기',
+    eyebrow: 'Excel 찾기',
     title: '사업예산을 찾아보세요',
     description: '검색어는 넣어뒀어요. 찾기 버튼을 누르면 됩니다.',
     icon: 'search',
   },
   'version-excel': {
-    eyebrow: 'Step 5 · Excel 버전',
+    eyebrow: 'Excel 버전',
     title: 'Excel 값 변경을 엽니다',
     description: '변경점 보기로 바뀐 값을 확인합니다.',
     icon: 'difference',
@@ -182,7 +188,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     icon: 'fact_check',
   },
   'excel-table': {
-    eyebrow: 'Step 6 · 셀 단위',
+    eyebrow: '셀 단위 보기',
     title: '표로 보기를 눌러보세요',
     description: '셀 단위로 바뀐 지점을 색으로 확인합니다.',
     icon: 'table_chart',
@@ -200,9 +206,9 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     icon: 'history',
   },
   done: {
-    eyebrow: '완료',
-    title: '둘러보기가 끝났습니다',
-    description: '이제 내 문서 폴더에서도 같은 흐름으로 확인해 보세요.',
+    eyebrow: '둘러보기 완료',
+    title: '핵심 흐름을 모두 확인했어요',
+    description: '임시 예제는 정리됩니다. 이제 내 문서 폴더에서도 같은 방식으로 확인해 보세요.',
     icon: 'task_alt',
   },
 }
@@ -307,6 +313,7 @@ export default function App() {
   const [onboardingReplay, setOnboardingReplay] = useState(false)
   const [tutorialStep, setTutorialStep] = useState<TutorialStep | null>(null)
   const [exampleLibraryPath, setExampleLibraryPath] = useState('')
+  const [libraryDataRevision, setLibraryDataRevision] = useState(0)
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
   const [updateDownloading, setUpdateDownloading] = useState(false)
@@ -314,10 +321,16 @@ export default function App() {
   const [updateError, setUpdateError] = useState('')
   const [updateDownloadedPath, setUpdateDownloadedPath] = useState('')
   const { textSize, increaseTextSize, decreaseTextSize, resetTextSize } = useDisplaySettings()
+  const tutorialCleanupPathRef = useRef('')
+  const tutorialCleanupInFlightRef = useRef<Promise<void> | null>(null)
 
   useEffect(() => {
     window.localStorage.setItem(LS_TAB, activeTab)
   }, [activeTab])
+
+  useEffect(() => {
+    if (exampleLibraryPath) tutorialCleanupPathRef.current = exampleLibraryPath
+  }, [exampleLibraryPath])
 
   useEffect(() => {
     let cancelled = false
@@ -432,7 +445,41 @@ export default function App() {
     setOnboardingReplay(false)
   }
 
+  const cleanupTutorialLibrary = useCallback(
+    (showMessage = false) => {
+      if (tutorialCleanupInFlightRef.current) return tutorialCleanupInFlightRef.current
+      const path = tutorialCleanupPathRef.current
+      if (!path) return Promise.resolve()
+
+      tutorialCleanupPathRef.current = ''
+      setExampleLibraryPath('')
+
+      const promise = api.app
+        .cleanupTutorialLibrary(path)
+        .then((response) => {
+          setLibraryDataRevision((value) => value + 1)
+          if (showMessage && response.data.success) {
+            snackbar.info('튜토리얼 예제 파일과 임시 색인을 정리했습니다.')
+          }
+          if (showMessage && !response.data.success) {
+            snackbar.warn('튜토리얼 예제 일부를 정리하지 못했습니다. 앱 데이터 정리에서 다시 지울 수 있습니다.')
+          }
+        })
+        .catch(() => {
+          if (showMessage) snackbar.warn('튜토리얼 예제 파일 정리에 실패했습니다.')
+        })
+        .finally(() => {
+          tutorialCleanupInFlightRef.current = null
+        })
+
+      tutorialCleanupInFlightRef.current = promise
+      return promise
+    },
+    [snackbar],
+  )
+
   const handleStartOwnFolder = () => {
+    void cleanupTutorialLibrary(false)
     completeOnboarding()
     setTutorialStep(null)
     setActiveTab('files')
@@ -445,26 +492,30 @@ export default function App() {
 
   const handleStartExample = async () => {
     try {
-      const response = await api.app.getExampleLibraryPath()
+      const response = await api.app.createTutorialLibrary()
       if (response.data.available && response.data.path) {
+        tutorialCleanupPathRef.current = response.data.path
         setExampleLibraryPath(response.data.path)
         completeOnboarding()
         setActiveTab('files')
         setTutorialStep('example-folder')
       } else {
         setExampleLibraryPath('')
-        snackbar.warn(response.data.reason || '예제 라이브러리 경로를 찾지 못했습니다.')
+        tutorialCleanupPathRef.current = ''
+        snackbar.warn(response.data.reason || '튜토리얼 예제 파일을 만들지 못했습니다.')
       }
     } catch (error) {
       setExampleLibraryPath('')
+      tutorialCleanupPathRef.current = ''
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        '예제 라이브러리 경로를 확인하지 못했습니다.'
+        '튜토리얼 예제 파일을 만들지 못했습니다.'
       snackbar.warn(detail)
     }
   }
 
   const handleTutorialStep = (next: TutorialStep | null) => {
+    if (next === null && tutorialStep && tutorialStep !== 'done') void cleanupTutorialLibrary(true)
     setTutorialStep(next)
   }
 
@@ -518,29 +569,30 @@ export default function App() {
     const handleTutorialKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
+      void cleanupTutorialLibrary(true)
       setTutorialStep(null)
     }
 
     window.addEventListener('keydown', handleTutorialKeyDown)
     return () => window.removeEventListener('keydown', handleTutorialKeyDown)
-  }, [tutorialStep])
+  }, [cleanupTutorialLibrary, tutorialStep])
 
   useEffect(() => {
     if (!tutorialStep) return undefined
     if (tutorialStep === 'done') {
-      const timer = window.setTimeout(() => setTutorialStep(null), 3000)
-      return () => window.clearTimeout(timer)
+      void cleanupTutorialLibrary(true)
+      return undefined
     }
     const nextStep = TUTORIAL_REVIEW_ADVANCE[tutorialStep]
     if (!nextStep) return undefined
 
-    const delay = TUTORIAL_REVIEW_DELAY_MS[tutorialStep] ?? 2200
+    const delay = TUTORIAL_REVIEW_DELAY_MS[tutorialStep] ?? 700
     const timer = window.setTimeout(() => {
       setTutorialStep((current) => (current === tutorialStep ? nextStep : current))
     }, delay)
 
     return () => window.clearTimeout(timer)
-  }, [tutorialStep])
+  }, [cleanupTutorialLibrary, tutorialStep])
 
   return (
     <div
@@ -562,6 +614,7 @@ export default function App() {
               <FileManager
                 tutorialStep={tutorialStep}
                 exampleLibraryPath={exampleLibraryPath}
+                libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
                 onReplayOnboarding={handleReplayOnboarding}
               />
@@ -569,12 +622,14 @@ export default function App() {
             {activeTab === 'search' && (
               <FileSearch
                 tutorialStep={tutorialStep}
+                libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
               />
             )}
             {activeTab === 'check' && (
               <ConsistencyCheck
                 tutorialStep={tutorialStep}
+                libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
               />
             )}
@@ -589,6 +644,12 @@ export default function App() {
         step={tutorialStep}
         activeTab={activeTab}
         targetTab={tutorialTargetTab}
+        onCloseDone={() => setTutorialStep(null)}
+        onReplayOnboarding={() => {
+          setTutorialStep(null)
+          setOnboardingReplay(true)
+          setOnboardingOpen(true)
+        }}
       />
       <OnboardingCarousel
         open={onboardingOpen}
@@ -736,15 +797,20 @@ function GuidedTourHud({
   step,
   activeTab,
   targetTab,
+  onCloseDone,
+  onReplayOnboarding,
 }: {
   step: TutorialStep | null
   activeTab: Tab
   targetTab: Tab | null
+  onCloseDone: () => void
+  onReplayOnboarding: () => void
 }) {
   const [pointer, setPointer] = useState<Point>(getInitialPointer)
   const [viewport, setViewport] = useState(getViewport)
   const [targetRect, setTargetRect] = useState<TourRect | null>(null)
   const scrolledKeyRef = useRef('')
+  const primaryButtonRef = useRef<HTMLButtonElement>(null)
 
   const content = useMemo(() => getTutorialCopy(step, activeTab), [activeTab, step])
 
@@ -758,6 +824,24 @@ function GuidedTourHud({
     window.addEventListener('pointermove', handlePointerMove, { passive: true })
     return () => window.removeEventListener('pointermove', handlePointerMove)
   }, [step])
+
+  useEffect(() => {
+    if (step !== 'done') return undefined
+    const raf = requestAnimationFrame(() => primaryButtonRef.current?.focus())
+    return () => cancelAnimationFrame(raf)
+  }, [step])
+
+  useEffect(() => {
+    if (step !== 'done') return undefined
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === 'Escape') {
+        event.preventDefault()
+        onCloseDone()
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [step, onCloseDone])
 
   useEffect(() => {
     if (!step) {
@@ -832,8 +916,9 @@ function GuidedTourHud({
 
   if (!step || !content) return null
 
-  const bubbleWidth = Math.min(352, Math.max(280, viewport.width - 32))
-  const bubbleHeight = step === 'done' ? 132 : 178
+  const isDone = step === 'done'
+  const bubbleWidth = Math.min(isDone ? 380 : 352, Math.max(280, viewport.width - 32))
+  const bubbleHeight = isDone ? 300 : 214
   const targetCenter = targetRect
     ? {
         x: targetRect.left + targetRect.width / 2,
@@ -842,17 +927,21 @@ function GuidedTourHud({
     : null
   const targetAnchor = targetRect ? getRectBoundaryPoint(targetRect, pointer) : null
   const pointerOverTarget = targetRect ? isPointInsideRect(pointer, targetRect, 10) : false
-  const bubbleLeft = clamp(
-    targetCenter && pointer.x < targetCenter.x ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
-    16,
-    Math.max(16, viewport.width - bubbleWidth - 16),
-  )
-  const bubbleTop = clamp(
-    pointer.y > viewport.height - bubbleHeight - 44 ? pointer.y - bubbleHeight - 24 : pointer.y + 22,
-    16,
-    Math.max(16, viewport.height - bubbleHeight - 16),
-  )
-  const curve = targetAnchor && !pointerOverTarget
+  const bubbleLeft = isDone
+    ? Math.max(16, (viewport.width - bubbleWidth) / 2)
+    : clamp(
+        targetCenter && pointer.x < targetCenter.x ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
+        16,
+        Math.max(16, viewport.width - bubbleWidth - 16),
+      )
+  const bubbleTop = isDone
+    ? Math.max(16, (viewport.height - bubbleHeight) / 2)
+    : clamp(
+        pointer.y > viewport.height - bubbleHeight - 44 ? pointer.y - bubbleHeight - 24 : pointer.y + 22,
+        16,
+        Math.max(16, viewport.height - bubbleHeight - 16),
+      )
+  const curve = !isDone && targetAnchor && !pointerOverTarget
     ? {
         startX: pointer.x,
         startY: pointer.y,
@@ -864,6 +953,8 @@ function GuidedTourHud({
         endY: targetAnchor.y,
       }
     : null
+  const stepIndex = getTutorialStepIndex(step)
+  const section = getTutorialSection(step)
 
   return (
     <div className="fixed inset-0 z-[90] pointer-events-none">
@@ -878,22 +969,87 @@ function GuidedTourHud({
         </svg>
       )}
       <div className="tour-hud-bubble" style={{ left: bubbleLeft, top: bubbleTop, width: bubbleWidth }}>
-        <div className="flex items-start gap-3">
-          <div className="tour-hud-icon">
-            <Icon name={content.icon} size={22} filled={step === 'done'} />
-          </div>
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <p className="tour-hud-eyebrow">{content.eyebrow}</p>
-            <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{content.title}</p>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{content.description}</p>
-            <div className="flex items-center gap-3 pt-2">
-              <span className="tour-hud-kbd">
-                <kbd>Esc</kbd>
-                <span>그만보기</span>
-              </span>
+        {isDone ? (
+          <div className="tour-hud-done">
+            <div className="tour-hud-done-icon">
+              <Icon name="task_alt" size={28} filled />
+            </div>
+            <p className="tour-hud-eyebrow">둘러보기 완료</p>
+            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">핵심 흐름을 모두 확인했어요</p>
+            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              임시 예제는 정리됩니다. 이제 내 문서 폴더에서도 같은 방식으로 확인해 보세요.
+            </p>
+            <ul className="tour-hud-summary">
+              <li><Icon name="search" size={16} /><span>파일명·본문 통합 검색</span></li>
+              <li><Icon name="timeline" size={16} /><span>PPT·Excel 버전 변경점 추적</span></li>
+              <li><Icon name="grid_on" size={16} /><span>Excel 셀 단위 차이와 이력</span></li>
+            </ul>
+            <div className="tour-hud-done-actions">
+              <button
+                type="button"
+                ref={primaryButtonRef}
+                className="tour-hud-btn tour-hud-btn-primary"
+                onClick={onCloseDone}
+              >
+                <Icon name="folder_open" size={16} />
+                <span>내 폴더로 시작하기</span>
+              </button>
+              <button
+                type="button"
+                className="tour-hud-btn tour-hud-btn-ghost"
+                onClick={onReplayOnboarding}
+              >
+                <Icon name="replay" size={16} />
+                <span>처음부터 다시 보기</span>
+              </button>
             </div>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="tour-hud-meta">
+              <span className="tour-hud-section">{section?.label ?? ''}</span>
+              <span
+                className="tour-hud-count tabular-nums"
+                aria-label={`진행 단계 ${stepIndex} / ${TUTORIAL_TOTAL_STEPS}`}
+              >
+                {stepIndex} / {TUTORIAL_TOTAL_STEPS}
+              </span>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="tour-hud-icon">
+                <Icon name={content.icon} size={22} />
+              </div>
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <p className="tour-hud-eyebrow">{content.eyebrow}</p>
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{content.title}</p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{content.description}</p>
+                <div className="tour-hud-progress" aria-hidden="true">
+                  {TUTORIAL_SECTIONS.map((seg) => {
+                    const segSize = seg.range[1] - seg.range[0] + 1
+                    const filled = Math.max(0, Math.min(segSize, stepIndex - seg.range[0] + 1))
+                    const pct = (filled / segSize) * 100
+                    const isActive = stepIndex >= seg.range[0] && stepIndex <= seg.range[1]
+                    return (
+                      <div
+                        key={seg.id}
+                        className={`tour-hud-progress-seg${isActive ? ' is-active' : ''}`}
+                        style={{ flex: segSize }}
+                      >
+                        <span className="tour-hud-progress-fill" style={{ width: `${pct}%` }} />
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex items-center gap-3 pt-2">
+                  <span className="tour-hud-kbd">
+                    <kbd>Esc</kbd>
+                    <span>그만보기</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

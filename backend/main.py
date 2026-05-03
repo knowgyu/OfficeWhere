@@ -1,10 +1,14 @@
 import sys
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from .database import get_db_path, init_db, pop_setting
 from .api.files import router as files_router
@@ -12,11 +16,23 @@ from .api.check import router as check_router
 from .api.search import router as search_router
 from .api.library import router as library_router
 from .core.indexer import start_scheduler
+from .core.tutorial_examples import cleanup_tutorial_library, create_tutorial_library
+
+
+logger = logging.getLogger(__name__)
+
+
+class TutorialLibraryCleanupRequest(BaseModel):
+    path: Optional[str] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    try:
+        cleanup_tutorial_library()
+    except Exception:
+        logger.warning("failed to clean stale tutorial library", exc_info=True)
     start_scheduler()
     yield
 
@@ -66,6 +82,24 @@ async def example_library_path():
         "path": "",
         "reason": "examples/officewhere_test_library 폴더를 찾지 못했습니다.",
     }
+
+
+@app.post("/api/app/tutorial-library")
+async def create_tutorial_library_endpoint():
+    try:
+        return create_tutorial_library()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"튜토리얼 예제 파일을 만들지 못했습니다: {exc}") from exc
+
+
+@app.delete("/api/app/tutorial-library")
+async def cleanup_tutorial_library_endpoint(request: Optional[TutorialLibraryCleanupRequest] = None):
+    try:
+        return cleanup_tutorial_library(request.path if request else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"튜토리얼 예제 파일을 정리하지 못했습니다: {exc}") from exc
 
 
 @app.get("/api/app/schema-reset-state")
