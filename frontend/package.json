@@ -1,7 +1,7 @@
 {
   "name": "officewhere",
   "productName": "OfficeWhere",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,8 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "electron:dev": "npm run build && npm run build:electron && electron .",
     "package:win": "electron-builder --win zip",
-    "package:mac": "electron-builder --mac",
+    "prepare:python-runtime:mac": "python3 ../scripts/prepare_python_runtime.py mac-arm64",
+    "package:mac": "npm run prepare:python-runtime:mac && electron-builder --mac",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -47,10 +48,6 @@
         "to": "renderer"
       },
       {
-        "from": "../python-runtime/win-x64",
-        "to": "python-runtime"
-      },
-      {
         "from": "../backend",
         "to": "backend-source/backend",
         "filter": [
@@ -74,7 +71,13 @@
           ]
         }
       ],
-      "artifactName": "officewhere-${version}-windows-x64.${ext}"
+      "artifactName": "officewhere-${version}-windows-x64.${ext}",
+      "extraResources": [
+        {
+          "from": "../python-runtime/win-x64",
+          "to": "python-runtime"
+        }
+      ]
     },
     "mac": {
       "icon": "public/officewhere-icon.icns",
@@ -94,7 +97,13 @@
         }
       ],
       "artifactName": "officewhere-${version}-mac-${arch}.${ext}",
-      "identity": null
+      "identity": null,
+      "extraResources": [
+        {
+          "from": "../python-runtime/mac-arm64",
+          "to": "python-runtime"
+        }
+      ]
     }
   },
   "license": "GPL-3.0-only"

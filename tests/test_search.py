@@ -598,3 +598,41 @@ def test_search_api_allows_more_files_up_to_max(tmp_path):
     assert response.file_count == 100
     assert len({item.file_id for item in response.results}) == 100
     assert response.has_more is False
+
+
+def test_search_api_content_results_include_optional_fingerprint_metadata(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    file_id = register_file(str(tmp_path / 'fingerprint.docx'), 'fingerprint.docx', 'Word', 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "fingerprint body match"}])
+
+    response = search_files(SearchRequest(query="fingerprint", search_scope="content"))
+
+    assert response.total == 1
+    result = response.results[0]
+    assert result.file_id == file_id
+    assert result.normalized_hash
+    assert result.content_hash
+    assert result.content_chars == len("fingerprint body match")
+    assert result.chunk_count == 1
+
+
+def test_search_api_filename_results_include_optional_fingerprint_metadata(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    file_id = register_file(str(tmp_path / 'filename-hash.docx'), 'filename-hash.docx', 'Word', 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "same content available for filename result"}])
+
+    response = search_files(SearchRequest(query="filename-hash", search_scope="filename"))
+
+    assert response.total == 1
+    result = response.results[0]
+    assert result.file_id == file_id
+    assert result.normalized_hash
+    assert result.content_hash
+    assert result.content_chars == len("same content available for filename result")
+    assert result.chunk_count == 1

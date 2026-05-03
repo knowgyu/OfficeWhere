@@ -317,6 +317,10 @@ class SearchResult(BaseModel):
     file_type: str
     location: str
     snippet: str
+    normalized_hash: Optional[str] = None
+    content_hash: Optional[str] = None
+    content_chars: Optional[int] = None
+    chunk_count: Optional[int] = None
 
 
 class SearchResponse(BaseModel):

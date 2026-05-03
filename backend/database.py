@@ -2029,10 +2029,15 @@ def search_file_names(
         cursor = conn.cursor()
         cursor.execute(
             f"""
-            SELECT *
-            FROM registered_files
+            SELECT rf.*,
+                   df.normalized_hash,
+                   df.content_hash,
+                   df.content_chars,
+                   df.chunk_count
+            FROM registered_files rf
+            LEFT JOIN document_fingerprints df ON df.file_id = rf.id
             WHERE {' AND '.join(clauses)}
-            ORDER BY file_mtime DESC, created_at DESC, id DESC
+            ORDER BY rf.file_mtime DESC, rf.created_at DESC, rf.id DESC
             LIMIT ?
             """,
             params,
@@ -2464,13 +2469,18 @@ def _search_table_for_query(raw_query: str) -> str:
 
 
 def _search_row_dicts(rows: Sequence[sqlite3.Row], query_for_snippet: str) -> List[Dict[str, Any]]:
-    return [
-        {
+    results: List[Dict[str, Any]] = []
+    for row in rows:
+        row_keys = set(row.keys())
+        result = {
             **{key: row[key] for key in ("file_id", "name", "path", "file_type", "location")},
             "snippet": make_search_snippet(row["content"], query_for_snippet),
         }
-        for row in rows
-    ]
+        for key in ("normalized_hash", "content_hash", "content_chars", "chunk_count"):
+            if key in row_keys:
+                result[key] = row[key]
+        results.append(result)
+    return results
 
 
 def _log_search_done(
@@ -2545,10 +2555,12 @@ def search_chunks(
             params.append(limit)
             cursor.execute(
                 f"""
-                SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content
+                SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content,
+                       df.normalized_hash, df.content_hash, df.content_chars, df.chunk_count
                 FROM {search_table}
                 JOIN file_chunks fc ON fc.id = {search_table}.rowid
                 JOIN registered_files rf ON rf.id = fc.file_id
+                LEFT JOIN document_fingerprints df ON df.file_id = rf.id
                 WHERE {search_table} MATCH ?{filter_clause}
                 ORDER BY rf.file_mtime IS NULL,
                          rf.file_mtime DESC,
@@ -2596,6 +2608,7 @@ def search_chunks(
             ),
             ranked_chunks AS (
                 SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content,
+                       df.normalized_hash, df.content_hash, df.content_chars, df.chunk_count,
                        matched_files.file_mtime AS matched_file_mtime,
                        matched_files.created_at AS matched_created_at,
                        matched_files.sort_id AS matched_sort_id,
@@ -2604,9 +2617,11 @@ def search_chunks(
                 JOIN file_chunks fc ON fc.file_id = matched_files.file_id
                 JOIN {search_table} ON {search_table}.rowid = fc.id
                 JOIN registered_files rf ON rf.id = fc.file_id
+                LEFT JOIN document_fingerprints df ON df.file_id = rf.id
                 WHERE {search_table} MATCH ?
             )
-            SELECT file_id, name, path, file_type, location, content
+            SELECT file_id, name, path, file_type, location, content,
+                   normalized_hash, content_hash, content_chars, chunk_count
             FROM ranked_chunks
             WHERE chunk_number <= ?
             ORDER BY matched_file_mtime IS NULL,

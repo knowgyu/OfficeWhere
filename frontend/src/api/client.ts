@@ -380,6 +380,10 @@ export interface SearchResult {
   file_type: string
   location: string
   snippet: string
+  normalized_hash?: string | null
+  content_hash?: string | null
+  content_chars?: number | null
+  chunk_count?: number | null
 }
 
 export type SearchScope = 'filename_content' | 'filename' | 'content'

@@ -6,15 +6,12 @@ import {
   ClearAppDataResult,
   CloseBehavior,
   FileInfo,
-  FileInspectResponse,
   LibraryRescanResponse,
   LibraryRescanStatus,
   LibrarySettings,
-  NormalizedFileInspect,
   NormalizedPreview,
   SchemaResponse,
   getOfficeWhereBridge,
-  normalizeFileInspect,
   normalizeSchemaResponse,
 } from '../api/client'
 import {
@@ -22,7 +19,6 @@ import {
   Button,
   Card,
   CardSection,
-  Chip,
   Dialog,
   EmptyState,
   FileTypeBadge,
@@ -205,12 +201,6 @@ export default function FileManager({
   const [fileQuery, setFileQuery] = useState('')
   const [fileQueryDraft, setFileQueryDraft] = useState('')
   const [loading, setLoading] = useState(false)
-
-  const [filePath, setFilePath] = useState('')
-  const [inspectedFile, setInspectedFile] = useState<NormalizedFileInspect | null>(null)
-  const [inspecting, setInspecting] = useState(false)
-  const [picking, setPicking] = useState(false)
-  const [registering, setRegistering] = useState(false)
 
   const [previewFile, setPreviewFile] = useState<FileInfo | null>(null)
   const [schema, setSchema] = useState<NormalizedPreview | null>(null)
@@ -662,18 +652,6 @@ export default function FileManager({
     }
   }
 
-  const resetInspection = () => {
-    setInspectedFile(null)
-  }
-
-  const applyInspection = (payload: FileInspectResponse) => {
-    const normalized = normalizeFileInspect(payload)
-
-    setInspectedFile(normalized)
-    setFilePath(normalized.path)
-  }
-
-  const effectivePreview = inspectedFile?.preview ?? null
   const normalizedFolderDraft = folderPathDraft.trim()
   const hasPendingNewFolder =
     Boolean(normalizedFolderDraft) &&
@@ -696,69 +674,6 @@ export default function FileManager({
   const selectedFiles = files.filter((file) => selectedFileIds.has(file.id))
   const selectedCount = selectedFiles.length
   const selectionVisible = selectionMode || selectedCount > 0
-
-  const handleInspectPath = async () => {
-    if (!filePath.trim()) {
-      snackbar.warn('파일 경로를 입력해 주세요.')
-      return
-    }
-    setInspecting(true)
-    try {
-      const response = await api.files.inspect({ path: filePath.trim() })
-      applyInspection(response.data)
-    } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        '파일 검사에 실패했습니다.'
-      snackbar.error(detail)
-      resetInspection()
-    } finally {
-      setInspecting(false)
-    }
-  }
-
-  const handlePickFile = async () => {
-    setPicking(true)
-    try {
-      const response = await api.files.pick()
-      if (!response.data.cancelled && response.data.file) {
-        applyInspection(response.data.file)
-      }
-    } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        '파일 선택창을 열지 못했습니다.'
-      snackbar.error(detail)
-    } finally {
-      setPicking(false)
-    }
-  }
-
-  const handleRegister = async () => {
-    if (!filePath.trim()) {
-      snackbar.warn('파일 경로를 입력해 주세요.')
-      return
-    }
-    if (!inspectedFile) {
-      snackbar.warn('먼저 파일 검사를 실행해 주세요.')
-      return
-    }
-    setRegistering(true)
-    try {
-      await api.files.register({ path: filePath.trim() })
-      snackbar.success(`"${inspectedFile.name}" 등록 완료.`)
-      setFilePath('')
-      resetInspection()
-      await fetchFiles(0, fileQuery)
-    } catch (error) {
-      const detail =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        '파일 등록에 실패했습니다.'
-      snackbar.error(detail)
-    } finally {
-      setRegistering(false)
-    }
-  }
 
   const handleDeleteFiles = async (targets: FileInfo[]) => {
     if (targets.length === 0) return
@@ -1111,68 +1026,6 @@ export default function FileManager({
         onPage={goToFilePage}
       />
 
-      <Card variant="elevated" className="console-panel">
-        <CardSection
-          title="개별 파일 추가"
-          description="대상 폴더 밖에 있는 파일만 수동으로 추가하세요. 등록한 파일은 검색과 문서 비교에 사용할 수 있습니다."
-          trailing={
-            <div className="flex gap-2 flex-wrap">
-              <Chip label="Excel · 검색 + 비교" tone="success" icon="table_chart" as="span" />
-              <Chip label="Word / PPT · 변경 비교" tone="primary" icon="article" as="span" />
-            </div>
-          }
-        >
-          <div className="space-y-3">
-            <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
-              <div className="flex-1 min-w-0">
-                <TextField
-                  leadingIcon="folder_open"
-                  placeholder="파일 경로 입력 또는 파일 찾기 사용"
-                  value={filePath}
-                  onChange={(event) => {
-                    setFilePath(event.target.value)
-                    if (inspectedFile && event.target.value !== inspectedFile.path) {
-                      resetInspection()
-                    }
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') handleInspectPath()
-                  }}
-                />
-              </div>
-              <Button
-                variant="outlined"
-                leadingIcon="find_in_page"
-                onClick={handleInspectPath}
-                loading={inspecting}
-              >
-                경로 검사
-              </Button>
-              <Button
-                variant="tonal"
-                leadingIcon="upload_file"
-                onClick={handlePickFile}
-                loading={picking}
-              >
-                파일 찾기
-              </Button>
-            </div>
-
-            {inspectedFile && (
-              <InspectionCard
-                inspectedFile={inspectedFile}
-                effectivePreview={effectivePreview}
-                onRegister={handleRegister}
-                registering={registering}
-              />
-            )}
-          </div>
-          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            지원 형식 · .xlsx · .docx · .pptx
-          </p>
-        </CardSection>
-      </Card>
-
       {onReplayOnboarding && (
         <Card variant="outlined" className="overflow-hidden">
           <CardSection
@@ -1517,79 +1370,6 @@ export default function FileManager({
           </div>
         )}
       </Dialog>
-    </div>
-  )
-}
-
-function InspectionCard({
-  inspectedFile,
-  effectivePreview,
-  onRegister,
-  registering,
-}: {
-  inspectedFile: NormalizedFileInspect
-  effectivePreview: NormalizedPreview | null
-  onRegister: () => void
-  registering: boolean
-}) {
-  return (
-    <div className="rounded-md bg-[var(--md-sys-color-primary-container)] p-5 space-y-5 animate-slide-up">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="space-y-1 min-w-0">
-          <p className="type-title-md text-[var(--md-sys-color-on-primary-container)]">
-            {inspectedFile.name}
-          </p>
-          <p className="type-body-sm text-[var(--md-sys-color-on-primary-container)] opacity-80 break-all">
-            {inspectedFile.path}
-          </p>
-          <div className="flex gap-2 flex-wrap pt-1">
-            <FileTypeBadge fileType={inspectedFile.fileType} />
-            <Badge tone="primary">
-              {inspectedFile.compareMode === 'excel'
-                ? 'Excel 검색/비교'
-                : inspectedFile.compareMode === 'word'
-                  ? '문서 변경 비교'
-                  : '슬라이드 변경 비교'}
-            </Badge>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap justify-end">
-          {inspectedFile.capabilitySummary.map((item) => (
-            <Chip key={item} label={item} tone="primary" as="span" icon="check" />
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,280px)_1fr] gap-4">
-        <div className="space-y-3">
-          <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-2">
-            <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)] uppercase">
-              등록 안내
-            </p>
-            <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
-              원본 문서는 수정하지 않고 앱 목록과 검색 준비 데이터에만 등록합니다.
-            </p>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              등록 후 파일명·문서 내용 검색과 같은 형식의 변경 비교에 사용할 수 있습니다.
-            </p>
-          </div>
-
-          <Button
-            variant="filled"
-            leadingIcon="add_circle"
-            onClick={onRegister}
-            loading={registering}
-            fullWidth
-          >
-            문서 등록
-          </Button>
-        </div>
-
-        <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)] mb-3">미리보기</p>
-          {effectivePreview && <PreviewPanel preview={effectivePreview} />}
-        </div>
-      </div>
     </div>
   )
 }

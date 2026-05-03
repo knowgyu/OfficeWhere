@@ -59,7 +59,6 @@ const LS_TAB = 'officewhere:last-tab'
 const LEGACY_LS_TAB = 'odj:last-tab'
 const LS_ONBOARDING_DONE = 'officewhere:onboarding-complete:v1'
 const LS_UPDATE_DISMISSED_VERSION = 'officewhere:update-dismissed-version'
-const LOGO_SRC = './officewhere-logo.png'
 const LOCAL_STATE_PREFIXES = ['officewhere:', 'odj:']
 
 interface Point {
@@ -127,8 +126,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'search-results': {
     eyebrow: '본문 매칭',
-    title: '본문 매칭을 펼치세요',
-    description: '어디에서 검색됐는지 바로 확인합니다.',
+    title: '본문 매칭을 확인하세요',
+    description: '결과가 열리면 어디에서 검색됐는지 바로 확인합니다.',
     icon: 'unfold_more',
   },
   'search-review': {
@@ -585,8 +584,8 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         <TopAppBar title={current.label} hint={current.hint} />
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 pt-6 pb-16 animate-fade-in" key={activeTab}>
-            {activeTab === 'files' && (
+          <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 pt-6 pb-16">
+            <section className={activeTab === 'files' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'files'}>
               <FileManager
                 tutorialStep={tutorialStep}
                 exampleLibraryPath={exampleLibraryPath}
@@ -594,21 +593,21 @@ export default function App() {
                 onTutorialStep={handleTutorialStep}
                 onReplayOnboarding={handleReplayOnboarding}
               />
-            )}
-            {activeTab === 'search' && (
+            </section>
+            <section className={activeTab === 'search' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'search'}>
               <FileSearch
                 tutorialStep={tutorialStep}
                 libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
               />
-            )}
-            {activeTab === 'check' && (
+            </section>
+            <section className={activeTab === 'check' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'check'}>
               <ConsistencyCheck
                 tutorialStep={tutorialStep}
                 libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
               />
-            )}
+            </section>
           </div>
         </main>
       </div>
@@ -789,6 +788,7 @@ function GuidedTourHud({
   const [viewport, setViewport] = useState(getViewport)
   const [targetRect, setTargetRect] = useState<TourRect | null>(null)
   const primaryButtonRef = useRef<HTMLButtonElement>(null)
+  const autoAdvancedStepRef = useRef<TutorialStep | null>(null)
 
   const content = useMemo(() => getTutorialCopy(step, activeTab), [activeTab, step])
   const nextCheckpoint = step ? TUTORIAL_REVIEW_ADVANCE[step] : undefined
@@ -825,6 +825,7 @@ function GuidedTourHud({
   useEffect(() => {
     if (!step) {
       setTargetRect(null)
+      autoAdvancedStepRef.current = null
       return undefined
     }
 
@@ -872,6 +873,14 @@ function GuidedTourHud({
       window.removeEventListener('resize', handleResize)
     }
   }, [activeTab, step, targetTab])
+
+  useEffect(() => {
+    if (!step || !nextCheckpoint || !targetRect || targetTab !== activeTab) return undefined
+    if (autoAdvancedStepRef.current === step) return undefined
+    autoAdvancedStepRef.current = step
+    const timer = window.setTimeout(() => onAdvance(nextCheckpoint), 1050)
+    return () => window.clearTimeout(timer)
+  }, [activeTab, nextCheckpoint, onAdvance, step, targetRect, targetTab])
 
   if (!step || !content) return null
 
@@ -1005,14 +1014,10 @@ function GuidedTourHud({
                     <span>그만보기</span>
                   </span>
                   {nextCheckpoint && (
-                    <button
-                      type="button"
-                      className="tour-hud-btn tour-hud-btn-ghost"
-                      onClick={() => onAdvance(nextCheckpoint)}
-                    >
-                      <Icon name="arrow_forward" size={16} />
-                      <span>다음 안내</span>
-                    </button>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 py-1 type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                      <Icon name="progress_activity" size={16} />
+                      확인되면 다음 안내로 넘어갑니다
+                    </span>
                   )}
                 </div>
               </div>
@@ -1037,13 +1042,7 @@ function NavigationRail({
 }) {
   return (
     <aside className="sticky top-0 self-start flex flex-col items-center gap-2 w-24 min-h-screen py-4 bg-[var(--md-sys-color-surface-container-lowest)]/88 backdrop-blur-xl border-r border-[var(--md-sys-color-outline-variant)] shadow-[1px_0_0_var(--ow-inset-highlight)_inset]">
-      <div className="flex items-center justify-center py-3">
-        <img
-          src={LOGO_SRC}
-          alt="OfficeWhere"
-          className="h-10 w-10 rounded-lg object-cover shadow-elev-2 ring-1 ring-[var(--md-sys-color-outline-variant)]"
-        />
-      </div>
+      <div className="py-2" aria-hidden="true" />
 
       <nav className="flex flex-col gap-1.5 mt-2 w-full px-2" aria-label="메인 내비게이션">
         {TABS.map((tab) => {

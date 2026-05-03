@@ -130,6 +130,10 @@ def _filename_matches(
                 "file_type": file_info["file_type"],
                 "location": "파일명",
                 "snippet": make_search_snippet(file_info["name"], normalized_query, context=80),
+                "normalized_hash": file_info.get("normalized_hash"),
+                "content_hash": file_info.get("content_hash"),
+                "content_chars": file_info.get("content_chars"),
+                "chunk_count": file_info.get("chunk_count"),
             }
         )
     return matches

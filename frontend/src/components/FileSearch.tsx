@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, SchedulerSettings, SearchResponse, SearchResult, SearchScope } from '../api/client'
+import { api, SearchResponse, SearchResult, SearchScope } from '../api/client'
 import {
   Badge,
   Button,
@@ -10,7 +10,6 @@ import {
   FileTypeBadge,
   Icon,
   IconButton,
-  Radio,
   SegmentedButton,
   Spinner,
   TextField,
@@ -76,6 +75,19 @@ interface PrefetchedSearch {
   data: SearchResponse
 }
 
+type GroupedSearchResult = {
+  fileKey: string
+  fileName: string
+  items: SearchResult[]
+  contentHash: string | null
+}
+
+type DuplicateContentSuggestion = {
+  hash: string
+  names: string[]
+  fileCount: number
+}
+
 const MODIFIED_DATE_FILTERS: Array<{ label: string; value: ModifiedDateFilter }> = [
   { label: '전체', value: 'all' },
   { label: '최근 7일', value: '7d' },
@@ -137,6 +149,20 @@ function getContentFileKeys(results: SearchResult[]) {
     }
   }
   return keys
+}
+
+function normalizeDuplicateTitle(name: string) {
+  return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ko-KR')
+}
+
+function getReliableContentHash(items: SearchResult[]) {
+  const first = items.find(
+    (item) =>
+      item.normalized_hash &&
+      (item.content_chars ?? 0) > 0 &&
+      (item.chunk_count ?? 0) > 0,
+  )
+  return first?.normalized_hash ?? null
 }
 
 function SearchResultListItem({
@@ -206,21 +232,9 @@ export default function FileSearch({
   const [customModifiedTo, setCustomModifiedTo] = useState('')
   const [expandedContentFiles, setExpandedContentFiles] = useState<Set<string>>(new Set())
 
-  const [settings, setSettings] = useState<SchedulerSettings | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsDraft, setSettingsDraft] = useState<SchedulerSettings | null>(null)
-  const [reindexing, setReindexing] = useState(false)
-
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRequestSeq = useRef(0)
   const prefetchedSearchRef = useRef<PrefetchedSearch | null>(null)
-
-  useEffect(() => {
-    api.search.getSettings().then((response) => {
-      setSettings(response.data)
-      setSettingsDraft(response.data)
-    })
-  }, [])
 
   const buildModifiedDateParams = useCallback(
     (
@@ -266,10 +280,10 @@ export default function FileSearch({
       hasMore: Boolean(data.has_more),
     })
     setExpandedContentFiles((current) => {
-      if (!keepExpandedContentFiles) return new Set()
-
       const nextContentFileKeys = getContentFileKeys(data.results)
-      return new Set([...current].filter((fileKey) => nextContentFileKeys.has(fileKey)))
+      if (!keepExpandedContentFiles) return nextContentFileKeys
+
+      return new Set([...nextContentFileKeys, ...current].filter((fileKey) => nextContentFileKeys.has(fileKey)))
     })
     setSearched(true)
     return data.results.length > 0
@@ -453,43 +467,6 @@ export default function FileSearch({
     if (willExpand && tutorialStep === 'search-results') onTutorialStep?.('search-review')
   }
 
-  const handleReindex = async () => {
-    setReindexing(true)
-    try {
-      const response = await api.search.reindex()
-      snackbar.success(
-        `검색 갱신 완료 · 성공 ${response.data.success} · 실패 ${response.data.failed}`,
-      )
-      const next = await api.search.getSettings()
-      setSettings(next.data)
-      setSettingsDraft(next.data)
-    } catch {
-      snackbar.error('검색 갱신에 실패했습니다.')
-    } finally {
-      setReindexing(false)
-    }
-  }
-
-  const handleSaveSettings = async () => {
-    if (!settingsDraft) return
-    const intervalHours = Math.floor(Number(settingsDraft.interval_hours))
-    if (settingsDraft.mode === 'interval' && (!Number.isFinite(intervalHours) || intervalHours < 1)) {
-      snackbar.warn('반복 주기는 1 이상인 정수만 입력할 수 있습니다.')
-      return
-    }
-    try {
-      const response = await api.search.updateSettings({
-        ...settingsDraft,
-        interval_hours: settingsDraft.mode === 'interval' ? intervalHours : settingsDraft.interval_hours,
-      })
-      setSettings(response.data)
-      setSettingsOpen(false)
-      snackbar.success('검색 최신화 설정이 저장되었습니다.')
-    } catch {
-      snackbar.error('설정 저장에 실패했습니다.')
-    }
-  }
-
   const handleOpenFile = async (fileId: number, fileName: string) => {
     try {
       await api.files.open(fileId)
@@ -524,7 +501,7 @@ export default function FileSearch({
     void doSearch(query)
   }, [libraryDataRevision])
 
-  const grouped = useMemo(() => {
+  const groupedSearch = useMemo(() => {
     const map = new Map<string, { fileName: string; items: SearchResult[] }>()
     for (const result of results) {
       const fileKey = `${result.file_id}:${result.path}`
@@ -532,15 +509,57 @@ export default function FileSearch({
       entry.items.push(result)
       map.set(fileKey, entry)
     }
-    return Array.from(map.values()).map(({ fileName, items }) => [fileName, items] as [string, SearchResult[]])
+    const allGroups: GroupedSearchResult[] = Array.from(map.entries()).map(([fileKey, { fileName, items }]) => ({
+      fileKey,
+      fileName,
+      items,
+      contentHash: getReliableContentHash(items),
+    }))
+
+    const seenExactTitleContent = new Set<string>()
+    let hiddenExactDuplicateCount = 0
+    const visibleGroups: GroupedSearchResult[] = []
+    for (const group of allGroups) {
+      const exactKey = group.contentHash
+        ? `${normalizeDuplicateTitle(group.fileName)}:${group.contentHash}`
+        : null
+      if (exactKey && seenExactTitleContent.has(exactKey)) {
+        hiddenExactDuplicateCount += 1
+        continue
+      }
+      if (exactKey) seenExactTitleContent.add(exactKey)
+      visibleGroups.push(group)
+    }
+
+    const duplicateContentSuggestions = new Map<string, Set<string>>()
+    for (const group of visibleGroups) {
+      if (!group.contentHash) continue
+      const names = duplicateContentSuggestions.get(group.contentHash) ?? new Set<string>()
+      names.add(group.fileName)
+      duplicateContentSuggestions.set(group.contentHash, names)
+    }
+
+    const suggestions: DuplicateContentSuggestion[] = Array.from(duplicateContentSuggestions.entries())
+      .map(([hash, names]) => ({
+        hash,
+        names: Array.from(names),
+        fileCount: visibleGroups.filter((group) => group.contentHash === hash).length,
+      }))
+      .filter((suggestion) => suggestion.names.length > 1)
+
+    return {
+      visibleGroups,
+      hiddenExactDuplicateCount,
+      duplicateContentSuggestions: suggestions,
+    }
   }, [results])
 
   const contentFileKeys = useMemo(
     () =>
-      grouped
-        .filter(([, items]) => items.some((item) => item.location !== '파일명'))
-        .map(([fileName, items]) => `${items[0].file_id}:${fileName}`),
-    [grouped],
+      groupedSearch.visibleGroups
+        .filter((group) => group.items.some((item) => item.location !== '파일명'))
+        .map((group) => getContentFileKey(group.items[0])),
+    [groupedSearch.visibleGroups],
   )
 
   const activeModifiedDateLabel = useMemo(
@@ -548,10 +567,31 @@ export default function FileSearch({
       MODIFIED_DATE_FILTERS.find((filter) => filter.value === modifiedDateFilter)?.label ?? '전체',
     [modifiedDateFilter],
   )
+  const hasActiveFilters =
+    selectedFileTypes.length > 0 ||
+    searchScope !== 'filename_content' ||
+    modifiedDateFilter !== 'all' ||
+    Boolean(customModifiedFrom) ||
+    Boolean(customModifiedTo)
   const allContentMatchesExpanded =
     contentFileKeys.length > 0 && contentFileKeys.every((key) => expandedContentFiles.has(key))
   const hasResults = !loading && results.length > 0
   const tutorialSearchReviewKey = tutorialStep === 'search-review' ? contentFileKeys[0] : null
+  const visibleLocationCount = useMemo(
+    () => groupedSearch.visibleGroups.reduce((total, group) => total + group.items.length, 0),
+    [groupedSearch.visibleGroups],
+  )
+
+  const resetSearchFilters = () => {
+    setSelectedFileTypes([])
+    setSearchScope('filename_content')
+    setModifiedDateFilter('all')
+    setCustomModifiedFrom('')
+    setCustomModifiedTo('')
+    if (query.trim()) {
+      void doSearch(query, [], 'filename_content', 'all', '', '')
+    }
+  }
 
   const expandAllContentMatches = () => {
     setExpandedContentFiles(new Set(contentFileKeys))
@@ -584,9 +624,11 @@ export default function FileSearch({
     }
   }, [])
 
-  const lastReindex = settings?.last_reindex_at
-    ? new Date(settings.last_reindex_at).toLocaleString('ko-KR')
-    : null
+  useEffect(() => {
+    if (tutorialStep !== 'search-results' || contentFileKeys.length === 0) return undefined
+    const timer = window.setTimeout(() => onTutorialStep?.('search-review'), 650)
+    return () => window.clearTimeout(timer)
+  }, [contentFileKeys.length, onTutorialStep, tutorialStep])
 
   return (
     <div className="space-y-6">
@@ -647,13 +689,6 @@ export default function FileSearch({
             >
               검색
             </Button>
-            <IconButton
-              icon={settingsOpen ? 'tune' : 'tune'}
-              label="검색 최신화 설정"
-              variant="outlined"
-              onClick={() => setSettingsOpen((open) => !open)}
-              selected={settingsOpen}
-            />
           </div>
         </div>
 
@@ -665,11 +700,6 @@ export default function FileSearch({
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-primary)]/20 bg-[var(--md-sys-color-primary-container)]/55 px-3 py-1 text-[var(--md-sys-color-on-primary-container)]">
               <Icon name="auto_awesome" size={16} />
               프로젝트를 입력하면 파일명과 내용을 함께 찾아요
-            </span>
-          )}
-          {lastReindex && (
-            <span className="inline-flex items-center gap-1.5">
-              <Icon name="schedule" size={16} /> 마지막 검색 갱신 {lastReindex}
             </span>
           )}
         </div>
@@ -722,7 +752,18 @@ export default function FileSearch({
             </div>
           </div>
           <div className="console-subpanel rounded-lg p-4 space-y-2 lg:col-span-2">
-            <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">수정일</span>
+            <div className="flex items-center justify-between gap-3">
+              <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">수정일</span>
+              <Button
+                variant="text"
+                size="sm"
+                leadingIcon="filter_alt_off"
+                onClick={resetSearchFilters}
+                disabled={!hasActiveFilters}
+              >
+                필터 지우기
+              </Button>
+            </div>
             <div className="flex items-center gap-2 flex-wrap">
               {MODIFIED_DATE_FILTERS.map((filter) => (
                 <Chip
@@ -750,91 +791,24 @@ export default function FileSearch({
                 />
               </div>
             )}
+            {hasActiveFilters && (
+              <div className="flex items-center gap-2 flex-wrap pt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                <Icon name="filter_alt" size={16} />
+                <span>현재 필터:</span>
+                {searchScope !== 'filename_content' && (
+                  <Chip label={SEARCH_SCOPE_STATUS[searchScope]} tone="secondary" as="span" />
+                )}
+                {selectedFileTypes.map((fileType) => (
+                  <Chip key={fileType} label={`.${fileType}`} tone="secondary" as="span" />
+                ))}
+                {modifiedDateFilter !== 'all' && (
+                  <Chip label={activeModifiedDateLabel} tone="secondary" as="span" />
+                )}
+              </div>
+            )}
           </div>
         </div>
       </Card>
-
-      {settingsOpen && settingsDraft && (
-        <Card variant="elevated" className="console-panel p-5 space-y-4 animate-slide-up">
-          <div>
-            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">검색 최신화 설정</p>
-            <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              검색 결과가 최신 상태가 되도록 변경된 파일만 다시 확인합니다.
-            </p>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Radio
-              name="reindex-mode"
-              checked={settingsDraft.mode === 'manual'}
-              onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'manual' })}
-              label="수동"
-              description="필요할 때 이 설정 영역에서 직접 최신화합니다."
-            />
-            <Radio
-              name="reindex-mode"
-              checked={settingsDraft.mode === 'interval'}
-              onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'interval' })}
-              label="주기 반복"
-              description="지정한 시간마다 변경된 파일을 자동으로 다시 읽습니다."
-            />
-            <Radio
-              name="reindex-mode"
-              checked={settingsDraft.mode === 'daily'}
-              onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'daily' })}
-              label="매일 정시"
-              description="매일 지정한 시각에 검색 결과를 최신 상태로 준비합니다."
-            />
-          </div>
-
-          {settingsDraft.mode === 'interval' && (
-            <div className="flex items-center gap-2">
-              <TextField
-                label="반복 주기(시간)"
-                type="number"
-                min={1}
-                max={72}
-                step={1}
-                value={settingsDraft.interval_hours}
-                onChange={(event) =>
-                  setSettingsDraft({
-                    ...settingsDraft,
-                    interval_hours: Number(event.target.value),
-                  })
-                }
-                className="w-40"
-                fullWidth={false}
-              />
-            </div>
-          )}
-
-          {settingsDraft.mode === 'daily' && (
-            <TextField
-              label="실행 시각"
-              type="time"
-              value={settingsDraft.daily_time}
-              onChange={(event) =>
-                setSettingsDraft({ ...settingsDraft, daily_time: event.target.value })
-              }
-              className="w-40"
-              fullWidth={false}
-            />
-          )}
-
-          <div className="flex justify-between gap-2 pt-1 flex-wrap">
-            <Button variant="tonal" leadingIcon="refresh" onClick={handleReindex} loading={reindexing}>
-              지금 검색 결과 최신화
-            </Button>
-            <div className="flex gap-2">
-              <Button variant="text" onClick={() => setSettingsOpen(false)}>
-                취소
-              </Button>
-              <Button variant="filled" leadingIcon="save" onClick={handleSaveSettings}>
-                저장
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
 
       {loading && (
         <div className="flex items-center justify-center gap-3 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
@@ -862,8 +836,8 @@ export default function FileSearch({
       {hasResults && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 flex-wrap rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/80 p-3">
-            <Chip label={`${searchMeta.fileCount}개 파일`} tone="primary" as="span" icon="folder_open" />
-            <Chip label={`${results.length}개 위치`} tone="neutral" as="span" icon="filter_list" />
+            <Chip label={`${groupedSearch.visibleGroups.length}개 파일`} tone="primary" as="span" icon="folder_open" />
+            <Chip label={`${visibleLocationCount}개 위치`} tone="neutral" as="span" icon="filter_list" />
             {selectedFileTypes.length > 0 && (
               <Chip label={`형식 ${selectedFileTypes.length}개 선택`} tone="secondary" as="span" icon="checklist" />
             )}
@@ -874,82 +848,113 @@ export default function FileSearch({
               관련도 높은 결과부터 가볍게 보여줍니다
               {prefetching ? ' · 다음 결과 준비 중' : ''}
             </span>
-            {contentFileKeys.length > 0 && (
-              <div className="ml-auto flex gap-2 flex-wrap">
-                <Button
-                  variant="text"
-                  size="sm"
-                  leadingIcon="unfold_more"
-                  onClick={expandAllContentMatches}
-                  disabled={allContentMatchesExpanded}
-                  className={tutorialStep === 'search-results' ? 'attention-pulse tour-target' : ''}
-                  data-tour-target={tutorialStep === 'search-results' ? 'search-results' : undefined}
-                >
-                  본문 전체 열기
-                </Button>
-                <Button
-                  variant="text"
-                  size="sm"
-                  leadingIcon="unfold_less"
-                  onClick={collapseAllContentMatches}
-                  disabled={expandedContentFiles.size === 0}
-                >
-                  본문 전체 접기
-                </Button>
-              </div>
-            )}
+            <div className="ml-auto flex gap-2 flex-wrap">
+              {groupedSearch.hiddenExactDuplicateCount > 0 && (
+                <Chip
+                  label={`완전 중복 ${groupedSearch.hiddenExactDuplicateCount}개 숨김`}
+                  tone="neutral"
+                  as="span"
+                  icon="content_copy"
+                />
+              )}
+              {contentFileKeys.length > 0 && (
+                <>
+                  <Button
+                    variant="text"
+                    size="sm"
+                    leadingIcon="unfold_more"
+                    onClick={expandAllContentMatches}
+                    disabled={allContentMatchesExpanded}
+                    className={tutorialStep === 'search-results' ? 'attention-pulse tour-target' : ''}
+                    data-tour-target={tutorialStep === 'search-results' ? 'search-results' : undefined}
+                  >
+                    본문 전체 열기
+                  </Button>
+                  <Button
+                    variant="text"
+                    size="sm"
+                    leadingIcon="unfold_less"
+                    onClick={collapseAllContentMatches}
+                    disabled={expandedContentFiles.size === 0}
+                  >
+                    본문 전체 접기
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
-          <div>
-            {grouped.map(([fileName, items]) => {
-              const fileKey = `${items[0].file_id}:${fileName}`
+          {groupedSearch.duplicateContentSuggestions.length > 0 && (
+            <Card variant="outlined" className="p-4 border-[var(--md-sys-color-tertiary)]/35 bg-[var(--md-sys-color-tertiary-container)]/22">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--md-sys-color-tertiary-container)] text-[var(--md-sys-color-on-tertiary-container)]">
+                  <Icon name="rule_folder" size={18} />
+                </span>
+                <div className="min-w-0 space-y-1">
+                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                    제목만 다른 중복 문서가 보입니다
+                  </p>
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    본문이 같은 파일은 정리 후보로 확인해 보세요. 예: {groupedSearch.duplicateContentSuggestions[0].names.slice(0, 3).join(', ')}
+                    {groupedSearch.duplicateContentSuggestions[0].names.length > 3 ? ' 외' : ''}
+                  </p>
+                </div>
+              </div>
+            </Card>
+          )}
+          <div className="space-y-3">
+            {groupedSearch.visibleGroups.map((group) => {
+              const { fileName, items } = group
+              const fileKey = getContentFileKey(items[0])
               const filenameItems = items.filter((item) => item.location === '파일명')
               const contentItems = items.filter((item) => item.location !== '파일명')
               const contentExpanded = expandedContentFiles.has(fileKey)
               const titleSnippet = filenameItems[0]?.snippet ?? fileName
 
               return (
-                <Card key={fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none">
-                  <header className="px-5 py-3.5 flex items-center gap-2 flex-wrap border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/62">
-                    <FileTypeBadge fileType={items[0].file_type} />
-                    <span className="type-title-sm text-[var(--md-sys-color-on-surface)] truncate flex-1 min-w-0">
-                      <HighlightedSnippet
-                        snippet={titleSnippet}
-                        className="type-title-sm text-[var(--md-sys-color-on-surface)]"
-                      />
-                    </span>
-                    <Badge tone="neutral">{items.length}건</Badge>
-                    <Button
-                      variant="text"
-                      size="sm"
-                      leadingIcon="open_in_new"
-                      onClick={() => handleOpenFile(items[0].file_id, fileName)}
-                    >
-                      열기
-                    </Button>
-                    <Button
-                      variant="text"
-                      size="sm"
-                      leadingIcon="folder_open"
-                      onClick={() => handleShowInFolder(items[0].file_id, fileName, items[0].path)}
-                    >
-                      폴더에서 보기
-                    </Button>
-                  </header>
-                  <ul>
-                    {contentItems.length > 0 && (
-                      <li className="px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0">
+                <Card key={group.fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none ring-1 ring-[var(--ow-inset-highlight)]">
+                  <header className="border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/72 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <FileTypeBadge fileType={items[0].file_type} />
+                      <span className="min-w-0 flex-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]">
+                        <HighlightedSnippet
+                          snippet={titleSnippet}
+                          className="type-title-sm text-[var(--md-sys-color-on-surface)]"
+                        />
+                      </span>
+                      <Badge tone="neutral">{items.length}건</Badge>
+                      {contentItems.length > 0 && (
                         <Button
                           variant="tonal"
                           size="sm"
-                          leadingIcon={contentExpanded ? 'expand_less' : 'expand_more'}
+                          leadingIcon={contentExpanded ? 'expand_less' : 'subject'}
                           onClick={() => toggleContentMatches(fileKey)}
                         >
-                          {contentExpanded
-                            ? '본문 매칭 접기'
-                            : `본문 매칭 ${contentItems.length}건 보기`}
+                          {contentExpanded ? '본문 접기' : `본문 ${contentItems.length}건`}
                         </Button>
-                      </li>
-                    )}
+                      )}
+                      <Button
+                        variant="text"
+                        size="sm"
+                        leadingIcon="open_in_new"
+                        onClick={() => handleOpenFile(items[0].file_id, fileName)}
+                      >
+                        열기
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="sm"
+                        leadingIcon="folder_open"
+                        onClick={() => handleShowInFolder(items[0].file_id, fileName, items[0].path)}
+                      >
+                        폴더
+                      </Button>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                      <Icon name="description" size={15} />
+                      <span className="truncate" title={items[0].path}>{items[0].path}</span>
+                    </div>
+                  </header>
+                  <ul>
                     {contentExpanded &&
                       contentItems.map((item, index) => (
                         <SearchResultListItem

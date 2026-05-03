@@ -1,3 +1,5 @@
 # Vendored Windows embedded Python runtime: keep upstream line endings and avoid
 # giant third-party diffs/whitespace checks in normal repository verification.
 python-runtime/** -text -diff
+python-runtime/**/*.md text diff
+python-runtime/**/.gitkeep text diff

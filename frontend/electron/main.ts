@@ -1104,18 +1104,24 @@ async function startBackend(port: number) {
 
   let spawnError: Error | null = null
   let exited = false
+  const backendEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    OW_DATA_DIR: dataDir,
+    OW_HOST: HOST,
+    OW_PORT: String(port),
+    OW_INDEX_PERF_LOG_PATH: indexPerfLogPath,
+    PYTHONUTF8: '1',
+    PYTHONPYCACHEPREFIX: pythonCacheDir,
+  }
+  if (app.isPackaged) {
+    delete backendEnv.PYTHONHOME
+    delete backendEnv.PYTHONPATH
+    backendEnv.PYTHONNOUSERSITE = '1'
+  }
 
   const child = spawn(command.file, command.args, {
     cwd: command.cwd,
-    env: {
-      ...process.env,
-      OW_DATA_DIR: dataDir,
-      OW_HOST: HOST,
-      OW_PORT: String(port),
-      OW_INDEX_PERF_LOG_PATH: indexPerfLogPath,
-      PYTHONUTF8: '1',
-      PYTHONPYCACHEPREFIX: pythonCacheDir,
-    },
+    env: backendEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   })
@@ -1169,14 +1175,23 @@ function getBackendCommand(port: number, dataDir: string): { file: string; args:
   if (app.isPackaged) {
     const backendRoot = path.join(process.resourcesPath, 'backend-source')
     const script = path.join(backendRoot, 'backend_server.py')
-    const bundledPython = path.join(process.resourcesPath, 'python-runtime', 'python.exe')
     const configuredPython = process.env.OW_PYTHON
-    return { file: configuredPython || bundledPython, args: [script, ...args], cwd: backendRoot }
+    return { file: configuredPython || getBundledPythonExecutable(), args: [script, ...args], cwd: backendRoot }
   }
 
   const repoRoot = path.resolve(app.getAppPath(), '..')
   const script = path.join(repoRoot, 'backend_server.py')
   return { file: getPythonExecutable(repoRoot), args: [script, ...args], cwd: repoRoot }
+}
+
+function getBundledPythonExecutable(): string {
+  if (process.platform === 'win32') {
+    return path.join(process.resourcesPath, 'python-runtime', 'python.exe')
+  }
+  if (process.platform === 'darwin') {
+    return path.join(process.resourcesPath, 'python-runtime', 'bin', 'python3')
+  }
+  return path.join(process.resourcesPath, 'python-runtime', 'bin', 'python3')
 }
 
 function getPythonExecutable(repoRoot: string): string {

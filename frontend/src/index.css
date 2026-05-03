@@ -138,7 +138,7 @@
       'opsz' 24;
   }
 
-  /* M3 type scale — used via `text-*` utilities. */
+  /* OfficeWhere type scale — used via `text-*` utilities. */
   .type-display-lg {
     font-size: 3.5rem;
     line-height: 4rem;

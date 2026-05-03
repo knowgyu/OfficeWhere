@@ -821,20 +821,20 @@ export default function ConsistencyCheck({
               >
                 필터{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
               </Button>
-	              {groupQuery && (
-	                <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
-	                  지우기
-	                </Button>
-	              )}
-	              <Button
-	                variant="text"
-	                leadingIcon="restart_alt"
-	                onClick={resetGroupFilters}
-	                disabled={groupsLoading || !hasActiveGroupFilters}
-	              >
-	                필터 초기화
-	              </Button>
-	            </div>
+                {groupQuery && (
+                  <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
+                    지우기
+                  </Button>
+                )}
+                <Button
+                  variant="text"
+                  leadingIcon="restart_alt"
+                  onClick={resetGroupFilters}
+                  disabled={groupsLoading || !hasActiveGroupFilters}
+                >
+                  필터 초기화
+                </Button>
+              </div>
             {groupFilterOpen && (
               <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 p-3 shadow-elev-1">
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
@@ -917,7 +917,7 @@ export default function ConsistencyCheck({
                 직접 파일 고르기
               </Button>
             </div>
-	            {hasActiveGroupFilters && (
+              {hasActiveGroupFilters && (
               <div className="flex gap-2 flex-wrap">
                 {groupQuery && <Chip label={`검색어 · ${groupQuery}`} tone="secondary" icon="search" as="span" />}
                 {groupFilter !== 'all' && <Chip label={`구분 · ${groupFilterLabel}`} tone="primary" as="span" />}
@@ -1276,52 +1276,63 @@ function GroupCard({
 
       <div className="space-y-4 p-4">
         {(group.latest_file || group.previous_file) && (
-          <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            {group.latest_file && (
-              <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">현재 기준 파일</p>
-                    <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.latest_file.name}>
-                      {group.latest_file.name}
-                    </p>
-                  </div>
-                  <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(group.latest_file!)}>
-                    열기
-                  </Button>
-                </div>
+          <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/75 px-3 py-2">
+            <div className="grid grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-center">
+              {group.latest_file && (
+                <button
+                  type="button"
+                  className="min-w-0 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--md-sys-color-surface-container-high)]"
+                  onClick={() => onOpenFile(group.latest_file!)}
+                >
+                  <span className="mr-2 type-label-md text-[var(--md-sys-color-on-surface-variant)]">기준</span>
+                  <span className="inline-block max-w-[calc(100%-3.5rem)] truncate align-bottom type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.latest_file.name}>
+                    {group.latest_file.name}
+                  </span>
+                </button>
+              )}
+              {group.previous_file && (
+                <button
+                  type="button"
+                  className="min-w-0 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--md-sys-color-surface-container-high)]"
+                  onClick={() => onOpenFile(group.previous_file!)}
+                >
+                  <span className="mr-2 type-label-md text-[var(--md-sys-color-on-surface-variant)]">직전</span>
+                  <span className="inline-block max-w-[calc(100%-3.5rem)] truncate align-bottom type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.previous_file.name}>
+                    {group.previous_file.name}
+                  </span>
+                </button>
+              )}
+              <div className="flex justify-end">
+                <Button
+                  variant={activeDetail ? 'tonal' : 'filled'}
+                  size="sm"
+                  leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
+                  onClick={onOpen}
+                  loading={historyLoading}
+                  className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
+                  data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
+                >
+                  {activeDetail ? '접기' : '변경점'}
+                </Button>
               </div>
-            )}
-            {group.previous_file && (
-              <div className="rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">직전 비교 대상</p>
-                    <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.previous_file.name}>
-                      {group.previous_file.name}
-                    </p>
-                  </div>
-                  <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => onOpenFile(group.previous_file!)}>
-                    열기
-                  </Button>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
 
-        <div className="flex gap-2 flex-wrap">
-          <Button
-            variant={activeDetail ? 'tonal' : 'filled'}
-            leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
-            onClick={onOpen}
-            loading={historyLoading}
-            className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
-            data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
-          >
-            {activeDetail ? '접기' : '변경점 보기'}
-          </Button>
-        </div>
+        {!(group.latest_file || group.previous_file) && (
+          <div className="flex justify-end">
+            <Button
+              variant={activeDetail ? 'tonal' : 'filled'}
+              leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
+              onClick={onOpen}
+              loading={historyLoading}
+              className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
+              data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
+            >
+              {activeDetail ? '접기' : '변경점 보기'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {activeDetail && (

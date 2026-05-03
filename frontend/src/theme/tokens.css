@@ -7,22 +7,22 @@
   color-scheme: light;
 
   /* Primary — action / accent */
-  --md-sys-color-primary: #4257b2;
+  --md-sys-color-primary: #315f8f;
   --md-sys-color-on-primary: #ffffff;
-  --md-sys-color-primary-container: #e3e8ff;
-  --md-sys-color-on-primary-container: #121942;
+  --md-sys-color-primary-container: #dbeafe;
+  --md-sys-color-on-primary-container: #0d2b45;
 
   /* Secondary — supportive, neutral-warm */
-  --md-sys-color-secondary: #5a6072;
+  --md-sys-color-secondary: #596273;
   --md-sys-color-on-secondary: #ffffff;
-  --md-sys-color-secondary-container: #e8ebf4;
+  --md-sys-color-secondary-container: #e8ecf2;
   --md-sys-color-on-secondary-container: #171b27;
 
-  /* Tertiary — highlight / contrasting accent */
-  --md-sys-color-tertiary: #6d5a86;
+  /* Tertiary — search highlight / warm contrast */
+  --md-sys-color-tertiary: #8a5a10;
   --md-sys-color-on-tertiary: #ffffff;
-  --md-sys-color-tertiary-container: #eee7ff;
-  --md-sys-color-on-tertiary-container: #24183d;
+  --md-sys-color-tertiary-container: #fff1cf;
+  --md-sys-color-on-tertiary-container: #2a1700;
 
   /* Error */
   --md-sys-color-error: #ba1a1a;
@@ -30,7 +30,7 @@
   --md-sys-color-error-container: #ffdad6;
   --md-sys-color-on-error-container: #410002;
 
-  /* Warning (not in M3 baseline, custom addition) */
+  /* Warning */
   --md-sys-color-warning: #a05200;
   --md-sys-color-warning-container: #ffdcbe;
   --md-sys-color-on-warning-container: #2a1700;
@@ -41,28 +41,28 @@
   --md-sys-color-on-success-container: #00210a;
 
   /* Background & surface tonal layers */
-  --md-sys-color-background: #f6f7fb;
+  --md-sys-color-background: #f7f8fb;
   --md-sys-color-on-background: #1a1c1e;
-  --md-sys-color-surface: #f6f7fb;
+  --md-sys-color-surface: #f7f8fb;
   --md-sys-color-on-surface: #1a1c1e;
-  --md-sys-color-surface-variant: #e3e6ee;
-  --md-sys-color-on-surface-variant: #4a505d;
+  --md-sys-color-surface-variant: #e5e8ef;
+  --md-sys-color-on-surface-variant: #4b5563;
 
   --md-sys-color-surface-dim: #d9dde7;
   --md-sys-color-surface-bright: #fbfcff;
   --md-sys-color-surface-container-lowest: #ffffff;
   --md-sys-color-surface-container-low: #f8f9fc;
-  --md-sys-color-surface-container: #f1f3f8;
-  --md-sys-color-surface-container-high: #e9edf5;
-  --md-sys-color-surface-container-highest: #e1e6ef;
+  --md-sys-color-surface-container: #f2f4f8;
+  --md-sys-color-surface-container-high: #e9edf3;
+  --md-sys-color-surface-container-highest: #e1e6ee;
 
   /* Outline */
-  --md-sys-color-outline: #747a87;
-  --md-sys-color-outline-variant: #d8dde7;
+  --md-sys-color-outline: #747d8c;
+  --md-sys-color-outline-variant: #d8dee8;
 
   /* OfficeWhere app-level layers */
   --ow-app-bg-start: #fbfcff;
-  --ow-app-accent-glow: rgba(66, 87, 178, 0.08);
+  --ow-app-accent-glow: rgba(49, 95, 143, 0.07);
   --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 88%, transparent);
   --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 96%, transparent);
   --ow-inset-highlight: rgba(255, 255, 255, 0.86);
@@ -80,13 +80,13 @@
   --ow-diff-changed-text: #78350f;
   --ow-diff-changed-border: #fcd34d;
 
-  /* State layer opacity (M3 spec) */
+  /* State layer opacity */
   --md-state-hover: 0.08;
   --md-state-focus: 0.12;
   --md-state-pressed: 0.12;
   --md-state-dragged: 0.16;
 
-  /* Elevation shadows (M3 levels 1–5) */
+  /* Elevation shadows */
   --md-elev-1: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 0 rgba(255, 255, 255, 0.75) inset;
   --md-elev-2: 0 10px 24px rgba(15, 23, 42, 0.07), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
   --md-elev-3: 0 18px 42px rgba(15, 23, 42, 0.10), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
@@ -110,20 +110,20 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --md-sys-color-primary: #9aa7ff;
-  --md-sys-color-on-primary: #10164a;
-  --md-sys-color-primary-container: #26347e;
-  --md-sys-color-on-primary-container: #e7eaff;
+  --md-sys-color-primary: #8ab7e6;
+  --md-sys-color-on-primary: #082134;
+  --md-sys-color-primary-container: #183756;
+  --md-sys-color-on-primary-container: #dcecff;
 
   --md-sys-color-secondary: #c3c7d7;
   --md-sys-color-on-secondary: #2c3040;
   --md-sys-color-secondary-container: #3f4354;
   --md-sys-color-on-secondary-container: #e0e3f3;
 
-  --md-sys-color-tertiary: #d7bff6;
-  --md-sys-color-on-tertiary: #39284e;
-  --md-sys-color-tertiary-container: #513f68;
-  --md-sys-color-on-tertiary-container: #f0defd;
+  --md-sys-color-tertiary: #f1c76d;
+  --md-sys-color-on-tertiary: #402900;
+  --md-sys-color-tertiary-container: #4d3714;
+  --md-sys-color-on-tertiary-container: #ffe9b5;
 
   --md-sys-color-error: #ffb4ab;
   --md-sys-color-on-error: #690005;
@@ -138,26 +138,26 @@
   --md-sys-color-success-container: #0f4d23;
   --md-sys-color-on-success-container: #c5f5c7;
 
-  --md-sys-color-background: #0b0d12;
+  --md-sys-color-background: #0b0d11;
   --md-sys-color-on-background: #e5e7ef;
-  --md-sys-color-surface: #0b0d12;
+  --md-sys-color-surface: #0b0d11;
   --md-sys-color-on-surface: #e5e7ef;
   --md-sys-color-surface-variant: #444854;
   --md-sys-color-on-surface-variant: #bfc4d0;
 
   --md-sys-color-surface-dim: #0b0d12;
   --md-sys-color-surface-bright: #343844;
-  --md-sys-color-surface-container-lowest: #101218;
-  --md-sys-color-surface-container-low: #171a22;
-  --md-sys-color-surface-container: #1d202a;
-  --md-sys-color-surface-container-high: #272b36;
-  --md-sys-color-surface-container-highest: #323746;
+  --md-sys-color-surface-container-lowest: #101319;
+  --md-sys-color-surface-container-low: #171b23;
+  --md-sys-color-surface-container: #1d222c;
+  --md-sys-color-surface-container-high: #272d38;
+  --md-sys-color-surface-container-highest: #333a47;
 
   --md-sys-color-outline: #8d93a3;
   --md-sys-color-outline-variant: #3c414f;
 
   --ow-app-bg-start: #0e1118;
-  --ow-app-accent-glow: rgba(128, 146, 255, 0.13);
+  --ow-app-accent-glow: rgba(94, 149, 206, 0.11);
   --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 88%, transparent);
   --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-low) 94%, transparent);
   --ow-inset-highlight: rgba(255, 255, 255, 0.07);
