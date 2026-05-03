@@ -65,9 +65,9 @@ Use this checklist before publishing a release tag.
 - [ ] Push the verified branch/tag. Tag push builds Actions artifacts but does not publish a GitHub Release.
 - [ ] If publishing a GitHub Release, run `workflow_dispatch` with `release_tag` set to the verified tag.
 - [ ] Confirm the GitHub Release contains `officewhere-vX.Y.Z-windows-x64.zip` and `officewhere-vX.Y.Z-windows-x64.sha256.txt` only when a Release was intentionally published.
-- [ ] From the previous packaged Windows version, confirm the update dialog shows `업데이트하기`, observes helper startup, downloads/verifies the zip, restarts, and reports the new version.
+- [ ] From the previous packaged Windows version, confirm the update dialog shows `zip 다운로드`, downloads/verifies the zip into the Downloads folder, opens the file location, and leaves the current app/data untouched.
 - [ ] Confirm a missing/bad `.sha256.txt` aborts before extraction/replacement and the current app remains usable.
-- [ ] Confirm a helper launch/early-exit failure aborts before app quit and leaves the current app usable.
+- [ ] Confirm a download or SHA256 verification failure leaves the current app usable and shows a clear modal error.
 - [ ] Confirm a disposable rollback simulation leaves the old `OfficeWhere.exe` runnable and records the restore/failure in the update log.
-- [ ] Confirm a permission-protected install folder fails safely before helper launch and leaves the release-page fallback available.
+- [ ] Confirm a permission-protected install folder does not affect update download because the updater writes only to the Downloads folder.
 - [ ] Confirm the Windows zip contains `resources/python-runtime/python.exe` and `resources/backend-source/backend_server.py`.

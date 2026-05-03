@@ -81,13 +81,11 @@ type UpdateInstallResult = {
   success: boolean
   latestVersion: string
   assetName: string
+  filePath: string
+  folderPath: string
+  alreadyDownloaded: boolean
   restartScheduled: boolean
   message: string
-}
-
-type PortableUpdateTarget = {
-  currentDir: string
-  exeName: string
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -104,7 +102,7 @@ let closePromptInProgress = false
 let appShutdownInProgress = false
 let appRelaunchScheduled = false
 let cachedUpdateCheck: UpdateCheckResult | null = null
-let updateInstallInProgress = false
+let updateDownloadInProgress = false
 
 app.setName('OfficeWhere')
 
@@ -160,7 +158,7 @@ function registerIpcHandlers() {
   ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
   ipcMain.handle('app:get-example-library-path', () => getExampleLibraryPath())
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
-  ipcMain.handle('app:install-update', () => installLatestUpdate())
+  ipcMain.handle('app:install-update', () => downloadLatestUpdateZip())
   ipcMain.handle('app:open-release-page', () => openLatestReleasePage())
   ipcMain.handle('app:show-item-in-folder', (_event, payload: unknown) => showItemInFolder(payload))
   ipcMain.handle('dialog:pick-file', async () => pickFile())
@@ -462,327 +460,101 @@ function hashFileSha256(filePath: string): Promise<string> {
   })
 }
 
-function psQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`
+function appendDownloadSuffix(filePath: string, suffix: number): string {
+  const directory = path.dirname(filePath)
+  const extension = path.extname(filePath)
+  const baseName = path.basename(filePath, extension)
+  return path.join(directory, `${baseName} (${suffix})${extension}`)
 }
 
-function runPowerShell(command: string, timeoutMs: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
-      { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          const detail = (stderr || stdout || error.message).trim()
-          reject(new Error(detail || 'PowerShell 명령을 실행하지 못했습니다.'))
-          return
-        }
-        resolve()
-      },
-    )
-    child.stdin?.end()
-  })
-}
+async function resolveDownloadDestination(fileName: string): Promise<string> {
+  const downloadDir = app.getPath('downloads')
+  await fs.promises.mkdir(downloadDir, { recursive: true })
 
-async function extractZipToDirectory(zipPath: string, destination: string): Promise<void> {
-  await fs.promises.mkdir(destination, { recursive: true })
-  await runPowerShell(
-    `Expand-Archive -LiteralPath ${psQuote(zipPath)} -DestinationPath ${psQuote(destination)} -Force`,
-    180_000,
-  )
-}
+  const preferredPath = path.join(downloadDir, fileName)
+  if (!(await pathExists(preferredPath))) return preferredPath
 
-async function findDirectoryContainingFile(root: string, fileName: string, depth = 3): Promise<string | undefined> {
-  const candidate = path.join(root, fileName)
-  if (await pathExists(candidate)) return root
-  if (depth <= 0) return undefined
-
-  let entries: fs.Dirent[]
-  try {
-    entries = await fs.promises.readdir(root, { withFileTypes: true })
-  } catch {
-    return undefined
+  for (let suffix = 1; suffix <= 99; suffix += 1) {
+    const candidate = appendDownloadSuffix(preferredPath, suffix)
+    if (!(await pathExists(candidate))) return candidate
   }
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    if (entry.name === '__MACOSX') continue
-    const found = await findDirectoryContainingFile(path.join(root, entry.name), fileName, depth - 1)
-    if (found) return found
+  throw new Error('다운로드 폴더에 같은 이름의 파일이 너무 많습니다. 기존 OfficeWhere zip 파일을 정리한 뒤 다시 시도해 주세요.')
+}
+
+async function findExistingVerifiedDownload(fileName: string, expectedSha256: string): Promise<string | undefined> {
+  const downloadDir = app.getPath('downloads')
+  const preferredPath = path.join(downloadDir, fileName)
+  const candidates = [preferredPath]
+  for (let suffix = 1; suffix <= 99; suffix += 1) {
+    candidates.push(appendDownloadSuffix(preferredPath, suffix))
   }
+
+  for (const candidate of candidates) {
+    if (!(await pathExists(candidate))) continue
+    const hash = await hashFileSha256(candidate).catch(() => '')
+    if (hash === expectedSha256) return candidate
+  }
+
   return undefined
 }
 
-async function resolveExtractedAppRoot(extractDir: string, exeName: string): Promise<string> {
-  const appRoot = await findDirectoryContainingFile(extractDir, exeName)
-  if (!appRoot) {
-    throw new Error('업데이트 압축 파일에서 OfficeWhere 실행 파일을 찾지 못했습니다.')
-  }
-  return appRoot
-}
-
-async function assertWritableDirectory(directory: string, label: string): Promise<void> {
-  const testPath = path.join(directory, `.officewhere-update-write-test-${process.pid}-${Date.now()}`)
-  try {
-    await fs.promises.writeFile(testPath, 'ok', { flag: 'wx' })
-  } catch (error) {
-    throw new Error(`${label}에 쓸 수 없어 자동 업데이트를 적용할 수 없습니다. (${errorToMessage(error)})`)
-  } finally {
-    await fs.promises.rm(testPath, { force: true }).catch(() => undefined)
-  }
-}
-
-async function assertPortableUpdateTarget(): Promise<PortableUpdateTarget> {
-  if (process.platform !== 'win32') {
-    throw new Error('자동 적용 업데이트는 현재 Windows zip 배포판에서만 지원합니다.')
-  }
-  if (!app.isPackaged) {
-    throw new Error('개발 실행 중에는 자동 업데이트를 적용할 수 없습니다. 패키지된 앱에서 실행해 주세요.')
+async function downloadLatestUpdateZip(): Promise<UpdateInstallResult> {
+  if (updateDownloadInProgress) {
+    throw new Error('업데이트 zip을 이미 다운로드하고 있습니다.')
   }
 
-  const exePath = app.getPath('exe')
-  const currentDir = path.dirname(exePath)
-  await assertWritableDirectory(path.dirname(currentDir), '설치 폴더의 상위 폴더')
-  await assertWritableDirectory(currentDir, '설치 폴더')
-
-  return {
-    currentDir,
-    exeName: path.basename(exePath),
-  }
-}
-
-function updateScriptTimestamp(): string {
-  return new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
-}
-
-async function createPortableUpdateScript(
-  tempDir: string,
-  target: PortableUpdateTarget,
-  newRoot: string,
-  readyPath: string,
-): Promise<{ scriptPath: string; logPath: string }> {
-  const logDir = app.getPath('logs')
-  await fs.promises.mkdir(logDir, { recursive: true })
-  const logPath = path.join(logDir, `update-${new Date().toISOString().replace(/[:.]/g, '-')}.log`)
-  const scriptPath = path.join(tempDir, 'apply-officewhere-update.ps1')
-  const script = `
-param(
-  [Parameter(Mandatory = $true)][string]$CurrentDir,
-  [Parameter(Mandatory = $true)][string]$NewRoot,
-  [Parameter(Mandatory = $true)][string]$ExeName,
-  [Parameter(Mandatory = $true)][int]$ParentPid,
-  [Parameter(Mandatory = $true)][string]$LogPath,
-  [Parameter(Mandatory = $true)][string]$ReadyPath
-)
-
-$ErrorActionPreference = 'Stop'
-
-function Write-UpdateLog([string]$Message) {
-  $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-  Add-Content -LiteralPath $LogPath -Value "[$stamp] $Message" -Encoding UTF8
-}
-
-try {
-  Set-Content -LiteralPath $ReadyPath -Value "ready" -Encoding Ascii
-  Write-UpdateLog "Waiting for OfficeWhere process $ParentPid to exit."
-  try {
-    Wait-Process -Id $ParentPid -Timeout 90 -ErrorAction Stop
-  } catch {
-    Write-UpdateLog "Wait-Process skipped or timed out: $($_.Exception.Message)"
-    Start-Sleep -Seconds 3
-  }
-
-  $parent = Split-Path -Parent $CurrentDir
-  $leaf = Split-Path -Leaf $CurrentDir
-  $backupLeaf = "$leaf.old-${updateScriptTimestamp()}"
-  $backupDir = Join-Path $parent $backupLeaf
-
-  Write-UpdateLog "Moving current app to backup: $backupDir"
-  Rename-Item -LiteralPath $CurrentDir -NewName $backupLeaf -Force
-
-  try {
-    Write-UpdateLog "Moving new app into place: $CurrentDir"
-    Move-Item -LiteralPath $NewRoot -Destination $CurrentDir -Force
-  } catch {
-    Write-UpdateLog "Move failed, restoring backup: $($_.Exception.Message)"
-    if (Test-Path -LiteralPath $CurrentDir) {
-      Remove-Item -LiteralPath $CurrentDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    Rename-Item -LiteralPath $backupDir -NewName $leaf -Force
-    throw
-  }
-
-  $exePath = Join-Path $CurrentDir $ExeName
-  Write-UpdateLog "Starting updated app: $exePath"
-  Start-Process -FilePath $exePath -WorkingDirectory $CurrentDir
-
-  Start-Sleep -Seconds 5
-  try {
-    Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction Stop
-    Write-UpdateLog "Removed backup app folder."
-  } catch {
-    Write-UpdateLog "Backup cleanup skipped: $($_.Exception.Message)"
-  }
-} catch {
-  Write-UpdateLog "ERROR: $($_.Exception.Message)"
-  exit 1
-}
-`
-  await fs.promises.writeFile(scriptPath, script, 'utf8')
-  return { scriptPath, logPath }
-}
-
-function launchPortableUpdateHelper(
-  scriptPath: string,
-  target: PortableUpdateTarget,
-  newRoot: string,
-  logPath: string,
-  readyPath: string,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        scriptPath,
-        '-CurrentDir',
-        target.currentDir,
-        '-NewRoot',
-        newRoot,
-        '-ExeName',
-        target.exeName,
-        '-ParentPid',
-        String(process.pid),
-        '-LogPath',
-        logPath,
-        '-ReadyPath',
-        readyPath,
-      ],
-      {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-      },
-    )
-
-    let settled = false
-    let pollTimer: NodeJS.Timeout | undefined
-    let timeoutTimer: NodeJS.Timeout | undefined
-
-    const cleanup = () => {
-      if (pollTimer) clearInterval(pollTimer)
-      if (timeoutTimer) clearTimeout(timeoutTimer)
-      child.off('error', onError)
-      child.off('exit', onExit)
-    }
-
-    const settle = (callback: () => void) => {
-      if (settled) return
-      settled = true
-      cleanup()
-      callback()
-    }
-
-    const onError = (error: Error) => {
-      settle(() => reject(new Error(`업데이트 helper를 시작하지 못했습니다. (${error.message})`)))
-    }
-
-    const onExit = (code: number | null) => {
-      settle(() => reject(new Error(`업데이트 helper가 너무 일찍 종료되었습니다. (code: ${code ?? 'unknown'})`)))
-    }
-
-    child.once('error', onError)
-    child.once('exit', onExit)
-
-    pollTimer = setInterval(() => {
-      if (fs.existsSync(readyPath)) {
-        settle(() => {
-          child.unref()
-          resolve()
-        })
-      }
-    }, 100)
-
-    timeoutTimer = setTimeout(() => {
-      settle(() => reject(new Error('업데이트 helper 시작 확인 시간이 초과되었습니다.')))
-    }, 5_000)
-  })
-}
-
-async function fetchInstallZipToDirectory(
-  update: UpdateCheckResult,
-  directory: string,
-): Promise<{ path: string; fileName: string; sizeBytes: number }> {
-  if (!update.asset) {
-    throw new Error('다운로드할 새 Windows zip 릴리즈가 없습니다.')
-  }
-  const fileName = sanitizeUpdateFileName(update.asset.name)
-  const destination = path.join(directory, fileName)
-  const sizeBytes = await downloadToFile(update.asset.url, destination)
-  return {
-    path: destination,
-    fileName,
-    sizeBytes,
-  }
-}
-
-async function installLatestUpdate(): Promise<UpdateInstallResult> {
-  if (updateInstallInProgress) {
-    throw new Error('업데이트를 이미 적용하고 있습니다.')
-  }
-
-  updateInstallInProgress = true
-  let helperStarted = false
-  let tempDir = ''
+  updateDownloadInProgress = true
 
   try {
     const update = cachedUpdateCheck ?? (await checkForUpdates())
     if (!update.updateAvailable || !update.asset) {
-      throw new Error('적용할 새 Windows zip 릴리즈가 없습니다.')
+      throw new Error('다운로드할 새 Windows zip 릴리즈가 없습니다.')
     }
     if (!update.asset.sha256Url) {
-      throw new Error('업데이트 검증 파일이 없어 자동 적용을 중단했습니다. 릴리즈 페이지에서 직접 확인해 주세요.')
+      throw new Error('업데이트 검증 파일이 없어 다운로드를 중단했습니다. 릴리즈 페이지에서 직접 확인해 주세요.')
     }
 
-    const target = await assertPortableUpdateTarget()
-    tempDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), 'officewhere-update-'))
-    const downloaded = await fetchInstallZipToDirectory(update, tempDir)
-
+    const fileName = sanitizeUpdateFileName(update.asset.name)
     const expectedSha256 = parseExpectedSha256(await requestUpdateText(update.asset.sha256Url))
-    const actualSha256 = await hashFileSha256(downloaded.path)
+    const existingPath = await findExistingVerifiedDownload(fileName, expectedSha256)
+    if (existingPath) {
+      shell.showItemInFolder(existingPath)
+      return {
+        success: true,
+        latestVersion: update.latestVersion,
+        assetName: update.asset.name,
+        filePath: existingPath,
+        folderPath: path.dirname(existingPath),
+        alreadyDownloaded: true,
+        restartScheduled: false,
+        message: '이미 다운로드된 업데이트 zip을 확인했습니다. 압축을 풀고 새 OfficeWhere.exe를 실행해 주세요.',
+      }
+    }
+
+    const destination = await resolveDownloadDestination(fileName)
+    await downloadToFile(update.asset.url, destination)
+
+    const actualSha256 = await hashFileSha256(destination)
     if (actualSha256 !== expectedSha256) {
+      await fs.promises.rm(destination, { force: true }).catch(() => undefined)
       throw new Error('업데이트 파일 검증에 실패했습니다. 다운로드한 파일의 SHA256 값이 릴리즈 정보와 다릅니다.')
     }
 
-    const extractDir = path.join(tempDir, 'extracted')
-    await extractZipToDirectory(downloaded.path, extractDir)
-    const newRoot = await resolveExtractedAppRoot(extractDir, target.exeName)
-    const readyPath = path.join(tempDir, 'helper-ready.txt')
-    const { scriptPath, logPath } = await createPortableUpdateScript(tempDir, target, newRoot, readyPath)
-
-    await launchPortableUpdateHelper(scriptPath, target, newRoot, logPath, readyPath)
-    helperStarted = true
-
-    setTimeout(() => requestAppQuit(), 450)
+    shell.showItemInFolder(destination)
 
     return {
       success: true,
       latestVersion: update.latestVersion,
       assetName: update.asset.name,
-      restartScheduled: true,
-      message: '업데이트를 적용하기 위해 앱을 종료하고 다시 시작합니다.',
+      filePath: destination,
+      folderPath: path.dirname(destination),
+      alreadyDownloaded: false,
+      restartScheduled: false,
+      message: '업데이트 zip을 다운로드했습니다. 압축을 풀고 새 OfficeWhere.exe를 실행해 주세요.',
     }
   } finally {
-    if (!helperStarted) {
-      updateInstallInProgress = false
-      if (tempDir) {
-        await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
-      }
-    }
+    updateDownloadInProgress = false
   }
 }
 

@@ -57,6 +57,9 @@ export interface UpdateInstallResult {
   success: boolean
   latestVersion: string
   assetName: string
+  filePath: string
+  folderPath: string
+  alreadyDownloaded: boolean
   restartScheduled: boolean
   message: string
 }
