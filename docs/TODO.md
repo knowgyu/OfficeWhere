@@ -1,6 +1,6 @@
 # OfficeWhere TODO
 
-Last updated: 2026-04-30
+Last updated: 2026-05-02
 
 This file tracks follow-up work that is not part of the formal release checklist. Keep `docs/release-test-checklist.md` for release validation steps.
 
@@ -17,7 +17,8 @@ This file tracks follow-up work that is not part of the formal release checklist
   - Durable decision record: `docs/search-version-performance-roadmap.md`.
   - Already landed in 0.6.x: Excel sparse diff + warnings, SQL-backed group list filtering/paging, PPT similarity guard, Word/PPT compressed comparison artifacts.
   - v0.6.8 scanner boundary work: default discovery now has an `os.scandir`/snapshot-cache direction with fallback-on-doubt.
-  - Remaining future item from that roadmap: optional Everything/ES discovery accelerator, only after Windows manual validation and SDK/license/redistribution checks.
+  - v0.7.0 candidate work: optional Everything SDK path discovery auto-detects app-owned SDK resources, with filesystem fallback on doubt.
+  - Remaining release gate: do not tag/release Everything support until Windows manual validation passes and SDK/license/redistribution checks decide whether to bundle any DLL/ES artifact.
   - Treat this as the source of truth instead of duplicating the same performance notes across `.omx/context`, `.omx/wiki`, or session notes.
 
 - [ ] Continue architecture cleanup only as scoped follow-up waves, not as a big-bang rewrite.
@@ -26,10 +27,9 @@ This file tracks follow-up work that is not part of the formal release checklist
   - Next possible slices: FileManager library-settings hook/presenter, deeper group domain-builder extraction, frontend tests, or migration backups — each needs its own performance/safety decision.
   - Preserve the >10% performance guard for 500~2,000 document libraries.
 
-- [ ] Consider a local AI Agent integration surface after the 0.6.x release line stabilizes.
-  - Candidate shapes: loopback-only REST API for search/version/library state, or MCP server exposing read-only tools plus explicitly user-approved app actions.
-  - Constraints: source Office documents remain read-only; no broad filesystem mutation tools; any external agent access should be opt-in, local-only by default, and documented with clear trust boundaries.
-  - Do not implement in 0.6.4; revisit as a deliberate architecture/security task.
+- [ ] Do not pursue AI/MCP as a primary product direction unless a non-generic document workflow emerges.
+  - Reason: generic AI assistants can already search/read files when granted filesystem access; OfficeWhere should focus on Office-specific indexing, version evidence, change tracking, and safe document operations that generic AI tools do not reliably provide.
+  - If revisited later, keep it opt-in and read-only by default; do not add broad filesystem mutation tools.
 
 - [ ] Revisit simple scheduling only if logs show a likely 10%+ wall-clock gain.
   - Candidate: Excel-first ordering with about half the worker slots reserved for Excel-heavy runs.
@@ -38,7 +38,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 ## Completed / user-owned for now
 
 - External architecture review P0-P3 first implementation wave and second responsibility-boundary refactor wave are complete enough for this pass; only scoped follow-up slices remain.
-- v0.6.8 default scanner improvement is complete enough for release prep; Everything remains a separate v0.7.0 candidate pending Windows manual validation.
+- v0.6.8 default scanner improvement is complete enough for release prep; Everything is implemented only as a v0.7.0 candidate and remains pending Windows manual validation before release.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
 - Embedded-Python Windows packaging has been checked on DRM-policy PCs.
 - In-app update notice and portable zip update flow are implemented.

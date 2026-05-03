@@ -65,6 +65,13 @@ def is_high_confidence_root(path: str) -> bool:
     # controlled by the remote server. Keep snapshot reuse local by default.
     if normalized.startswith("\\\\") or normalized.startswith("//"):
         return False
+    try:
+        if os.path.islink(normalized):
+            return False
+    except OSError:
+        return False
+    if directory_signature(normalized) is None:
+        return False
     return True
 
 

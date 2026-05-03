@@ -6,6 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from .everything_discovery import (
+    EverythingDiscoveryResult,
+    discover_paths,
+)
+
 from .file_scope import (
     DEFAULT_EXCLUDED_FOLDER_NAMES,
     SUPPORTED_EXTENSIONS,
@@ -14,6 +19,7 @@ from .file_scope import (
 )
 from .library_scan_cache import (
     DirectorySignature,
+    ScanCacheEntry,
     directory_signature,
     is_high_confidence_root,
     load_entry,
@@ -38,6 +44,13 @@ class ScanCollection:
     cache_hit: bool = False
     cache_fallback_reason: str = ""
     cache_hit_dir_count: int = 0
+    provider_status: str = ""
+    provider_fallback_reason: str = ""
+    provider_raw_total: int = 0
+    provider_returned_count: int = 0
+    provider_timed_out: bool = False
+    provider_fallback_ran: bool = False
+    provider_dll_path: str = ""
 
 
 @dataclass
@@ -124,15 +137,95 @@ def _validate_cached_directories(directories: Iterable[DirectorySignature]) -> b
     return True
 
 
+def _path_is_under_root(candidate_path: str, root_path: str) -> bool:
+    try:
+        candidate_abs = os.path.abspath(os.path.normpath(candidate_path))
+        root_abs = os.path.abspath(os.path.normpath(root_path))
+        common = os.path.commonpath([candidate_abs, root_abs])
+    except (OSError, ValueError):
+        return False
+    return os.path.normcase(common) == os.path.normcase(root_abs)
+
+
+def _relative_parts(candidate_path: str, root_path: str) -> tuple[str, ...] | None:
+    try:
+        relative = os.path.relpath(
+            os.path.abspath(os.path.normpath(candidate_path)),
+            os.path.abspath(os.path.normpath(root_path)),
+        )
+    except (OSError, ValueError):
+        return None
+    if relative == os.curdir:
+        return ()
+    return Path(relative).parts
+
+
+def _provider_candidate_is_valid(
+    candidate_path: str,
+    root_path: str,
+    recursive: bool,
+    supported: set[str],
+    excluded_keys: set[str],
+) -> bool:
+    if not candidate_path or not isinstance(candidate_path, str):
+        return False
+    path = os.path.normpath(candidate_path)
+    name = os.path.basename(path)
+    if not name or name.startswith("~$"):
+        return False
+    if os.path.splitext(name)[1].lower() not in supported:
+        return False
+    if not _path_is_under_root(path, root_path):
+        return False
+
+    relative_parts = _relative_parts(path, root_path)
+    if relative_parts is None:
+        return False
+    directory_parts = relative_parts[:-1]
+    if not recursive and directory_parts:
+        return False
+    if any(part.casefold() in excluded_keys for part in directory_parts):
+        return False
+    try:
+        return os.path.isfile(path)
+    except OSError:
+        return False
+
+
+def _provider_metadata(result: EverythingDiscoveryResult, *, fallback_ran: bool) -> dict[str, object]:
+    return {
+        "provider_status": result.status,
+        "provider_fallback_reason": result.fallback_reason,
+        "provider_raw_total": result.raw_total,
+        "provider_returned_count": result.returned_count,
+        "provider_timed_out": result.timed_out,
+        "provider_fallback_ran": fallback_ran,
+        "provider_dll_path": result.dll_path or "",
+    }
+
+
+def _apply_provider_metadata(
+    collection: ScanCollection,
+    result: EverythingDiscoveryResult | None,
+    *,
+    fallback_ran: bool,
+) -> ScanCollection:
+    if result is None:
+        return collection
+    for key, value in _provider_metadata(result, fallback_ran=fallback_ran).items():
+        setattr(collection, key, value)
+    return collection
+
+
 def _collection_from_cache(
     folder: Path,
     recursive: bool,
     supported: set[str],
     excluded_keys: set[str],
-) -> tuple[ScanCollection | None, str]:
+) -> tuple[ScanCollection | None, str, ScanCacheEntry | None]:
     root_path = os.path.normpath(str(folder))
     if not is_high_confidence_root(root_path):
-        return None, "low_confidence_root"
+        return None, "low_confidence_root", None
 
     entry = load_entry(
         root_path,
@@ -141,17 +234,19 @@ def _collection_from_cache(
         normalized_signature(supported),
     )
     if entry is None:
-        return None, "missing_cache"
+        return None, "missing_cache", None
 
     force_reason = should_force_full_scan(entry)
     if force_reason:
-        return None, force_reason
+        if _validate_cached_directories(entry.directories) and _validate_cached_paths(entry.paths, supported):
+            return None, force_reason, entry
+        return None, force_reason, None
 
     if not _validate_cached_directories(entry.directories):
-        return None, "directory_signature_changed"
+        return None, "directory_signature_changed", None
 
     if not _validate_cached_paths(entry.paths, supported):
-        return None, "cached_path_invalid"
+        return None, "cached_path_invalid", None
 
     collection = ScanCollection(
         paths=sorted(entry.paths),
@@ -172,7 +267,76 @@ def _collection_from_cache(
         # Snapshot reuse is an optimization. A temporary cache write failure must
         # not turn a validated read-only discovery result into a rescan failure.
         collection.cache_fallback_reason = "cache_reuse_write_failed"
-    return collection, ""
+    return collection, "", None
+
+
+def _everything_fallback_result(reason: str, *, status: str = "skipped") -> EverythingDiscoveryResult:
+    return EverythingDiscoveryResult(status=status, fallback_reason=reason)
+
+
+def _collection_from_everything(
+    folder: Path,
+    recursive: bool,
+    supported: set[str],
+    excluded_keys: set[str],
+    *,
+    cache_fallback_reason: str,
+    prior_valid_cache: ScanCacheEntry | None,
+) -> tuple[ScanCollection | None, EverythingDiscoveryResult | None]:
+    root_path = os.path.normpath(str(folder))
+    if not is_high_confidence_root(root_path):
+        return None, _everything_fallback_result("everything_low_confidence_root")
+    if cache_fallback_reason in {"directory_signature_changed", "cached_path_invalid"}:
+        return None, _everything_fallback_result("everything_snapshot_conflict")
+
+    result = discover_paths(
+        root_path,
+        recursive,
+        sorted(excluded_keys),
+        sorted(supported),
+    )
+    if result.fallback_reason:
+        return None, result
+
+    normalized_paths: list[str] = []
+    for candidate_path in result.paths:
+        if not _provider_candidate_is_valid(candidate_path, root_path, recursive, supported, excluded_keys):
+            invalid = EverythingDiscoveryResult(
+                paths=[],
+                status="invalid_candidate",
+                fallback_reason="everything_invalid_candidate",
+                raw_total=result.raw_total,
+                returned_count=result.returned_count,
+                timed_out=result.timed_out,
+                dll_path=result.dll_path,
+                query=result.query,
+            )
+            return None, invalid
+        normalized_paths.append(os.path.normpath(candidate_path))
+
+    if prior_valid_cache is not None:
+        provider_signature = {os.path.normcase(os.path.normpath(path)) for path in normalized_paths}
+        cached_signature = {os.path.normcase(os.path.normpath(path)) for path in prior_valid_cache.paths}
+        if provider_signature != cached_signature:
+            conflict = EverythingDiscoveryResult(
+                paths=[],
+                status="snapshot_conflict",
+                fallback_reason="everything_snapshot_conflict",
+                raw_total=result.raw_total,
+                returned_count=result.returned_count,
+                timed_out=result.timed_out,
+                dll_path=result.dll_path,
+                query=result.query,
+            )
+            return None, conflict
+
+    collection = ScanCollection(
+        paths=sorted(set(normalized_paths)),
+        discovery_source="everything_sdk",
+        cache_hit=False,
+        cache_fallback_reason=cache_fallback_reason,
+    )
+    return _apply_provider_metadata(collection, result, fallback_ran=False), result
 
 
 def _scan_directory(folder: Path, recursive: bool, supported: set[str], excluded_keys: set[str]) -> _ScanState:
@@ -248,14 +412,35 @@ def collect_supported_paths_with_stats(
     cache_fallback_reason = ""
 
     if use_cache:
-        cached, cache_fallback_reason = _collection_from_cache(folder, recursive, supported, excluded_keys)
+        cached, cache_fallback_reason, prior_valid_cache = _collection_from_cache(
+            folder, recursive, supported, excluded_keys
+        )
         if cached is not None:
             return cached
 
+        everything_collection, everything_result = _collection_from_everything(
+            folder,
+            recursive,
+            supported,
+            excluded_keys,
+            cache_fallback_reason=cache_fallback_reason,
+            prior_valid_cache=prior_valid_cache,
+        )
+        if everything_collection is not None:
+            return everything_collection
+    else:
+        everything_result = None
+
     state = _scan_directory(folder, recursive, supported, excluded_keys)
     collection = state.to_collection(cache_fallback_reason=cache_fallback_reason)
+    collection = _apply_provider_metadata(collection, everything_result, fallback_ran=everything_result is not None)
 
-    if use_cache and is_high_confidence_root(os.path.normpath(str(folder))) and state.directory_signatures:
+    if (
+        use_cache
+        and is_high_confidence_root(os.path.normpath(str(folder)))
+        and state.directory_signatures
+        and not state.inaccessible_dirs
+    ):
         try:
             save_entry(
                 os.path.normpath(str(folder)),

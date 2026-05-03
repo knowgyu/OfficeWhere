@@ -66,6 +66,15 @@
       {
         "from": "../examples/officewhere_test_library",
         "to": "examples/officewhere_test_library"
+      },
+      {
+        "from": "../resources/everything-sdk",
+        "to": "everything-sdk",
+        "filter": [
+          "Everything*.dll",
+          "README.md",
+          "LICENSE*.txt"
+        ]
       }
     ],
     "win": {

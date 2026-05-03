@@ -378,6 +378,46 @@ def test_collect_supported_paths_falls_back_when_directory_signature_changes(tmp
     assert {Path(path) for path in second.paths} == {first_file, added}
 
 
+def test_collect_supported_paths_skips_everything_when_snapshot_detects_change(tmp_path, monkeypatch):
+    from pathlib import Path
+    import os
+    import time
+
+    from backend.core import library_scanner
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    first_file = scan_root / "report.xlsx"
+    first_file.write_text("x")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+
+    first = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+    assert {Path(path) for path in first.paths} == {first_file}
+
+    added = scan_root / "new.docx"
+    added.write_text("x")
+    next_mtime = time.time() + 3
+    os.utime(scan_root, (next_mtime, next_mtime))
+    monkeypatch.setattr(
+        library_scanner,
+        "discover_paths",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("changed app-owned snapshot must force filesystem scan")
+        ),
+    )
+
+    second = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert second.discovery_source == "filesystem"
+    assert second.cache_fallback_reason == "directory_signature_changed"
+    assert second.provider_fallback_reason == "everything_snapshot_conflict"
+    assert {Path(path) for path in second.paths} == {first_file, added}
+
+
 def test_collect_supported_paths_full_scan_escape_after_reuse_limit(tmp_path, monkeypatch):
     from pathlib import Path
 
@@ -426,6 +466,269 @@ def test_collect_supported_paths_keeps_symlinked_files(tmp_path, monkeypatch):
     result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
 
     assert {Path(path) for path in result.paths} == {target, link}
+
+
+def test_everything_discovery_query_is_path_only():
+    from backend.core.everything_discovery import build_search_query
+
+    query = build_search_query(r"C:\Reports", [".xlsx", ".xls", ".docx", ".pptx"])
+
+    assert "file:" in query
+    assert "ext:docx;pptx;xls;xlsx" in query
+    assert "content:" not in query.casefold()
+
+
+def test_everything_discovery_non_windows_falls_back(monkeypatch):
+    from backend.core.everything_discovery import discover_paths
+    from backend.core import everything_discovery
+
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+    monkeypatch.setattr(everything_discovery, "_is_windows", lambda: False)
+
+    result = discover_paths("C:/Reports", True, [], [".xlsx"])
+
+    assert result.fallback_reason == "everything_non_windows"
+    assert result.paths == []
+
+
+def test_everything_discovery_auto_mode_without_sdk_is_disabled(monkeypatch):
+    from backend.core.everything_discovery import check_availability
+    from backend.core import everything_discovery
+
+    monkeypatch.delenv("OW_EVERYTHING_ENABLED", raising=False)
+    monkeypatch.delenv("OW_EVERYTHING_SDK_DLL", raising=False)
+    monkeypatch.delenv("OW_EVERYTHING_RESOURCES_DIR", raising=False)
+    monkeypatch.delenv("OW_EVERYTHING_SDK_DIR", raising=False)
+    monkeypatch.setattr(everything_discovery, "_is_windows", lambda: True)
+    monkeypatch.setattr(everything_discovery, "_candidate_resource_dirs", lambda: [])
+
+    result = check_availability()
+
+    assert result.status == "unavailable"
+    assert result.reason == "everything_disabled"
+
+
+def test_everything_discovery_auto_detects_resource_dir(tmp_path, monkeypatch):
+    from backend.core.everything_discovery import check_availability
+    from backend.core import everything_discovery
+
+    resources = tmp_path / "everything-sdk"
+    resources.mkdir()
+    dll = resources / "Everything64.dll"
+    dll.write_bytes(b"placeholder")
+
+    monkeypatch.delenv("OW_EVERYTHING_ENABLED", raising=False)
+    monkeypatch.delenv("OW_EVERYTHING_SDK_DLL", raising=False)
+    monkeypatch.setenv("OW_EVERYTHING_RESOURCES_DIR", str(resources))
+    monkeypatch.setattr(everything_discovery, "_is_windows", lambda: True)
+    monkeypatch.setattr(everything_discovery, "_sdk_dll_name", lambda: "Everything64.dll")
+
+    result = check_availability()
+
+    assert result.status == "configured"
+    assert result.dll_path == str(dll)
+
+
+def test_everything_discovery_windows_missing_sdk_falls_back(monkeypatch):
+    from backend.core.everything_discovery import discover_paths
+    from backend.core import everything_discovery
+
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+    monkeypatch.delenv("OW_EVERYTHING_SDK_DLL", raising=False)
+    monkeypatch.delenv("OW_EVERYTHING_RESOURCES_DIR", raising=False)
+    monkeypatch.setattr(everything_discovery, "_candidate_resource_dirs", lambda: [])
+    monkeypatch.setattr(everything_discovery, "_is_windows", lambda: True)
+
+    result = discover_paths("C:/Reports", True, [], [".xlsx"])
+
+    assert result.fallback_reason == "everything_sdk_missing"
+
+
+def test_collect_supported_paths_can_use_everything_provider_success(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.everything_discovery import EverythingDiscoveryResult
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    keep = scan_root / "report.xlsx"
+    keep.write_text("x")
+    nested = scan_root / "nested"
+    nested.mkdir()
+    nested_keep = nested / "deck.pptx"
+    nested_keep.write_text("x")
+
+    def fake_discover(*args, **kwargs):
+        return EverythingDiscoveryResult(
+            paths=[str(nested_keep), str(keep)],
+            status="ok",
+            raw_total=2,
+            returned_count=2,
+            dll_path="Everything64.dll",
+        )
+
+    monkeypatch.setattr(library_scanner, "discover_paths", fake_discover)
+
+    def fail_scandir(_path):
+        raise AssertionError("successful Everything discovery should avoid filesystem directory traversal")
+
+    monkeypatch.setattr(library_scanner.os, "scandir", fail_scandir)
+
+    result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert result.discovery_source == "everything_sdk"
+    assert result.cache_fallback_reason == "missing_cache"
+    assert result.provider_status == "ok"
+    assert result.provider_raw_total == 2
+    assert result.provider_returned_count == 2
+    assert result.provider_fallback_ran is False
+    assert {Path(path) for path in result.paths} == {keep, nested_keep}
+
+
+def test_collect_supported_paths_falls_back_on_invalid_everything_candidate(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.everything_discovery import EverythingDiscoveryResult
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    keep = scan_root / "report.xlsx"
+    keep.write_text("x")
+    outside = tmp_path / "outside.xlsx"
+    outside.write_text("x")
+
+    monkeypatch.setattr(
+        library_scanner,
+        "discover_paths",
+        lambda *args, **kwargs: EverythingDiscoveryResult(
+            paths=[str(keep), str(outside)],
+            status="ok",
+            raw_total=2,
+            returned_count=2,
+        ),
+    )
+
+    result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert result.discovery_source == "filesystem"
+    assert result.provider_status == "invalid_candidate"
+    assert result.provider_fallback_reason == "everything_invalid_candidate"
+    assert result.provider_fallback_ran is True
+    assert {Path(path) for path in result.paths} == {keep}
+
+
+def test_collect_supported_paths_falls_back_on_empty_everything_result(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.everything_discovery import EverythingDiscoveryResult
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    keep = scan_root / "report.xlsx"
+    keep.write_text("x")
+
+    monkeypatch.setattr(
+        library_scanner,
+        "discover_paths",
+        lambda *args, **kwargs: EverythingDiscoveryResult(
+            status="empty",
+            fallback_reason="everything_empty_uncertain",
+            raw_total=0,
+            returned_count=0,
+        ),
+    )
+
+    result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert result.discovery_source == "filesystem"
+    assert result.provider_fallback_reason == "everything_empty_uncertain"
+    assert result.provider_fallback_ran is True
+    assert {Path(path) for path in result.paths} == {keep}
+
+
+def test_collect_supported_paths_skips_everything_for_low_confidence_root(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    keep = scan_root / "report.xlsx"
+    keep.write_text("x")
+
+    monkeypatch.setattr(library_scanner, "is_high_confidence_root", lambda _path: False)
+    monkeypatch.setattr(
+        library_scanner,
+        "discover_paths",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("low-confidence roots must not call Everything")
+        ),
+    )
+
+    result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert result.discovery_source == "filesystem"
+    assert result.cache_fallback_reason == "low_confidence_root"
+    assert result.provider_fallback_reason == "everything_low_confidence_root"
+    assert result.provider_fallback_ran is True
+    assert {Path(path) for path in result.paths} == {keep}
+
+
+def test_collect_supported_paths_use_cache_false_does_not_call_everything(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setenv("OW_EVERYTHING_ENABLED", "1")
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    keep = scan_root / "report.xlsx"
+    keep.write_text("x")
+
+    monkeypatch.setattr(
+        library_scanner,
+        "discover_paths",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("manual/cache-free scans must not call Everything")
+        ),
+    )
+
+    result = library_scanner.collect_supported_paths_with_stats(str(scan_root), recursive=True, use_cache=False)
+
+    assert result.discovery_source == "filesystem"
+    assert result.provider_fallback_reason == ""
+    assert {Path(path) for path in result.paths} == {keep}
 
 
 def test_scan_cache_disables_low_confidence_network_roots():

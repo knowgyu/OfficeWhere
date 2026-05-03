@@ -143,7 +143,7 @@ Deferred scope:
 
 ### P4 — Optional product/performance follow-ups
 
-1. Optional Everything/ES discovery accelerator after scanner strategy boundaries exist and license/redistribution are checked.
+1. Optional Everything SDK discovery accelerator is prepared as a v0.7.0 candidate, but remains release-gated on Windows validation plus SDK/license/redistribution decisions before any DLL/ES bundling.
 2. List virtualization or hand-rolled viewport rendering only if profiling shows bounded paging is insufficient.
 3. Bounded app-owned DB backup only for risky schema migrations, with pruning and reset cleanup rules.
 4. Local AI Agent integration remains a later security/architecture task.
