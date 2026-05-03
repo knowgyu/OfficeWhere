@@ -40,7 +40,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 - v0.7.0 cleanup release is prepared around the stable search/index/version-comparison workflows; Everything/ES acceleration and unfinished Excel integration/Join surfaces are not current release candidates.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
 - Embedded-Python Windows packaging has been checked on DRM-policy PCs.
-- In-app update notice and portable zip update flow are implemented.
+- In-app update notice and one-click Windows portable self-update flow are implemented; permission-protected install folders still fall back to manual release-page update.
 - First-run onboarding/tutorial is implemented.
 - Large DB/indexing structural optimization is considered complete enough for now.
 - Version-management first-load now uses a DB-backed derived group index with background/single-flight refresh and incremental affected-key updates.

@@ -309,7 +309,8 @@ export default function App() {
   const [exampleLibraryPath, setExampleLibraryPath] = useState('')
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
-  const [updateDownloading, setUpdateDownloading] = useState(false)
+  const [updateInstalling, setUpdateInstalling] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState('')
   const { textSize, increaseTextSize, decreaseTextSize, resetTextSize } = useDisplaySettings()
 
   useEffect(() => {
@@ -477,17 +478,19 @@ export default function App() {
     }
   }
 
-  const handleDownloadUpdate = async () => {
-    setUpdateDownloading(true)
+  const handleInstallUpdate = async () => {
+    setUpdateInstalling(true)
+    setUpdateStatus('업데이트 파일을 받고 검증하는 중입니다...')
     try {
-      const response = await api.app.downloadUpdate()
-      snackbar.success(`업데이트 zip을 다운로드했습니다: ${response.data.fileName}`, 6000)
-      dismissUpdateDialog()
+      const response = await api.app.installUpdate()
+      snackbar.success(response.data.message || '업데이트를 적용합니다.', 6000)
+      setUpdateStatus('앱을 종료하고 새 버전으로 다시 시작합니다...')
     } catch (error) {
-      const message = error instanceof Error ? error.message : '업데이트 다운로드에 실패했습니다.'
+      const message = error instanceof Error ? error.message : '업데이트 적용에 실패했습니다.'
       snackbar.error(message)
-    } finally {
-      setUpdateDownloading(false)
+      setUpdateInstalling(false)
+      setUpdateStatus('')
+      return
     }
   }
 
@@ -577,9 +580,9 @@ export default function App() {
       />
       <Dialog
         open={updateDialogOpen && Boolean(updateInfo)}
-        onClose={dismissUpdateDialog}
-        icon="download"
-        title="새 버전을 받을 수 있습니다"
+        onClose={updateInstalling ? () => undefined : dismissUpdateDialog}
+        icon="system_update_alt"
+        title="새 버전으로 업데이트할 수 있습니다"
         description={
           updateInfo
             ? `현재 ${updateInfo.currentVersion || '알 수 없음'} · 최신 ${updateInfo.latestVersion}`
@@ -587,38 +590,52 @@ export default function App() {
         }
         actions={
           <>
-            <Button variant="text" onClick={dismissUpdateDialog}>
+            <Button variant="text" onClick={dismissUpdateDialog} disabled={updateInstalling}>
               나중에
             </Button>
-            <Button variant="outlined" leadingIcon="open_in_new" onClick={handleOpenReleasePage}>
+            <Button
+              variant="outlined"
+              leadingIcon="open_in_new"
+              onClick={handleOpenReleasePage}
+              disabled={updateInstalling}
+            >
               릴리즈 보기
             </Button>
             <Button
               variant="filled"
-              leadingIcon="download"
-              onClick={handleDownloadUpdate}
-              loading={updateDownloading}
-              disabled={!updateInfo?.asset}
+              leadingIcon="system_update_alt"
+              onClick={handleInstallUpdate}
+              loading={updateInstalling}
+              disabled={!updateInfo?.asset || updateInstalling}
             >
-              zip 다운로드
+              {updateInstalling ? '업데이트 중...' : '업데이트하기'}
             </Button>
           </>
         }
       >
         <div className="space-y-3">
           <p className="type-body-md text-[var(--md-sys-color-on-surface)]">
-            다운로드만 진행합니다. 압축을 푼 뒤 기존 앱을 종료하고 새 폴더의 OfficeWhere.exe를 실행해 주세요.
+            업데이트 파일을 받고 확인한 뒤 앱을 종료하고 새 버전으로 다시 시작합니다. 원본 문서와 앱 데이터는
+            건드리지 않습니다.
           </p>
+          {updateInstalling && (
+            <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3">
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">업데이트 중...</p>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                {updateStatus || '잠시만 기다려 주세요.'}
+              </p>
+            </div>
+          )}
           {updateInfo?.asset ? (
             <div className="rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-3">
               <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{updateInfo.asset.name}</p>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                다운로드 위치: Windows 다운로드 폴더
+                설치 폴더에 쓰기 권한이 없으면 자동 적용 대신 릴리즈 보기에서 직접 받을 수 있습니다.
               </p>
             </div>
           ) : (
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              이 릴리즈에는 Windows zip 파일이 없어 릴리즈 페이지에서 직접 확인해 주세요.
+              이 릴리즈에는 자동 업데이트용 Windows zip 파일이 없어 릴리즈 페이지에서 직접 확인해 주세요.
             </p>
           )}
         </div>

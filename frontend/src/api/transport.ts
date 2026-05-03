@@ -42,6 +42,7 @@ export interface UpdateAssetInfo {
   name: string
   url: string
   sizeBytes?: number
+  sha256Url?: string
 }
 
 export interface UpdateCheckResult {
@@ -57,6 +58,14 @@ export interface UpdateDownloadResult {
   path: string
   fileName: string
   sizeBytes: number
+}
+
+export interface UpdateInstallResult {
+  success: boolean
+  latestVersion: string
+  assetName: string
+  restartScheduled: boolean
+  message: string
 }
 
 export interface FolderPickResponse {
@@ -79,6 +88,7 @@ declare global {
     getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
     checkForUpdates?: () => Promise<UpdateCheckResult>
     downloadUpdate?: () => Promise<UpdateDownloadResult>
+    installUpdate?: () => Promise<UpdateInstallResult>
     openReleasePage?: () => Promise<void>
     showItemInFolder?: (filePath: string) => Promise<void>
   }

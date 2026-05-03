@@ -24,6 +24,7 @@ export type {
   UpdateAssetInfo,
   UpdateCheckResult,
   UpdateDownloadResult,
+  UpdateInstallResult,
 } from './transport'
 export type { CellValue, CompareMode, FileInfo, FileType } from './shared'
 export { getLibraryGroups } from './library'
@@ -1185,6 +1186,11 @@ export const api = {
       const electron = electronApi()
       if (!electron?.downloadUpdate) desktopError('Electron 앱에서만 업데이트 zip을 다운로드할 수 있습니다.')
       return { data: await electron.downloadUpdate() }
+    },
+    installUpdate: async () => {
+      const electron = electronApi()
+      if (!electron?.installUpdate) desktopError('Electron 앱에서만 업데이트를 적용할 수 있습니다.')
+      return { data: await electron.installUpdate() }
     },
     openReleasePage: async () => {
       const electron = electronApi()

@@ -78,6 +78,8 @@ Electron 개발 실행에서 Python interpreter를 직접 지정할 때도 `OW_*
 
 GitHub Release를 publish하려면 `workflow_dispatch`를 수동 실행하고 `release_tag`에 대상 태그를 입력한다. `release_tag`를 비우면 Actions artifact만 만든다.
 
+앱 내 업데이트는 GitHub Release의 Windows x64 zip과 함께 게시되는 `.sha256.txt` 검증 파일을 사용한다. 사용자가 **업데이트하기**를 누르면 앱이 임시 폴더에 다운로드/검증/압축해제를 수행하고, 별도 helper가 앱 종료 후 설치 폴더를 교체한 뒤 새 `OfficeWhere.exe`를 시작한다.
+
 ## Windows 로컬 빌드 주의
 
 `electron-builder`가 `winCodeSign` helper 압축을 풀 때 symlink 권한 오류가 나면 Windows Developer Mode를 켜거나 관리자 PowerShell/CMD에서 실행한다.

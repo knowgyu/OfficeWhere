@@ -65,4 +65,6 @@ Use this checklist before publishing a release tag.
 - [ ] Push the verified branch/tag. Tag push builds Actions artifacts but does not publish a GitHub Release.
 - [ ] If publishing a GitHub Release, run `workflow_dispatch` with `release_tag` set to the verified tag.
 - [ ] Confirm the GitHub Release contains the Windows zip and `.sha256.txt` asset only when a Release was intentionally published.
+- [ ] From the previous packaged Windows version, confirm the update dialog shows `업데이트하기`, downloads/verifies the zip, restarts, and reports the new version.
+- [ ] Confirm a permission-protected install folder fails safely and leaves the release-page fallback available.
 - [ ] Confirm the Windows zip contains `resources/python-runtime/python.exe` and `resources/backend-source/backend_server.py`.

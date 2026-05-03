@@ -46,7 +46,7 @@ FastAPI routers
 - Excel indexing/registration/rescan은 table 후보 탐색 대신 used-range/cell-coordinate extraction만 사용한다.
 - Excel version comparison은 항상 used-range cell diff를 사용한다.
 - comparison cache는 version/key 변경 후 100MB/90일/최신 300개 기준으로 pruning한다.
-- portable update는 GitHub Release 확인 + Windows zip 다운로드까지만 제공한다. 자동 압축해제/교체는 하지 않는다.
+- portable update는 GitHub Release 확인 후 Windows zip과 SHA256 검증 파일을 받아 임시 폴더에서 압축을 풀고, 별도 PowerShell helper가 앱 종료 뒤 설치 폴더를 교체한 다음 재시작한다. 설치 폴더에 쓰기 권한이 없으면 릴리즈 페이지/수동 업데이트로 안내한다.
 
 ## 왜 당장 Node app-core로 옮기지 않는가
 

@@ -15,6 +15,7 @@ const officeWhereBridge = {
   getExampleLibraryPath: () => ipcRenderer.invoke('app:get-example-library-path'),
   checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates'),
   downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
+  installUpdate: () => ipcRenderer.invoke('app:install-update'),
   openReleasePage: () => ipcRenderer.invoke('app:open-release-page'),
   showItemInFolder: (filePath: string) => ipcRenderer.invoke('app:show-item-in-folder', { path: filePath }),
 }
