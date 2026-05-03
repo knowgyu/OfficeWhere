@@ -20,7 +20,7 @@ Use this checklist before publishing a release tag.
 ## File/library scale UX
 - [ ] File Manager shows a bounded page, not the full registered file list.
 - [ ] File Manager search narrows the file page.
-- [ ] Join Query can find Excel files through the paged picker.
+- [ ] File Manager search/paging still helps users find registered Excel files without exposing unfinished merge screens.
 
 ## Version management
 - [ ] Same Office filename in two folders appears as a “same filename” group.
@@ -38,7 +38,7 @@ Use this checklist before publishing a release tag.
 - [ ] Excel version history uses cell/used-range comparison and does not rely on saved table/parser settings.
 - [ ] Version Management auto-detected groups remain one column on a wide screen.
 - [ ] Version group cards do not show `최신 후보` / `이전 후보` labels.
-- [ ] Excel Integration shows a visible development-warning notice at the top.
+- [ ] Main navigation does not expose unfinished Excel merge/preview surfaces.
 - [ ] The Excel grid highlights added/removed/changed cells in green/red/yellow and cell click shows detailed history.
 - [ ] Large Excel grids show partial-range guidance and keep horizontal scrolling, including Shift + mouse wheel.
 - [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.

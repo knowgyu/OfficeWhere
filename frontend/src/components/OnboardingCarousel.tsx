@@ -31,15 +31,15 @@ type Slide = {
 
 const slides: Slide[] = [
   {
-    eyebrow: 'Find',
+    eyebrow: '문서 찾기',
     title: '흩어진 문서를 빠르게 찾습니다',
-    description: '파일명과 본문을 함께 읽어 필요한 문서를 바로 찾습니다.',
-    proof: '프로젝트를 검색하면 파일명과 본문 속 문서까지 이어집니다.',
+    description: '파일명과 문서 내용을 함께 살펴 필요한 문서를 바로 찾습니다.',
+    proof: '프로젝트를 검색하면 파일명과 문서 내용 속 결과까지 이어집니다.',
     accent: '#4257b2',
     previewTitle: '프로젝트 검색',
     previewSubtitle: 'A 프로젝트 본문 결과 8개',
-    metric: '파일명 + 본문',
-    chips: ['프로젝트 검색', '본문 미리보기', '로컬 색인'],
+    metric: '파일명 + 내용',
+    chips: ['프로젝트 검색', '본문 미리보기', '내 PC에서 확인'],
     rows: [
       { icon: 'description', title: '주간보고_v4.0_260517.docx', meta: '회의 액션아이템 · 본문 일치', state: 'Word' },
       { icon: 'slideshow', title: '프로젝트상태_v4.0_260517.pptx', meta: '릴리즈 후보 준비 · 슬라이드 2', state: 'PPT' },
@@ -47,7 +47,7 @@ const slides: Slide[] = [
     ],
   },
   {
-    eyebrow: 'Compare',
+    eyebrow: '변경 확인',
     title: '버전 차이를 바로 봅니다',
     description: '비슷한 파일을 묶고 바뀐 부분만 먼저 보여줍니다.',
     proof: 'PPT 슬라이드와 Excel 값 변경을 증거 중심으로 확인합니다.',
@@ -63,17 +63,17 @@ const slides: Slide[] = [
     ],
   },
   {
-    eyebrow: 'Try',
+    eyebrow: '첫 실행',
     title: '예제로 핵심만 둘러보세요',
     description: '강조된 곳을 따라가며 검색, 버전 차이, 셀 변경을 확인합니다.',
-    proof: '원본 문서는 건드리지 않고 준비된 예제로 확인합니다.',
+    proof: '준비된 예제로 확인하며 원본 문서는 수정하지 않습니다.',
     accent: '#146c2e',
     previewTitle: '예제 둘러보기 경로',
-    previewSubtitle: '6단계 안내 · 직접 클릭',
-    metric: '3분 체험',
+    previewSubtitle: '핵심 흐름 안내 · 직접 클릭',
+    metric: '짧은 체험',
     chips: ['프로젝트 검색', '문서 새로고침', '표로 보기'],
     rows: [
-      { icon: 'folder_open', title: '예제 폴더 지정', meta: 'officewhere_test_library', state: '1' },
+      { icon: 'folder_open', title: '예제 폴더 지정', meta: '예제 문서 폴더', state: '1' },
       { icon: 'search', title: '프로젝트 검색', meta: '검색 결과를 확인하고 버전으로 이동', state: '2' },
       { icon: 'grid_on', title: 'Excel 표로 보기', meta: '셀 단위 변경점을 표에서 확인', state: '3' },
     ],
@@ -166,9 +166,14 @@ export default function OnboardingCarousel({
 
               <div className="flex flex-wrap items-center gap-3">
                 {!isLast ? (
-                  <Button size="lg" trailingIcon="arrow_forward" onClick={() => setIndex((value) => value + 1)}>
-                    다음
-                  </Button>
+                  <>
+                    <Button size="lg" trailingIcon="arrow_forward" onClick={() => setIndex((value) => value + 1)}>
+                      다음
+                    </Button>
+                    <Button size="lg" variant="outlined" leadingIcon="folder_open" onClick={onStartOwnFolder}>
+                      내 폴더로 바로 시작
+                    </Button>
+                  </>
                 ) : (
                   <>
                     <Button size="lg" leadingIcon="play_circle" className="attention-pulse" onClick={onStartExample}>
@@ -209,7 +214,7 @@ function ProductPreview({ slide }: { slide: Slide }) {
             <span className="h-2.5 w-2.5 rounded-full bg-[#22c55e]" />
           </div>
           <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-1 text-[0.72rem] font-medium text-slate-300">
-            Local · Read-only
+            내 PC · 원본 보존
           </div>
         </div>
 
@@ -218,13 +223,13 @@ function ProductPreview({ slide }: { slide: Slide }) {
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-[0.72rem] font-semibold uppercase tracking-[0.16em] text-white/40">
-                  Workspace Preview
+                  문서 미리보기
                 </p>
                 <h2 className="mt-2 text-2xl font-medium tracking-[-0.04em] text-white">{slide.previewTitle}</h2>
                 <p className="mt-1 text-sm text-slate-400">{slide.previewSubtitle}</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_20%,transparent)] px-3 py-2 text-right">
-                <p className="text-[0.68rem] uppercase tracking-[0.12em] text-white/50">Mode</p>
+                <p className="text-[0.68rem] uppercase tracking-[0.12em] text-white/50">보기</p>
                 <p className="mt-1 text-sm font-semibold text-white">{slide.metric}</p>
               </div>
             </div>
@@ -267,9 +272,9 @@ function ProductPreview({ slide }: { slide: Slide }) {
       <div className="absolute -right-3 bottom-8 hidden w-44 rounded-2xl border border-white/10 bg-white/[0.08] p-3 text-white shadow-[0_18px_44px_rgba(0,0,0,0.28)] backdrop-blur-xl md:block">
         <div className="flex items-center gap-2 text-[0.72rem] font-medium text-white/60">
           <span className="h-2 w-2 rounded-full bg-[var(--ow-onboarding-accent)]" />
-          Guided step
+          안내
         </div>
-        <p className="mt-2 text-sm leading-5 text-white/[0.85]">빛나는 곳에서 결과를 확인하세요.</p>
+        <p className="mt-2 text-sm leading-5 text-white/[0.85]">강조된 곳에서 결과를 확인하세요.</p>
       </div>
     </div>
   )

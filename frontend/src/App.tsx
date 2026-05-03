@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
 
 import FileManager from './components/FileManager'
-import JoinQuery from './components/JoinQuery'
 import ConsistencyCheck from './components/ConsistencyCheck'
 import FileSearch from './components/FileSearch'
 import OnboardingCarousel from './components/OnboardingCarousel'
@@ -12,7 +11,7 @@ import { useLibraryRescan } from './contexts/LibraryRescanContext'
 import { useDisplaySettings } from './contexts/DisplaySettingsContext'
 import { TutorialStep } from './tutorial'
 
-type Tab = 'search' | 'check' | 'join' | 'files'
+type Tab = 'search' | 'check' | 'files'
 
 interface TabDef {
   id: Tab
@@ -39,14 +38,6 @@ const TABS: TabDef[] = [
     icon: 'history',
     iconFilled: 'history',
     hint: '같은 문서의 여러 버전에서 무엇이 바뀌었는지 확인합니다',
-  },
-  {
-    id: 'join',
-    label: 'Excel 통합',
-    short: '통합',
-    icon: 'table_chart',
-    iconFilled: 'table_chart',
-    hint: '여러 Excel 표를 한 화면에서 비교·정리합니다',
   },
   {
     id: 'files',
@@ -133,13 +124,13 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'document-refresh': {
     eyebrow: 'Step 2 · 문서 준비',
     title: '문서 새로고침을 눌러보세요',
-    description: '파일이 바뀌었을 때 이 버튼으로 다시 색인합니다.',
+    description: '파일이 바뀌었을 때 이 버튼으로 다시 확인합니다.',
     icon: 'sync',
   },
   search: {
     eyebrow: 'Step 3 · 문서 검색',
     title: '프로젝트로 검색해 보세요',
-    description: '예제 문서의 파일명과 본문을 함께 찾습니다.',
+    description: '예제 문서의 파일명과 내용을 함께 찾습니다.',
     icon: 'search',
   },
   'search-results': {
@@ -150,8 +141,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'search-review': {
     eyebrow: '검색 결과',
-    title: '본문 속 매칭을 찾았어요',
-    description: '빛나는 줄이 실제 검색된 위치입니다.',
+    title: '문서 내용에서 찾았어요',
+    description: '강조된 줄에서 검색어가 나온 위치를 확인합니다.',
     icon: 'visibility',
   },
   'version-ppt': {
@@ -306,10 +297,8 @@ export default function App() {
   const snackbar = useSnackbar()
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     if (typeof window === 'undefined') return 'search'
-    const stored = (
-      window.localStorage.getItem(LS_TAB) ?? window.localStorage.getItem(LEGACY_LS_TAB)
-    ) as Tab | null
-    return stored && TABS.some((tab) => tab.id === stored) ? stored : 'search'
+    const stored = window.localStorage.getItem(LS_TAB) ?? window.localStorage.getItem(LEGACY_LS_TAB)
+    return stored && TABS.some((tab) => tab.id === stored) ? (stored as Tab) : 'search'
   })
   const [onboardingOpen, setOnboardingOpen] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -363,7 +352,7 @@ export default function App() {
         setActiveTab('files')
         snackbar.warn(
           response.data.message ||
-            '색인 구조가 정리되었습니다. 원본 문서는 그대로이며 대상 폴더를 다시 새로고침해 주세요.',
+            '문서 목록을 다시 준비해야 합니다. 원본 문서는 그대로이며 대상 폴더를 다시 새로고침해 주세요.',
           8000,
         )
       } catch {
@@ -562,7 +551,6 @@ export default function App() {
                 onTutorialStep={handleTutorialStep}
               />
             )}
-            {activeTab === 'join' && <JoinQuery />}
             {activeTab === 'check' && (
               <ConsistencyCheck
                 tutorialStep={tutorialStep}

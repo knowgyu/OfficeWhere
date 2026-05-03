@@ -41,7 +41,7 @@ export default function AppDataManagementSection({
     <Card variant="outlined">
       <CardSection
         title="앱 데이터 관리"
-        description="문제 해결이 필요할 때만 검색 색인과 앱 설정을 초기화합니다. 원본 문서는 삭제하지 않습니다."
+        description="문제 해결이 필요할 때만 검색 준비 데이터와 앱 설정을 초기화합니다. 원본 문서는 삭제하지 않습니다."
         className="p-3"
         trailing={
           appDataAvailable ? (
@@ -62,8 +62,8 @@ export default function AppDataManagementSection({
         {!appDataAvailable ? (
           <EmptyState
             icon="desktop_windows"
-            title="Electron 앱에서만 사용할 수 있습니다"
-            description="브라우저/개발 서버 모드에서는 앱 userData 경로를 안전하게 확인할 수 없어 삭제 기능을 비활성화합니다."
+            title="데스크톱 앱에서만 사용할 수 있습니다"
+            description="현재 실행 환경에서는 앱 데이터 경로를 안전하게 확인할 수 없어 삭제 기능을 비활성화합니다."
             compact
           />
         ) : appDataPaths.length === 0 ? (
@@ -83,7 +83,7 @@ export default function AppDataManagementSection({
                       검색/앱 설정 초기화
                     </p>
                     <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                      색인, 화면 설정, 임시 캐시를 다음 실행 때 새로 만듭니다.
+                      검색 준비 데이터, 화면 설정, 임시 데이터를 다음 실행 때 새로 만듭니다.
                     </p>
                   </div>
                   <Badge tone={safeResetIds.length > 0 ? 'success' : 'neutral'}>
@@ -185,7 +185,7 @@ export default function AppDataManagementSection({
           <div className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-2">
             <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">최근 삭제 결과</p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              backend 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개
+              문서 서비스 종료 {clearAppDataResult.backendStopped ? '확인' : '타임아웃'} · 삭제 {clearAppDataResult.deleted.length}개 · 실패 {clearAppDataResult.failed.length}개
               {clearAppDataResult.restartScheduled
                 ? ' · 앱 재시작 예약'
                 : clearAppDataResult.exitScheduled

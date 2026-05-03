@@ -48,20 +48,20 @@ import RegisteredFilesSection from './file-manager/RegisteredFilesSection'
 import PreviewPanel from './PreviewPanel'
 
 function rescanTitle(status: LibraryRescanStatus | null, rescanning: boolean) {
-  if (!rescanning && status?.stage === 'failed') return '대상 폴더 색인 실패'
-  if (!rescanning && status?.stage === 'cancelled') return '대상 폴더 색인 정지됨'
-  if (!rescanning) return '최근 색인 결과'
+  if (!rescanning && status?.stage === 'failed') return '대상 폴더 확인 실패'
+  if (!rescanning && status?.stage === 'cancelled') return '대상 폴더 확인 정지됨'
+  if (!rescanning) return '최근 문서 확인 결과'
   if (status?.stage === 'scanning') return '대상 폴더 스캔 중'
-  if (status?.stage === 'indexing') return '변경 확인 및 파일 색인 중'
-  if (status?.stage === 'saving') return '색인 결과 저장 중'
+  if (status?.stage === 'indexing') return '변경된 파일 확인 중'
+  if (status?.stage === 'saving') return '확인 결과 저장 중'
   if (status?.stage === 'cancelling') return '정지 요청 처리 중'
-  return '대상 폴더 색인 준비 중'
+  return '대상 폴더 확인 준비 중'
 }
 
 function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescanResponse | null, rescanning: boolean) {
   if (rescanning && status) {
     const foundText = `발견 ${status.found}개`
-    const modeText = status.mode === 'fast' ? `고속 · 작업 ${status.worker_count}개` : ''
+    const modeText = status.mode === 'fast' ? `빠르게 확인 중` : ''
     const progressText =
       status.total > 0
         ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}%`
@@ -509,7 +509,7 @@ export default function FileManager({
     const excludedFolderNames = normalizeExcludedFolderNames(excludedFolderDraft)
     const saved = await saveLibrarySettings(
       { ...librarySettings, fast_worker_count: value, excluded_folder_names: excludedFolderNames },
-      '색인 성능 설정을 저장했습니다.',
+      '문서 확인 속도 설정을 저장했습니다.',
     )
     if (saved) setIndexSettingsOpen(false)
   }
@@ -894,7 +894,7 @@ export default function FileManager({
       <Card variant="elevated">
         <CardSection
           title="대상 폴더"
-          description="자주 쓰는 문서 폴더를 등록하면 검색과 버전 관리에 사용합니다. 앱은 원본 문서를 읽어 색인하며, 파일을 수정하거나 이동하지 않습니다."
+          description="자주 쓰는 문서 폴더를 등록하면 검색과 버전 관리에 사용합니다. 앱은 원본 문서를 읽기만 하며, 파일을 수정하거나 이동하지 않습니다."
           trailing={
             <div className="flex items-center justify-end gap-2 flex-wrap">
               <Button
@@ -903,7 +903,7 @@ export default function FileManager({
                 onClick={() => setIndexSettingsOpen(true)}
                 disabled={settingsLoading}
               >
-                색인 성능 설정
+                문서 확인 속도 설정
               </Button>
               <Button
                 variant="filled"
@@ -913,7 +913,7 @@ export default function FileManager({
                 disabled={settingsLoading || rescanning || librarySettings.watched_folders.length === 0}
                 className={tutorialStep === 'document-refresh' ? 'attention-pulse tour-target' : ''}
                 data-tour-target={tutorialStep === 'document-refresh' ? 'document-refresh' : undefined}
-                title="새 파일이나 수정된 파일을 다시 색인합니다."
+                title="새 파일이나 수정된 파일을 다시 확인합니다."
               >
                 문서 새로고침
               </Button>
@@ -1261,8 +1261,8 @@ export default function FileManager({
         onClose={() => setIndexSettingsOpen(false)}
         size="md"
         icon="tune"
-        title="색인 성능 설정"
-        description="동시에 처리할 문서 수와 스캔에서 건너뛸 폴더 이름을 정합니다."
+        title="문서 확인 속도 설정"
+        description="한 번에 확인할 문서 수와 건너뛸 폴더 이름을 정합니다."
         actions={
           <>
             <Button variant="text" onClick={() => setIndexSettingsOpen(false)}>
@@ -1283,7 +1283,7 @@ export default function FileManager({
           <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">작업 수</p>
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">동시 확인 수</p>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                   높을수록 빨라질 수 있지만 CPU/RAM/디스크 사용량이 늘어납니다.
                 </p>
@@ -1299,7 +1299,7 @@ export default function FileManager({
                   {indexWorkerDraft}
                 </p>
                 <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
-                  worker
+                  개 동시 확인
                 </p>
               </div>
               <div className="text-right type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
@@ -1315,7 +1315,7 @@ export default function FileManager({
               value={indexWorkerDraft}
               onChange={(event) => setIndexWorkerDraft(normalizeIndexWorkerCount(Number(event.target.value)))}
               className="w-full accent-[var(--md-sys-color-primary)]"
-              aria-label="색인 worker 수"
+              aria-label="동시 문서 확인 수"
             />
             <div className="grid grid-cols-4 gap-2 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">
               {[4, 16, 24, 32].map((value) => (
@@ -1341,7 +1341,7 @@ export default function FileManager({
               <div>
                 <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">제외 폴더</p>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  이름이 같은 폴더는 스캔하지 않습니다. 개발 산출물·캐시 폴더를 건너뛰면 큰 폴더에서도 빠르게 시작합니다.
+                  이름이 같은 폴더는 확인하지 않습니다. 불필요한 폴더를 건너뛰면 큰 폴더에서도 빠르게 시작합니다.
                 </p>
               </div>
               <Button
@@ -1400,7 +1400,7 @@ export default function FileManager({
           </div>
 
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            네트워크 폴더나 외장 저장장치에서는 작업 수를 너무 높이면 오히려 느려질 수 있습니다. 제외 폴더는 이름 기준으로만 적용됩니다.
+            네트워크 폴더나 외장 저장장치에서는 동시 확인 수를 너무 높이면 오히려 느려질 수 있습니다. 제외 폴더는 이름 기준으로만 적용됩니다.
           </p>
         </div>
       </Dialog>
@@ -1502,7 +1502,7 @@ export default function FileManager({
         size="sm"
         icon="delete_forever"
         title="전체 등록 해제"
-        description={`${fileTotal}개 파일의 등록 정보와 검색 인덱스를 모두 제거합니다.`}
+        description={`${fileTotal}개 파일의 등록 정보와 검색 준비 데이터를 모두 제거합니다.`}
         actions={
           <>
             <Button variant="text" onClick={() => setConfirmClearAllFilesOpen(false)} disabled={deletingFiles}>
@@ -1523,7 +1523,7 @@ export default function FileManager({
       >
         <div className="space-y-3">
           <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-            앱의 등록 목록과 검색 인덱스만 비웁니다. 원본 문서와 대상 폴더는 삭제하거나 이동하지 않습니다.
+            앱의 등록 목록과 검색 준비 데이터만 비웁니다. 원본 문서와 대상 폴더는 삭제하거나 이동하지 않습니다.
           </p>
           <div className="rounded-md border border-[var(--md-sys-color-error)]/40 bg-[var(--md-sys-color-error-container)]/20 p-3">
             <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">다시 검색하려면 문서 새로고침이 필요합니다.</p>
@@ -1540,7 +1540,7 @@ export default function FileManager({
         size="sm"
         icon="delete"
         title={confirmDeleteFiles.length > 1 ? `${confirmDeleteFiles.length}개 파일 등록 해제` : '등록 해제'}
-        description={confirmDeleteFiles.length === 1 ? confirmDeleteFiles[0]?.name : '선택한 파일의 등록 정보와 검색 인덱스를 제거합니다.'}
+        description={confirmDeleteFiles.length === 1 ? confirmDeleteFiles[0]?.name : '선택한 파일의 등록 정보와 검색 준비 데이터를 제거합니다.'}
         actions={
           <>
             <Button variant="text" onClick={() => setConfirmDeleteFiles([])} disabled={deletingFiles}>
@@ -1560,7 +1560,7 @@ export default function FileManager({
         }
       >
         <p className="type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-          앱 목록과 검색 인덱스에서만 제거합니다. 원본 파일은 삭제하거나 이동하지 않습니다.
+          앱 목록과 검색 준비 데이터에서만 제거합니다. 원본 파일은 삭제하거나 이동하지 않습니다.
         </p>
         {confirmDeleteFiles.length > 1 && (
           <div className="mt-3 max-h-48 space-y-2 overflow-auto rounded-md bg-[var(--md-sys-color-surface-container-lowest)] p-2">

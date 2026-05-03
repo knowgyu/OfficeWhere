@@ -949,7 +949,7 @@ export default function ConsistencyCheck({
 
           {groupIndexState.stale && (
             <div className="mx-5 rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-secondary-container)]/45 px-4 py-3 type-body-sm text-[var(--md-sys-color-on-secondary-container)]">
-              <span className="font-medium">문서 묶음 정보를 백그라운드에서 준비 중입니다.</span>
+              <span className="font-medium">문서 묶음 정보를 준비 중입니다.</span>
               <span className="ml-2 text-[var(--md-sys-color-on-surface-variant)]">
                 준비된 결과를 먼저 보여주고, 완료되면 자동으로 새로고침합니다.
               </span>
@@ -1043,7 +1043,7 @@ export default function ConsistencyCheck({
       <Card id="manual-version-picker" variant="outlined">
         <CardSection
           title="수동으로 직접 고르기"
-          description="자동 그룹에 없는 특수 케이스만 열어서 사용하세요. 1만 개 문서에서도 현재 페이지와 검색 결과만 보여줍니다."
+          description="자동 그룹에 없는 문서를 비교할 때만 열어 사용하세요. 현재 페이지와 검색 결과만 보여줍니다."
           trailing={
             <Button
               variant={manualOpen ? 'tonal' : 'outlined'}
@@ -1056,7 +1056,7 @@ export default function ConsistencyCheck({
         >
           <div className="flex items-center gap-2 flex-wrap">
             <Chip label={`선택 ${selectedFiles.length}개`} tone="primary" icon="task_alt" as="span" />
-            {selectedMode && <Chip label={`모드 · ${selectedMode.toUpperCase()}`} tone="secondary" as="span" />}
+            {selectedMode && <Chip label={`비교 방식 · ${selectedMode.toUpperCase()}`} tone="secondary" as="span" />}
             {selectedFiles.slice(0, 3).map((file) => (
               <Chip key={file.id} label={file.name} tone="neutral" as="span" />
             ))}
@@ -1156,9 +1156,9 @@ export default function ConsistencyCheck({
                           </div>
                           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
                             {unsupported
-                              ? '검색 등록 가능 · 변경점 확인 제외'
+                              ? '검색에는 사용할 수 있음 · 변경점 확인 제외'
                               : fileMode === 'excel'
-                                ? '셀 좌표 기준 · 여러 파일 비교'
+                                ? '셀 위치 기준 · 여러 파일 비교'
                                 : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
                           </p>
                         </div>

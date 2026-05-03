@@ -99,9 +99,9 @@ export function LibraryRescanProvider({ children }: { children: ReactNode }) {
     observedRunningRef.current = false
     snackbar.success(
       reasonRef.current === 'added'
-        ? `폴더 추가 및 색인 완료 · 등록/확인 ${currentSummary.registered + currentSummary.updated + currentSummary.skipped} · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`
+        ? `폴더 추가 및 문서 확인 완료 · 등록/확인 ${currentSummary.registered + currentSummary.updated + currentSummary.skipped} · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`
         : reasonRef.current === 'fast'
-          ? `고속 색인 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`
+          ? `빠른 문서 확인 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`
         : `문서 새로고침 완료 · 신규 ${currentSummary.registered} · 갱신 ${currentSummary.updated}${unchangedText}`,
     )
   }, [snackbar, status, summary])

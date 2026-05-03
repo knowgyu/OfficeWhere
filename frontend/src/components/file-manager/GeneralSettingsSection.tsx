@@ -71,8 +71,8 @@ export default function GeneralSettingsSection({
           {!closeBehaviorAvailable ? (
             <EmptyState
               icon="desktop_windows"
-              title="Electron 앱에서만 사용할 수 있습니다"
-              description="브라우저/개발 서버 모드에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
+              title="데스크톱 앱에서만 사용할 수 있습니다"
+              description="현재 실행 환경에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
               compact
             />
           ) : (
@@ -103,7 +103,7 @@ export default function GeneralSettingsSection({
                       ? '창을 닫을 때마다 백그라운드 실행/종료/취소를 고를 수 있습니다.'
                       : closeBehavior === 'hide'
                         ? '창을 닫으면 트레이에 남고, 트레이 메뉴에서 열기 또는 종료를 선택할 수 있습니다.'
-                        : '창을 닫으면 앱과 백그라운드 색인이 함께 종료됩니다.'}
+                        : '창을 닫으면 앱과 자동 문서 확인이 함께 종료됩니다.'}
                   </p>
                 </div>
               </div>

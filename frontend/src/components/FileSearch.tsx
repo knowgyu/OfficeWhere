@@ -26,21 +26,21 @@ const FILE_TYPE_FILTERS = [
 ]
 
 const SEARCH_SCOPE_STATUS: Record<SearchScope, string> = {
-  filename_content: '파일명과 본문을 함께 검색',
+  filename_content: '파일명과 내용 함께 검색',
   filename: '파일명만 검색',
-  content: '본문만 검색',
+  content: '문서 내용만 검색',
 }
 
 const SEARCH_SCOPE_DESCRIPTION: Record<SearchScope, string> = {
-  filename_content: '파일 이름과 색인된 문서 본문을 함께 찾습니다.',
+  filename_content: '파일 이름과 문서 내용을 함께 찾습니다.',
   filename: '파일 이름에 검색어가 포함된 문서만 찾습니다.',
-  content: '색인된 문서 본문에서만 검색어를 찾고, 파일명 매칭은 제외합니다.',
+  content: '문서 내용에서만 검색어를 찾고, 파일명 일치는 제외합니다.',
 }
 
 const SEARCH_SCOPE_EMPTY: Record<SearchScope, string> = {
   filename_content: '오탈자를 확인하거나 더 짧은 키워드로 다시 시도해 보세요.',
-  filename: '파일명만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.',
-  content: '본문만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.',
+  filename: '파일명만 검색 중입니다. 파일명+내용으로 범위를 넓혀 보세요.',
+  content: '문서 내용만 검색 중입니다. 파일명+내용으로 범위를 넓혀 보세요.',
 }
 
 const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: string }> = {
@@ -50,11 +50,11 @@ const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: stri
   },
   filename: {
     title: '파일명으로 빠르게 검색',
-    description: '파일명만 찾거나 검색 범위를 파일명+본문으로 바꿔 문서 안의 단어까지 검색할 수 있습니다.',
+    description: '파일명만 찾거나 검색 범위를 파일명+내용으로 바꿔 문서 안의 단어까지 검색할 수 있습니다.',
   },
   content: {
-    title: '문서 본문만 정밀 검색',
-    description: '파일명 매칭을 제외하고 Excel, Word, PPT 문서의 색인된 본문에서만 검색합니다.',
+    title: '문서 내용만 정밀 검색',
+    description: '파일명 일치를 제외하고 Excel, Word, PPT 문서 내용에서만 검색합니다.',
   },
 }
 
@@ -488,7 +488,7 @@ export default function FileSearch({
       })
       setSettings(response.data)
       setSettingsOpen(false)
-      snackbar.success('검색 갱신 주기가 저장되었습니다.')
+      snackbar.success('검색 최신화 설정이 저장되었습니다.')
     } catch {
       snackbar.error('설정 저장에 실패했습니다.')
     }
@@ -651,7 +651,7 @@ export default function FileSearch({
             </Button>
             <IconButton
               icon={settingsOpen ? 'tune' : 'tune'}
-              label="검색 갱신 주기"
+              label="검색 최신화 설정"
               variant="outlined"
               onClick={() => setSettingsOpen((open) => !open)}
               selected={settingsOpen}
@@ -666,7 +666,7 @@ export default function FileSearch({
           {tutorialStep === 'search' && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-primary)]/20 bg-[var(--md-sys-color-primary-container)]/55 px-3 py-1 text-[var(--md-sys-color-on-primary-container)]">
               <Icon name="auto_awesome" size={16} />
-              프로젝트를 입력하면 파일명과 본문을 함께 찾아요
+              프로젝트를 입력하면 파일명과 내용을 함께 찾아요
             </span>
           )}
           {lastReindex && (
@@ -759,9 +759,9 @@ export default function FileSearch({
       {settingsOpen && settingsDraft && (
         <Card variant="elevated" className="console-panel p-5 space-y-4 animate-slide-up">
           <div>
-            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">검색 갱신 주기</p>
+            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">검색 최신화 설정</p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              검색 결과가 최신 상태가 되도록 변경된 파일만 다시 읽습니다.
+              검색 결과가 최신 상태가 되도록 변경된 파일만 다시 확인합니다.
             </p>
           </div>
           <div className="flex flex-col gap-2">
@@ -770,7 +770,7 @@ export default function FileSearch({
               checked={settingsDraft.mode === 'manual'}
               onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'manual' })}
               label="수동"
-              description="필요할 때 이 설정 영역에서 수동 갱신을 실행합니다."
+              description="필요할 때 이 설정 영역에서 직접 최신화합니다."
             />
             <Radio
               name="reindex-mode"
@@ -784,7 +784,7 @@ export default function FileSearch({
               checked={settingsDraft.mode === 'daily'}
               onChange={() => setSettingsDraft({ ...settingsDraft, mode: 'daily' })}
               label="매일 정시"
-              description="매일 지정한 시각에 검색 색인을 갱신합니다."
+              description="매일 지정한 시각에 검색 결과를 최신 상태로 준비합니다."
             />
           </div>
 
@@ -824,7 +824,7 @@ export default function FileSearch({
 
           <div className="flex justify-between gap-2 pt-1 flex-wrap">
             <Button variant="tonal" leadingIcon="refresh" onClick={handleReindex} loading={reindexing}>
-              지금 검색 색인 갱신
+              지금 검색 결과 최신화
             </Button>
             <div className="flex gap-2">
               <Button variant="text" onClick={() => setSettingsOpen(false)}>
@@ -873,7 +873,7 @@ export default function FileSearch({
               <Chip label={`수정일 ${activeModifiedDateLabel}`} tone="secondary" as="span" icon="event" />
             )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              먼저 {searchMeta.fileLimit}개 파일까지만 가볍게 보여줍니다
+              관련도 높은 결과부터 가볍게 보여줍니다
               {prefetching ? ' · 다음 결과 준비 중' : ''}
             </span>
             {contentFileKeys.length > 0 && (

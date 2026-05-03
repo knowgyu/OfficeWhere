@@ -816,7 +816,7 @@ async function handleMainWindowClose() {
       type: 'question',
       title: 'OfficeWhere 닫기',
       message: '창을 닫으면 어떻게 할까요?',
-      detail: '백그라운드에서 계속 실행하면 트레이에 남아 자동 색인을 계속 수행할 수 있습니다.',
+      detail: '백그라운드에서 계속 실행하면 트레이에 남아 문서 변경을 자동으로 확인할 수 있습니다.',
       buttons: ['백그라운드에서 계속 실행', '종료', '취소'],
       defaultId: 0,
       cancelId: 2,
@@ -907,8 +907,8 @@ async function startBackendWithRetry() {
 
   const detail = errorToMessage(lastError)
   dialog.showErrorBox(
-      'OfficeWhere backend 시작 실패',
-    `Python backend를 시작하지 못했습니다.\n\n${detail}\n\n로그: ${backendLogPath || '생성되지 않음'}`
+    'OfficeWhere 문서 서비스 시작 실패',
+    `문서 서비스를 시작하지 못했습니다.\n\n${detail}\n\n진단 기록: ${backendLogPath || '생성되지 않음'}`,
   )
   throw lastError
 }
@@ -972,8 +972,8 @@ async function startBackend(port: number) {
 
     if (!expectedExit) {
       dialog.showErrorBox(
-        'OfficeWhere backend 종료',
-        `Python backend가 예기치 않게 종료되었습니다.\n\n로그: ${backendLogPath}`
+        'OfficeWhere 문서 서비스 종료',
+        `문서 서비스를 다시 시작해야 합니다.\n\n진단 기록: ${backendLogPath}`,
       )
       requestAppQuit(1)
     }
@@ -1131,66 +1131,66 @@ async function buildAppDataCandidates(): Promise<AppDataCandidate[]> {
   const candidates: AppDataCandidate[] = [
     {
       id: 'backend-data',
-      label: 'Backend database and index',
+      label: 'Search and app data',
       path: path.join(userData, 'backend-data'),
       exists: false,
-      description: 'Electron 실행에서 사용하는 data.db, WAL/SHM, 검색 색인 데이터입니다.',
+      description: '앱이 검색과 문서 목록을 준비할 때 사용하는 데이터입니다.',
       allowedRoot: userData,
     },
     {
       id: 'logs',
-      label: 'Application logs',
+      label: 'Application diagnostics',
       path: logs,
       exists: false,
-      description: 'Backend 실행 로그와 앱 진단 로그입니다.',
+      description: '문제 해결에 사용하는 앱 진단 기록입니다.',
       allowedRoot: userData,
     },
     {
       id: 'chromium-cache',
-      label: 'Chromium cache',
+      label: 'Temporary display cache',
       path: path.join(sessionData, 'Cache'),
       exists: false,
-      description: 'Electron Chromium HTTP/cache 파일입니다.',
+      description: '화면 표시 속도를 위해 보관된 임시 데이터입니다.',
       allowedRoot: sessionData,
     },
     {
       id: 'chromium-code-cache',
-      label: 'Chromium code cache',
+      label: 'Temporary app cache',
       path: path.join(sessionData, 'Code Cache'),
       exists: false,
-      description: 'Electron renderer JavaScript code cache입니다.',
+      description: '앱 화면을 빠르게 열기 위한 임시 데이터입니다.',
       allowedRoot: sessionData,
     },
     {
       id: 'chromium-local-storage',
-      label: 'Chromium local/session storage',
+      label: 'Window session data',
       path: path.join(sessionData, 'Local Storage'),
       exists: false,
-      description: 'Electron localStorage 등 renderer 저장 데이터입니다.',
+      description: '창 상태와 앱 세션에 필요한 저장 데이터입니다.',
       allowedRoot: sessionData,
     },
     {
       id: 'chromium-session-storage',
-      label: 'Chromium session storage',
+      label: 'Temporary session data',
       path: path.join(sessionData, 'Session Storage'),
       exists: false,
-      description: 'Electron sessionStorage 관련 데이터입니다.',
+      description: '현재 세션에 필요한 임시 데이터입니다.',
       allowedRoot: sessionData,
     },
     {
       id: 'chromium-gpu-cache',
-      label: 'Chromium GPU cache',
+      label: 'Temporary graphics cache',
       path: path.join(sessionData, 'GPUCache'),
       exists: false,
-      description: 'Electron GPU 렌더링 cache입니다.',
+      description: '화면 표시를 빠르게 하기 위한 그래픽 임시 데이터입니다.',
       allowedRoot: sessionData,
     },
     {
       id: 'legacy-home-data',
-      label: 'Legacy direct-backend data',
+      label: 'Previous app data',
       path: legacyHomeData,
       exists: false,
-      description: '직접 backend 실행 시 사용하던 ~/.officewhere 데이터입니다.',
+      description: '이전 실행 방식에서 사용하던 앱 데이터입니다.',
       allowedRoot: app.getPath('home'),
     },
   ]
@@ -1198,20 +1198,20 @@ async function buildAppDataCandidates(): Promise<AppDataCandidate[]> {
   if (crashDumps) {
     candidates.push({
       id: 'crash-dumps',
-      label: 'Crash dumps',
+      label: 'Crash reports',
       path: crashDumps,
       exists: false,
-      description: 'Electron/Chromium crash dump 파일입니다.',
+      description: '오류 원인 확인에 사용하는 충돌 보고서입니다.',
       allowedRoot: path.dirname(crashDumps),
     })
   }
 
   candidates.push({
     id: 'user-data-root',
-    label: 'Full Electron userData reset',
+    label: 'Full app profile reset',
     path: userData,
     exists: false,
-    description: 'OfficeWhere Electron 프로필 전체입니다. 원본 문서는 삭제하지 않지만 앱 설정/세션이 초기화됩니다.',
+    description: 'OfficeWhere 앱 프로필 전체입니다. 원본 문서는 삭제하지 않지만 앱 설정과 세션이 초기화됩니다.',
     dangerous: true,
     allowedRoot: appData,
   })

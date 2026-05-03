@@ -94,7 +94,7 @@ export default function RegisteredFilesSection({
               등록된 파일 <span className="text-[var(--md-sys-color-on-surface-variant)]">({fileTotal})</span>
             </h3>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              전체 목록을 한 번에 띄우지 않고 최근 50개 또는 검색 결과만 보여줍니다. 등록 해제는 앱 목록과 검색 인덱스에서만 제거하며 원본 파일은 삭제하지 않습니다.
+              등록한 문서는 최근 항목과 검색 결과 중심으로 보여줍니다. 등록 해제는 앱 목록과 검색 준비 데이터에서만 제거하며 원본 파일은 삭제하지 않습니다.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
