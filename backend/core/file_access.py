@@ -64,8 +64,8 @@ def pick_local_file() -> str:
             parent=root,
             title="등록할 파일 선택",
             filetypes=[
-                ("지원 파일", "*.xlsx *.xls *.docx *.pptx"),
-                ("Excel", "*.xlsx *.xls"),
+                ("지원 파일", "*.xlsx *.docx *.pptx"),
+                ("Excel", "*.xlsx"),
                 ("Word", "*.docx"),
                 ("PowerPoint", "*.pptx"),
                 ("모든 파일", "*.*"),

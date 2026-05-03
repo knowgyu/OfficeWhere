@@ -40,7 +40,7 @@ export function FileTypeBadge({ fileType }: { fileType: string }) {
   let label = fileType || 'Unknown'
   let tone: Tone = 'neutral'
   let icon = 'description'
-  if (raw.includes('excel') || raw === 'xlsx' || raw === 'xls') {
+  if (raw.includes('excel') || raw === 'xlsx') {
     tone = 'success'
     label = 'Excel'
     icon = 'table_chart'

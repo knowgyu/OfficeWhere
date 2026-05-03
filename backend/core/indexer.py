@@ -14,6 +14,7 @@ from ..database import (
     PPT_COMPARISON_PARSER_VERSION,
     WORD_COMPARISON_ARTIFACT_KIND,
     WORD_COMPARISON_PARSER_VERSION,
+    delete_files_by_extensions,
     delete_files_by_types,
     get_all_files,
     get_setting,
@@ -79,48 +80,34 @@ def _excel_used_range_inspection_and_chunks(path: str) -> Tuple[Dict[str, Any], 
         for used_range in used_ranges:
             sheet_name = used_range.sheet_name
             sheet_index = used_range.sheet_index
-            for dataframe_index, row in used_range.dataframe.iterrows():
-                excel_row = int(dataframe_index) + 1
-                for column_index, (column, value) in enumerate(row.items(), start=1):
-                    text = str(value).strip()
-                    if not text:
-                        continue
-                    location = f"{sheet_name} 시트 | {excel_row}행 {column}열"
-                    chunks.append(
-                        {
-                            "location": location,
-                            "content": text,
-                        }
-                    )
-                    excel_cells.append(
-                        {
-                            "sheet_name": sheet_name,
-                            "sheet_index": sheet_index,
-                            "row_number": excel_row,
-                            "column_index": column_index,
-                            "column_letter": str(column),
-                            "content": text,
-                            "location": location,
-                        }
-                    )
+            for cell in used_range.iter_non_empty_cells():
+                location = f"{sheet_name} 시트 | {cell['row_number']}행 {cell['column_letter']}열"
+                chunks.append(
+                    {
+                        "location": location,
+                        "content": cell["text"],
+                    }
+                )
+                excel_cells.append(
+                    {
+                        "sheet_name": sheet_name,
+                        "sheet_index": sheet_index,
+                        "row_number": cell["row_number"],
+                        "column_index": cell["column_index"],
+                        "column_letter": cell["column_letter"],
+                        "content": cell["text"],
+                        "location": location,
+                    }
+                )
 
         preview_range = next((item for item in used_ranges if item.non_empty_cell_count > 0), used_ranges[0])
-        df = preview_range.dataframe
         range_config = preview_range.range_config
         sheet_name = range_config["sheet_name"]
-        if df.empty:
-            columns: List[str] = []
-            sample: List[List[str]] = []
-        else:
-            header_values = [_excel_preview_text(value) for value in df.iloc[0].tolist()]
-            columns = [
-                header if header else str(fallback)
-                for header, fallback in zip(header_values, df.columns.tolist())
-            ]
-            sample = [
-                [_excel_preview_text(value) for value in row.tolist()]
-                for _, row in df.iloc[1:].head(5).iterrows()
-            ]
+        columns = preview_range.preview_columns()
+        sample = [
+            [_excel_preview_text(value) for value in row]
+            for row in preview_range.preview_sample()
+        ]
         inspection = {
             "columns": columns,
             "sample": sample,
@@ -269,7 +256,7 @@ def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, s
 
 def inspect_and_chunk(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     ext = Path(path).suffix.lower()
-    if ext in (".xlsx", ".xls"):
+    if ext == ".xlsx":
         inspection, chunks = _inspect_and_chunk_excel(path)
     elif ext == ".docx":
         inspection, chunks = _inspect_and_chunk_word(path)
@@ -303,7 +290,7 @@ def index_file(file_id: int, path: str) -> int:
         stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
         metrics["size_bytes"] = stat_result.st_size
         excel_index_payload: Dict[str, Any] = {}
-        if ext in (".xlsx", ".xls"):
+        if ext == ".xlsx":
             inspection, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _excel_used_range_inspection_and_chunks(path))
             excel_index_payload = {
                 "excel_sheets": inspection.get("excel_sheets", []),
@@ -387,7 +374,7 @@ def search(
 def reindex_all() -> Dict[str, int]:
     from concurrent.futures import ThreadPoolExecutor
 
-    pruned_legacy = delete_files_by_types(["Text", "Markdown"])
+    pruned_legacy = delete_files_by_types(["Text", "Markdown"]) + delete_files_by_extensions([".xls"])
     files = get_all_files()
 
     def _reindex_one(file_info: Dict[str, Any]) -> str:

@@ -4,9 +4,20 @@ from backend.models.schemas import LibraryRescanRequest, LibrarySettings
 
 
 def _write_excel(path, data: dict):
-    import pandas as pd
+    from openpyxl import Workbook
 
-    pd.DataFrame(data).to_excel(path, index=False)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Sheet1"
+    headers = list(data.keys())
+    worksheet.append(headers)
+    row_count = max((len(values) for values in data.values()), default=0)
+    for row_index in range(row_count):
+        worksheet.append([
+            values[row_index] if row_index < len(values) else ""
+            for values in data.values()
+        ])
+    workbook.save(path)
 
 
 def test_library_settings_interval_is_floored_and_minimum(tmp_path, monkeypatch):

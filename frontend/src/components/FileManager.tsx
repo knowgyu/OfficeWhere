@@ -1119,7 +1119,7 @@ export default function FileManager({
             )}
           </div>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            지원 형식 · .xlsx · .xls · .docx · .pptx
+            지원 형식 · .xlsx · .docx · .pptx
           </p>
         </CardSection>
       </Card>

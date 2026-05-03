@@ -171,12 +171,8 @@ def _source_excel_payload(file_info: Dict[str, Any]) -> Dict[str, Any]:
     for used_range in used_ranges:
         summary = used_range.sheet_summary()
         sheets[used_range.sheet_name] = summary
-        for dataframe_index, row in used_range.dataframe.iterrows():
-            row_number = int(dataframe_index) + 1
-            for column_index, (_column, value) in enumerate(row.items(), start=1):
-                text = _stringify_cell(value)
-                if text.strip():
-                    cells[(used_range.sheet_name, row_number, column_index)] = text
+        for cell in used_range.iter_non_empty_cells():
+            cells[(used_range.sheet_name, int(cell["row_number"]), int(cell["column_index"]))] = str(cell["text"])
     return {
         "info": file_info,
         "sheets": sheets,

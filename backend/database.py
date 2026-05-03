@@ -1145,6 +1145,25 @@ def _ensure_excel_index_version(cursor: sqlite3.Cursor) -> None:
     )
 
 
+def _prune_unsupported_file_extensions(cursor: sqlite3.Cursor) -> int:
+    """Remove app-owned records for formats no longer supported; never touches source files."""
+    cursor.execute("SELECT id FROM registered_files WHERE lower(path) LIKE '%.xls'")
+    file_ids = [int(row[0]) for row in cursor.fetchall()]
+    pruned = _delete_registered_file_ids_with_cursor(
+        cursor,
+        file_ids,
+        repair_reason="remove_unsupported_file_extensions",
+    )
+    if pruned:
+        log_index_perf(
+            "unsupported_records_pruned",
+            operation="db_init",
+            reason="remove_xls_support",
+            file_count=pruned,
+        )
+    return pruned
+
+
 def init_db():
     DB_DIR.mkdir(parents=True, exist_ok=True)
     with _write_connection() as conn:
@@ -1165,6 +1184,7 @@ def init_db():
                 ),
             )
 
+        _prune_unsupported_file_extensions(cursor)
         if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
             _refresh_search_text(cursor)
             _drop_current_search_indexes(cursor)
@@ -2021,21 +2041,36 @@ def search_file_names(
     return [dict(row) for row in rows]
 
 
+def _delete_registered_file_ids_with_cursor(
+    cursor: sqlite3.Cursor,
+    file_ids: Sequence[int],
+    *,
+    repair_reason: str,
+) -> int:
+    normalized_ids = [int(file_id) for file_id in file_ids]
+    if not normalized_ids:
+        return 0
+
+    id_placeholders = ",".join("?" for _ in normalized_ids)
+    cursor.execute(f"DELETE FROM file_chunks WHERE file_id IN ({id_placeholders})", normalized_ids)
+    cursor.execute(f"DELETE FROM document_fingerprints WHERE file_id IN ({id_placeholders})", normalized_ids)
+    cursor.execute(f"DELETE FROM excel_cell_index WHERE file_id IN ({id_placeholders})", normalized_ids)
+    cursor.execute(f"DELETE FROM excel_sheet_index WHERE file_id IN ({id_placeholders})", normalized_ids)
+    cursor.execute(f"DELETE FROM comparison_artifacts WHERE file_id IN ({id_placeholders})", normalized_ids)
+    cursor.execute(f"DELETE FROM library_group_index_files WHERE file_id IN ({id_placeholders})", normalized_ids)
+    cursor.execute(f"DELETE FROM library_group_members WHERE file_id IN ({id_placeholders})", normalized_ids)
+    cursor.execute(f"DELETE FROM registered_files WHERE id IN ({id_placeholders})", normalized_ids)
+    affected = cursor.rowcount
+    if affected:
+        cursor.execute("DELETE FROM comparison_cache")
+        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error=repair_reason)
+    return int(affected)
+
+
 def delete_file(file_id: int) -> bool:
     with _write_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM file_chunks WHERE file_id=?", (file_id,))
-        cursor.execute("DELETE FROM document_fingerprints WHERE file_id=?", (file_id,))
-        cursor.execute("DELETE FROM excel_cell_index WHERE file_id=?", (file_id,))
-        cursor.execute("DELETE FROM excel_sheet_index WHERE file_id=?", (file_id,))
-        cursor.execute("DELETE FROM comparison_artifacts WHERE file_id=?", (file_id,))
-        cursor.execute("DELETE FROM library_group_index_files WHERE file_id=?", (file_id,))
-        cursor.execute("DELETE FROM library_group_members WHERE file_id=?", (file_id,))
-        cursor.execute("DELETE FROM registered_files WHERE id=?", (file_id,))
-        affected = cursor.rowcount
-        if affected:
-            cursor.execute("DELETE FROM comparison_cache")
-            _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="delete_file")
+        affected = _delete_registered_file_ids_with_cursor(cursor, [file_id], repair_reason="delete_file")
         conn.commit()
         return affected > 0
 
@@ -2054,17 +2089,32 @@ def delete_files_by_types(file_types: Sequence[str]) -> int:
         if not file_ids:
             return 0
 
-        id_placeholders = ",".join("?" for _ in file_ids)
-        cursor.execute(f"DELETE FROM file_chunks WHERE file_id IN ({id_placeholders})", file_ids)
-        cursor.execute(f"DELETE FROM document_fingerprints WHERE file_id IN ({id_placeholders})", file_ids)
-        cursor.execute(f"DELETE FROM excel_cell_index WHERE file_id IN ({id_placeholders})", file_ids)
-        cursor.execute(f"DELETE FROM excel_sheet_index WHERE file_id IN ({id_placeholders})", file_ids)
-        cursor.execute(f"DELETE FROM comparison_artifacts WHERE file_id IN ({id_placeholders})", file_ids)
-        cursor.execute(f"DELETE FROM library_group_index_files WHERE file_id IN ({id_placeholders})", file_ids)
-        cursor.execute(f"DELETE FROM library_group_members WHERE file_id IN ({id_placeholders})", file_ids)
-        cursor.execute(f"DELETE FROM registered_files WHERE id IN ({id_placeholders})", file_ids)
-        cursor.execute("DELETE FROM comparison_cache")
-        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="delete_files_by_types")
+        _delete_registered_file_ids_with_cursor(cursor, file_ids, repair_reason="delete_files_by_types")
+        conn.commit()
+        return len(file_ids)
+
+
+def delete_files_by_extensions(extensions: Sequence[str]) -> int:
+    """Remove app-owned registrations/indexes by source path suffix without touching source files."""
+    normalized = []
+    for extension in extensions:
+        suffix = str(extension or "").strip().lower()
+        if not suffix:
+            continue
+        normalized.append(suffix if suffix.startswith(".") else f".{suffix}")
+    if not normalized:
+        return 0
+
+    clauses = " OR ".join("lower(path) LIKE ?" for _ in normalized)
+    params = [f"%{suffix}" for suffix in normalized]
+    with _write_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT id FROM registered_files WHERE {clauses}", params)
+        file_ids = [int(row[0]) for row in cursor.fetchall()]
+        if not file_ids:
+            return 0
+
+        _delete_registered_file_ids_with_cursor(cursor, file_ids, repair_reason="delete_files_by_extensions")
         conn.commit()
         return len(file_ids)
 

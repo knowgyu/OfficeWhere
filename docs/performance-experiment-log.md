@@ -70,7 +70,7 @@ Still plausible for corporate PCs.
 ### Narrow what gets indexed
 
 - Removed Text/Markdown from the target indexing scope.
-- Kept Office formats: `.xlsx`, `.xls`, `.docx`, `.pptx`.
+- Kept Office formats: `.xlsx`, `.docx`, `.pptx`.
 - Added default excluded folder names for common developer/build/cache directories.
 
 Why it mattered: scanning home/project roots should not waste time walking millions of irrelevant files in `node_modules`, virtualenvs, build folders, IDE metadata, and caches.

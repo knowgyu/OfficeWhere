@@ -22,6 +22,7 @@ from ..database import (
     begin_initial_index_staging,
     clear_library_group_index,
     delete_library_group_index_files,
+    delete_files_by_extensions,
     delete_files_by_types,
     ensure_file_fingerprints,
     get_all_files,
@@ -83,6 +84,7 @@ TARGETED_GROUP_INDEX_REPAIR_REASONS = {
     "save_indexed_files_batch",
     "delete_file",
     "delete_files_by_types",
+    "delete_files_by_extensions",
     "save_file_chunks",
     "update_file_mtime",
 }
@@ -218,7 +220,7 @@ def _cancelled_result(path: str) -> LibraryRescanResult:
 
 
 def _is_excel_path(path: str) -> bool:
-    return Path(path).suffix.lower() in {".xls", ".xlsx"}
+    return Path(path).suffix.lower() == ".xlsx"
 
 
 def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
@@ -344,7 +346,7 @@ def _rescan_library_impl(
     settings = load_library_settings()
     worker_count = _rescan_worker_count(mode, settings)
     rescan_started = time.perf_counter()
-    pruned_unsupported = delete_files_by_types(["Text", "Markdown"])
+    pruned_unsupported = delete_files_by_types(["Text", "Markdown"]) + delete_files_by_extensions([".xls"])
     if pruned_unsupported:
         log_index_perf(
             "unsupported_records_pruned",

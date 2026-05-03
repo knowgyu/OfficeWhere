@@ -194,13 +194,13 @@ def _build_excel_diff_grid_for_sheet(
     latest_info = file_infos[0]
     used_ranges = []
     for info in file_infos:
-        dataframe, parser = extract_excel_used_range(info["path"], sheet_name=target_sheet)
-        used_ranges.append((info, dataframe, parser))
-    latest_df = used_ranges[0][1]
+        used_range, parser = extract_excel_used_range(info["path"], sheet_name=target_sheet)
+        used_ranges.append((info, used_range, parser))
+    latest_range = used_ranges[0][1]
     range_config = used_ranges[0][2]
 
-    used_row_count = max((len(df.index) for _info, df, _config in used_ranges), default=0)
-    used_column_count = max((len(df.columns) for _info, df, _config in used_ranges), default=0)
+    used_row_count = max((used_range.row_count for _info, used_range, _config in used_ranges), default=0)
+    used_column_count = max((used_range.column_count for _info, used_range, _config in used_ranges), default=0)
     row_count = used_row_count + DISPLAY_ROW_MARGIN if used_row_count > 0 else 0
     column_count = used_column_count + DISPLAY_COL_MARGIN if used_column_count > 0 else 0
     columns = [_column_letter(index) for index in range(1, column_count + 1)]
@@ -212,26 +212,24 @@ def _build_excel_diff_grid_for_sheet(
     for row_index in range(row_count):
         _add_row_alias(row_number_lookup, row_index + 1, row_index)
 
-    def value_at(dataframe: Any, row_index: int, column_index: int) -> str:
-        if row_index >= len(dataframe.index) or column_index >= len(dataframe.columns):
-            return ""
-        return _stringify_cell(dataframe.iat[row_index, column_index])
+    def value_at(used_range: Any, row_index: int, column_index: int) -> str:
+        return _stringify_cell(used_range.value_at(row_index, column_index))
 
     def latest_value(row_index: int, column_index: int) -> str:
-        return value_at(latest_df, row_index, column_index)
+        return value_at(latest_range, row_index, column_index)
 
-    def register_header_aliases(dataframe: Any) -> None:
-        scan_rows = min(len(dataframe.index), 30)
-        scan_cols = min(len(dataframe.columns), column_count)
+    def register_header_aliases(used_range: Any) -> None:
+        scan_rows = min(used_range.row_count, 30)
+        scan_cols = min(used_range.column_count, column_count)
         for row_index in range(scan_rows):
-            row_values = [value_at(dataframe, row_index, column_index) for column_index in range(scan_cols)]
+            row_values = [value_at(used_range, row_index, column_index) for column_index in range(scan_cols)]
             if sum(1 for value in row_values if value.strip()) < 2:
                 continue
             for column_index, value in enumerate(row_values):
                 _add_column_alias(column_lookup, value, column_index)
 
-    for _info, dataframe, _config in used_ranges:
-        register_header_aliases(dataframe)
+    for _info, used_range, _config in used_ranges:
+        register_header_aliases(used_range)
 
     context_col_index = 0
 
@@ -307,14 +305,14 @@ def _build_excel_diff_grid_for_sheet(
 
     if row_count * column_count <= FULL_GRID_CELL_LIMIT:
         for newer_index in range(0, len(used_ranges) - 1):
-            newer_info, newer_df, _newer_config = used_ranges[newer_index]
-            older_info, older_df, _older_config = used_ranges[newer_index + 1]
+            newer_info, newer_range, _newer_config = used_ranges[newer_index]
+            older_info, older_range, _older_config = used_ranges[newer_index + 1]
             history_label = f"{older_info['name']} → {newer_info['name']}"
 
             for row_index in range(row_count):
                 for column_index in range(column_count):
-                    before = value_at(older_df, row_index, column_index)
-                    after = value_at(newer_df, row_index, column_index)
+                    before = value_at(older_range, row_index, column_index)
+                    after = value_at(newer_range, row_index, column_index)
                     if values_equal(before, after):
                         continue
 

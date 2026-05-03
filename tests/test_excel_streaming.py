@@ -9,14 +9,14 @@ from backend.core import excel_analysis
 from backend.core.file_access import inspect_file_path
 
 
-def test_backend_startup_import_does_not_load_pandas():
+def test_backend_startup_import_does_not_load_removed_excel_dependencies():
     env = os.environ.copy()
     env["PYTHONPATH"] = os.getcwd()
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; import backend.main; print('pandas' in sys.modules)",
+            "import sys; import backend.main; print(any(name in sys.modules for name in ('pandas', 'numpy', 'xlrd')))",
         ],
         cwd=os.getcwd(),
         env=env,
@@ -111,7 +111,7 @@ def test_extract_excel_used_ranges_reads_all_visible_sheets_and_skips_hidden(tmp
     ranges = excel_analysis.extract_excel_used_ranges(str(path))
 
     assert [item.sheet_name for item in ranges] == ["요약", "세부"]
-    assert ranges[1].dataframe.iat[1, 1] == "세부키워드"
+    assert ranges[1].value_at(1, 1) == "세부키워드"
     assert ranges[1].non_empty_cell_count == 1
 
 

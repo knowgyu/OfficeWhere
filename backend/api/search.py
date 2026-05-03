@@ -25,7 +25,6 @@ FILE_TYPE_ALIASES = {
     "powerpoint": "PowerPoint",
     "excel": "Excel",
     "xlsx": "Excel",
-    "xls": "Excel",
 }
 DEFAULT_SEARCH_FILE_LIMIT = 20
 MAX_SEARCH_FILE_LIMIT = 100

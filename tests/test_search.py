@@ -4,7 +4,6 @@ import time
 import tempfile
 from datetime import datetime
 
-import pandas as pd
 import pytest
 from openpyxl import Workbook
 
@@ -29,8 +28,18 @@ def setup_db(tmp_path, monkeypatch):
 
 
 def _make_excel(path: str, data: dict):
-    df = pd.DataFrame(data)
-    df.to_excel(path, index=False)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Sheet1"
+    headers = list(data.keys())
+    worksheet.append(headers)
+    row_count = max((len(values) for values in data.values()), default=0)
+    for row_index in range(row_count):
+        worksheet.append([
+            values[row_index] if row_index < len(values) else ""
+            for values in data.values()
+        ])
+    workbook.save(path)
 
 
 def test_index_and_search_excel(tmp_path):

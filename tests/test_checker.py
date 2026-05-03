@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 
-import pandas as pd
 import pytest
 from docx import Document
 from fastapi import HTTPException
@@ -19,6 +18,7 @@ from backend.models.schemas import CheckRequest
 def _write_excel_with_offset_table(path: Path):
     workbook = Workbook()
     worksheet = workbook.active
+    worksheet.title = "Sheet1"
     worksheet.title = "사업현황"
     worksheet["A1"] = "2026 사업 목록"
     worksheet["C3"] = "과제명"
@@ -41,8 +41,8 @@ def _write_excel_with_offset_conflict_table(path: Path, budget: str):
     worksheet["C3"] = "과제명"
     worksheet["D3"] = "담당자"
     worksheet["E3"] = "예산"
-    # Row 4 is intentionally blank. The parser drops it after reset_index, so
-    # location metadata must preserve the remaining DataFrame index offset.
+    # Row 4 is intentionally blank. The parser keeps source coordinates, so
+    # location metadata must preserve the blank-row offset.
     worksheet["C5"] = "A"
     worksheet["D5"] = "Kim"
     worksheet["E5"] = budget
@@ -52,8 +52,18 @@ def _write_excel_with_offset_conflict_table(path: Path, budget: str):
     workbook.save(path)
 
 
-def _write_dataframe_excel(path: Path, data: dict):
-    pd.DataFrame(data).to_excel(path, index=False)
+def _write_tabular_excel(path: Path, data: dict):
+    workbook = Workbook()
+    worksheet = workbook.active
+    headers = list(data.keys())
+    worksheet.append(headers)
+    row_count = max((len(values) for values in data.values()), default=0)
+    for row_index in range(row_count):
+        worksheet.append([
+            values[row_index] if row_index < len(values) else ""
+            for values in data.values()
+        ])
+    workbook.save(path)
 
 
 def _write_multisheet_excel(path: Path, detail_value: str):
@@ -126,8 +136,8 @@ def test_excel_inspect_uses_visible_range_without_table_detection(tmp_path):
 def test_excel_consistency_uses_cell_diffs_not_registered_keys(tmp_path):
     file_a = tmp_path / "a.xlsx"
     file_b = tmp_path / "b.xlsx"
-    _write_dataframe_excel(file_a, {"과제명": ["A", "B"], "예산": ["100", "200"], "담당자": ["Kim", "Lee"]})
-    _write_dataframe_excel(file_b, {"과제명": ["A", "C"], "예산": ["999", "300"]})
+    _write_tabular_excel(file_a, {"과제명": ["A", "B"], "예산": ["100", "200"], "담당자": ["Kim", "Lee"]})
+    _write_tabular_excel(file_b, {"과제명": ["A", "C"], "예산": ["999", "300"]})
 
     result = run_consistency_check(
         [
@@ -159,11 +169,11 @@ def test_excel_consistency_uses_cell_diffs_not_registered_keys(tmp_path):
 def test_excel_consistency_reports_cell_value_added_and_removed(tmp_path):
     file_a = tmp_path / "cell-a.xlsx"
     file_b = tmp_path / "cell-b.xlsx"
-    _write_dataframe_excel(
+    _write_tabular_excel(
         file_a,
         {"과제명": ["A", "B"], "담당자": ["", "Kim"], "예산": ["100", "200"]},
     )
-    _write_dataframe_excel(
+    _write_tabular_excel(
         file_b,
         {"과제명": ["A", "B"], "담당자": ["Lee", ""], "예산": ["100", "200"]},
     )
@@ -400,8 +410,8 @@ def test_excel_consistency_reports_offset_cell_refs_after_blank_rows(tmp_path):
 def test_excel_version_history_uses_current_used_range(tmp_path):
     previous = tmp_path / "budget-v1.xlsx"
     latest = tmp_path / "budget-v2.xlsx"
-    _write_dataframe_excel(previous, {"과제명": ["A"], "예산": ["100"]})
-    _write_dataframe_excel(latest, {"과제명": ["A"], "예산": ["999"]})
+    _write_tabular_excel(previous, {"과제명": ["A"], "예산": ["100"]})
+    _write_tabular_excel(latest, {"과제명": ["A"], "예산": ["999"]})
 
     result = run_consistency_check([{'id': 1, 'path': str(previous), 'name': 'budget-v1.xlsx', 'file_type': 'Excel'}, {'id': 2, 'path': str(latest), 'name': 'budget-v2.xlsx', 'file_type': 'Excel'}])
 
@@ -416,8 +426,8 @@ def test_excel_version_history_uses_current_used_range(tmp_path):
 def test_excel_version_history_uses_row_coordinates(tmp_path):
     previous = tmp_path / "budget-v1.xlsx"
     latest = tmp_path / "budget-v2.xlsx"
-    _write_dataframe_excel(previous, {"과제명": ["A"], "예산": ["100"]})
-    _write_dataframe_excel(latest, {"과제명": ["A"], "예산": ["120"]})
+    _write_tabular_excel(previous, {"과제명": ["A"], "예산": ["100"]})
+    _write_tabular_excel(latest, {"과제명": ["A"], "예산": ["120"]})
 
     result = run_consistency_check([{'id': 1, 'path': str(previous), 'name': 'budget-v1.xlsx', 'file_type': 'Excel'}, {'id': 2, 'path': str(latest), 'name': 'budget-v2.xlsx', 'file_type': 'Excel'}])
 
@@ -430,8 +440,8 @@ def test_excel_version_history_uses_row_coordinates(tmp_path):
 def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
     latest = tmp_path / "grid-latest.xlsx"
     previous = tmp_path / "grid-previous.xlsx"
-    _write_dataframe_excel(latest, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
-    _write_dataframe_excel(previous, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "200"]})
+    _write_tabular_excel(latest, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
+    _write_tabular_excel(previous, {"과제명": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "200"]})
 
     result = build_excel_diff_grid(
         [
@@ -483,9 +493,9 @@ def test_excel_diff_grid_colors_only_latest_vs_previous_but_keeps_older_history(
     v1 = tmp_path / "budget-v1.xlsx"
     v2 = tmp_path / "budget-v2.xlsx"
     v3 = tmp_path / "budget-v3.xlsx"
-    _write_dataframe_excel(v1, {"ID": ["A", "B"], "값": ["초안", "유지"]})
-    _write_dataframe_excel(v2, {"ID": ["A", "B"], "값": ["중간", "유지"]})
-    _write_dataframe_excel(v3, {"ID": ["A", "B"], "값": ["중간", "최신"]})
+    _write_tabular_excel(v1, {"ID": ["A", "B"], "값": ["초안", "유지"]})
+    _write_tabular_excel(v2, {"ID": ["A", "B"], "값": ["중간", "유지"]})
+    _write_tabular_excel(v3, {"ID": ["A", "B"], "값": ["중간", "최신"]})
 
     result = build_excel_diff_grid(
         [
@@ -519,8 +529,8 @@ def test_excel_diff_grid_colors_only_latest_vs_previous_but_keeps_older_history(
 def test_excel_diff_grid_uses_largest_compared_range_for_removed_cells(tmp_path):
     latest = tmp_path / "smaller-latest.xlsx"
     previous = tmp_path / "larger-previous.xlsx"
-    _write_dataframe_excel(latest, {"ID": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
-    _write_dataframe_excel(
+    _write_tabular_excel(latest, {"ID": ["A", "B"], "담당자": ["Kim", "Lee"], "예산": ["100", "250"]})
+    _write_tabular_excel(
         previous,
         {
             "ID": ["A", "B", "C", "D"],
@@ -652,8 +662,8 @@ def test_excel_diff_grid_limits_large_far_focus_and_keeps_context_column(tmp_pat
     data = {"ID": [f"K{row}" for row in range(1, rows + 1)]}
     for column in range(1, 120):
         data[f"C{column}"] = [f"{row}-{column}" for row in range(1, rows + 1)]
-    _write_dataframe_excel(latest, data)
-    _write_dataframe_excel(previous, data)
+    _write_tabular_excel(latest, data)
+    _write_tabular_excel(previous, data)
 
     result = build_excel_diff_grid(
         [
@@ -691,8 +701,8 @@ def test_excel_diff_grid_resolves_partial_focus_by_row_number_and_header(tmp_pat
     latest_data = {key: list(values) for key, values in data.items()}
     previous_data["C119"][100] = "old-budget"
     latest_data["C119"][100] = "new-budget"
-    _write_dataframe_excel(latest, latest_data)
-    _write_dataframe_excel(previous, previous_data)
+    _write_tabular_excel(latest, latest_data)
+    _write_tabular_excel(previous, previous_data)
 
     result = build_excel_diff_grid(
         [

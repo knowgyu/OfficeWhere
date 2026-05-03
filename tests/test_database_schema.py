@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime, timedelta
 
-from backend.database import init_db, prune_comparison_cache
+from backend.database import get_all_files, init_db, prune_comparison_cache, register_file, save_file_chunks
 
 
 def test_init_db_resets_legacy_excel_table_metadata_schema(tmp_path, monkeypatch):
@@ -55,6 +55,24 @@ def test_init_db_resets_legacy_excel_table_metadata_schema(tmp_path, monkeypatch
     assert source.exists()
     assert "library_settings" in settings
     assert "last_schema_reset" in settings
+
+
+def test_init_db_prunes_legacy_xls_records_without_touching_source(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr("backend.database.DB_PATH", db_path)
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    source = tmp_path / "legacy.xls"
+    source.write_text("legacy binary placeholder", encoding="utf-8")
+    file_id = register_file(str(source), "legacy.xls", "Excel", 1)
+    save_file_chunks(file_id, [{"location": "Sheet1 시트 | 1행 A열", "content": "legacy"}])
+
+    init_db()
+
+    assert get_all_files() == []
+    assert source.exists()
+    assert source.read_text(encoding="utf-8") == "legacy binary placeholder"
 
 
 def test_comparison_cache_prune_keeps_newest_floor(tmp_path, monkeypatch):

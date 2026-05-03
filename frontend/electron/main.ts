@@ -1841,7 +1841,7 @@ async function pickFile() {
   const options = {
     properties: ['openFile'],
     filters: [
-      { name: 'Office files', extensions: ['xlsx', 'xls', 'docx', 'pptx'] },
+      { name: 'Office files', extensions: ['xlsx', 'docx', 'pptx'] },
       { name: 'All files', extensions: ['*'] },
     ],
   } as Electron.OpenDialogOptions

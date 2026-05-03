@@ -13,7 +13,7 @@ For the docs-only backend role-separation/refactor plan that should guide future
 - Scheduler/automatic refresh stays conservative and does not silently inherit a manual fast run's worker count.
 - Fast mode defaults to 24 workers and is capped at 32 through the UI/runtime. Worker values normalize to 4-step increments.
 - Parser workers run in parallel, but SQLite writes are still serialized through the app-owned DB writer path.
-- OfficeWhere indexes Office documents only: `.xlsx`, `.xls`, `.docx`, `.pptx`.
+- OfficeWhere indexes Office documents only: `.xlsx`, `.docx`, `.pptx`.
 - Legacy Text/Markdown registrations are pruned from the app-owned index during library rescan. Source files are never deleted.
 - Folder scanning skips exact folder-name matches for common developer/cache/build directories such as `node_modules`, `.git`, `venv`, `.venv`, `__pycache__`, `dist`, `build`, `target`, `.gradle`, `.cargo`, `.vscode`, `.idea`, `.omx`, and `.omc`.
 
