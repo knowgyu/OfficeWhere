@@ -64,7 +64,7 @@ Use this checklist before publishing a release tag.
 - [ ] Git tag `vX.Y.Z` points at the verified commit.
 - [ ] Push the verified branch/tag. Tag push builds Actions artifacts but does not publish a GitHub Release.
 - [ ] If publishing a GitHub Release, run `workflow_dispatch` with `release_tag` set to the verified tag.
-- [ ] Confirm the GitHub Release contains the Windows zip and `.sha256.txt` asset only when a Release was intentionally published.
+- [ ] Confirm the GitHub Release contains `officewhere-vX.Y.Z-windows-x64.zip` and `officewhere-vX.Y.Z-windows-x64.sha256.txt` only when a Release was intentionally published.
 - [ ] From the previous packaged Windows version, confirm the update dialog shows `업데이트하기`, observes helper startup, downloads/verifies the zip, restarts, and reports the new version.
 - [ ] Confirm a missing/bad `.sha256.txt` aborts before extraction/replacement and the current app remains usable.
 - [ ] Confirm a helper launch/early-exit failure aborts before app quit and leaves the current app usable.

@@ -232,7 +232,7 @@ function sanitizeUpdateFileName(name: string): string {
 
 function expectedWindowsZipName(version: string): string {
   const normalized = version.trim().replace(/^v/i, '').toLowerCase()
-  return `officewhere-${normalized}-windows-x64.zip`
+  return `officewhere-v${normalized}-windows-x64.zip`
 }
 
 function requestJson<T>(urlString: string, redirects = 3): Promise<T> {
@@ -284,9 +284,10 @@ function requestJson<T>(urlString: string, redirects = 3): Promise<T> {
 function findSha256AssetForZip(assets: unknown, zipName: string): string | undefined {
   if (!Array.isArray(assets)) return undefined
 
+  const zipBaseName = zipName.replace(/\.zip$/i, '')
   const expectedShaNames = new Set([
-    `${zipName}.sha256.txt`.toLowerCase(),
-    `${zipName}.sha256`.toLowerCase(),
+    `${zipBaseName}.sha256.txt`.toLowerCase(),
+    `${zipBaseName}.sha256`.toLowerCase(),
   ])
   for (const item of assets as GitHubReleaseAsset[]) {
     const name = typeof item.name === 'string' ? item.name : ''

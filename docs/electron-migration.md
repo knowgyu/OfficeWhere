@@ -78,7 +78,7 @@ Electron 개발 실행에서 Python interpreter를 직접 지정할 때도 `OW_*
 
 GitHub Release를 publish하려면 `workflow_dispatch`를 수동 실행하고 `release_tag`에 대상 태그를 입력한다. `release_tag`를 비우면 Actions artifact만 만든다.
 
-앱 내 업데이트는 GitHub Release의 정확한 `officewhere-<version>-windows-x64.zip`과 함께 게시되는 같은 이름의 `.sha256.txt` 검증 파일을 사용한다. 사용자가 **업데이트하기**를 누르면 앱이 임시 폴더에 다운로드/검증/압축해제를 수행하고, 별도 helper의 시작을 확인한 뒤 앱 종료 후 설치 폴더를 교체하고 새 `OfficeWhere.exe`를 시작한다.
+앱 내 업데이트는 GitHub Release의 정확한 `officewhere-v<version>-windows-x64.zip`과 함께 게시되는 `officewhere-v<version>-windows-x64.sha256.txt` 검증 파일을 사용한다. 사용자가 **업데이트하기**를 누르면 앱이 임시 폴더에 다운로드/검증/압축해제를 수행하고, 별도 helper의 시작을 확인한 뒤 앱 종료 후 설치 폴더를 교체하고 새 `OfficeWhere.exe`를 시작한다.
 
 ## Windows 로컬 빌드 주의
 
