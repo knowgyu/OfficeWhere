@@ -37,7 +37,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 ## Completed / user-owned for now
 
 - External architecture review P0-P3 first implementation wave and second responsibility-boundary refactor wave are complete enough for this pass; only scoped follow-up slices remain.
-- v0.6.8 default scanner improvement is complete enough for release prep; Everything/ES acceleration is not a current release candidate.
+- v0.7.0 cleanup release is prepared around the stable search/index/version-comparison workflows; Everything/ES acceleration and unfinished Excel integration/Join surfaces are not current release candidates.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
 - Embedded-Python Windows packaging has been checked on DRM-policy PCs.
 - In-app update notice and portable zip update flow are implemented.
