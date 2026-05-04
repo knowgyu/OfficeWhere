@@ -114,7 +114,13 @@ let updateDownloadInProgress = false
 
 app.setName('OfficeWhere')
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock()
+// In E2E mode we bypass the single-instance lock so multiple test workers can
+// run side-by-side and a developer's regular OfficeWhere instance does not
+// silently kill the test process. The lock is keyed by app name, not user-data
+// dir, so even with --user-data-dir overrides the second instance would quit
+// without this branch.
+const hasSingleInstanceLock =
+  process.env.OW_E2E === '1' ? true : app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
   app.quit()
 } else {
@@ -173,6 +179,15 @@ function registerIpcHandlers() {
   ipcMain.handle('app:show-item-in-folder', (_event, payload: unknown) => showItemInFolder(payload))
   ipcMain.handle('dialog:pick-file', async () => pickFile())
   ipcMain.handle('dialog:pick-folder', async () => pickFolder())
+
+  if (process.env.OW_E2E === '1') {
+    // Helper for tests to reset main-process caches between specs without
+    // tearing down the whole Electron app.
+    ipcMain.handle('e2e:reset-caches', () => {
+      cachedUpdateCheck = null
+      updateDownloadInProgress = false
+    })
+  }
 }
 
 type GitHubReleaseAsset = {
@@ -328,6 +343,32 @@ function findWindowsZipAsset(assets: unknown, latestVersion: string): UpdateAsse
 }
 
 async function checkForUpdates(): Promise<UpdateCheckResult> {
+  if (process.env.OW_E2E === '1') {
+    // Tests inject a fixture JSON to avoid hitting GitHub from CI.
+    const raw = process.env.OW_E2E_UPDATE_RESPONSE ?? ''
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<UpdateCheckResult>
+      const currentVersion = app.getVersion()
+      const result: UpdateCheckResult = {
+        currentVersion: parsed.currentVersion ?? currentVersion,
+        latestVersion: parsed.latestVersion ?? currentVersion,
+        updateAvailable: parsed.updateAvailable ?? false,
+        releaseUrl: parsed.releaseUrl ?? RELEASE_PAGE_URL,
+        asset: parsed.asset,
+      }
+      cachedUpdateCheck = result
+      return result
+    }
+    const currentVersion = app.getVersion()
+    const fallback: UpdateCheckResult = {
+      currentVersion,
+      latestVersion: currentVersion,
+      updateAvailable: false,
+      releaseUrl: RELEASE_PAGE_URL,
+    }
+    cachedUpdateCheck = fallback
+    return fallback
+  }
   const currentVersion = app.getVersion()
   const release = await requestJson<GitHubRelease>(RELEASE_API_URL)
   const latestVersion =
@@ -510,6 +551,21 @@ async function findExistingVerifiedDownload(fileName: string, expectedSha256: st
 }
 
 async function downloadLatestUpdateZip(): Promise<UpdateInstallResult> {
+  if (process.env.OW_E2E === '1') {
+    // Avoid actually downloading anything during E2E. Tests assert the dialog
+    // wires the install flow correctly, not that the network download works.
+    const update = cachedUpdateCheck ?? (await checkForUpdates())
+    return {
+      success: true,
+      latestVersion: update.latestVersion,
+      assetName: update.asset?.name ?? 'e2e-mock.zip',
+      filePath: '',
+      folderPath: '',
+      alreadyDownloaded: true,
+      restartScheduled: false,
+      message: 'E2E mock: download skipped',
+    }
+  }
   if (updateDownloadInProgress) {
     throw new Error('업데이트 zip을 이미 다운로드하고 있습니다.')
   }
@@ -1195,6 +1251,10 @@ async function startBackend(port: number) {
     OW_INDEX_PERF_LOG_PATH: indexPerfLogPath,
     PYTHONUTF8: '1',
     PYTHONPYCACHEPREFIX: pythonCacheDir,
+    OW_E2E: process.env.OW_E2E ?? '',
+    OW_E2E_ALLOW: process.env.OW_E2E_ALLOW ?? '',
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    LC_ALL: process.env.LC_ALL ?? 'C.UTF-8',
   }
   if (app.isPackaged) {
     delete backendEnv.PYTHONHOME
@@ -1708,6 +1768,14 @@ async function pingHealth(baseUrl: string): Promise<boolean> {
 }
 
 async function pickFile() {
+  if (process.env.OW_E2E === '1') {
+    // Native dialogs cannot be driven under Xvfb; tests inject a path via env.
+    const overridePath = process.env.OW_E2E_PICK_FILE_PATH ?? ''
+    return {
+      cancelled: !overridePath,
+      path: overridePath ? path.normalize(overridePath) : '',
+    }
+  }
   const options = {
     properties: ['openFile'],
     filters: [
@@ -1727,6 +1795,13 @@ async function pickFile() {
 }
 
 async function pickFolder() {
+  if (process.env.OW_E2E === '1') {
+    const overridePath = process.env.OW_E2E_PICK_FOLDER_PATH ?? ''
+    return {
+      cancelled: !overridePath,
+      folder_path: overridePath ? path.normalize(overridePath) : '',
+    }
+  }
   const options = {
     properties: ['openDirectory'],
   } as Electron.OpenDialogOptions
