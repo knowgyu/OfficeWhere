@@ -39,7 +39,7 @@ This file tracks follow-up work that is not part of the formal release checklist
 - External architecture review P0-P3 first implementation wave and second responsibility-boundary refactor wave are complete enough for this pass; only scoped follow-up slices remain.
 - v0.7.0 cleanup release is prepared around the stable search/index/version-comparison workflows; Everything/ES acceleration and unfinished Excel integration/Join surfaces are not current release candidates.
 - App-data deletion/reset/exit race is handled by prior reset/shutdown commits; user will do any needed real-use confirmation.
-- Embedded-Python Windows packaging has been checked on DRM-policy PCs.
+- Windows packaging has been checked on policy-managed PCs.
 - In-app update notice now downloads and verifies the Windows portable zip into the user's Downloads folder; portable folder self-replacement is intentionally not used.
 - First-run onboarding/tutorial is implemented.
 - Large DB/indexing structural optimization is considered complete enough for now.

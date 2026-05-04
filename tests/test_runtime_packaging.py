@@ -28,6 +28,7 @@ def test_electron_builder_runtime_resources_are_platform_scoped():
     assert scripts["prepare:python-runtime:mac"] == "python3 ../scripts/prepare_python_runtime.py mac-arm64"
     assert scripts["package:mac"].startswith("npm run prepare:python-runtime:mac && ")
     assert scripts["package:mac"].endswith("electron-builder --mac --publish never")
+    assert build["publish"] is None
     top_level_sources = {item["from"] for item in build["extraResources"]}
     assert "../python-runtime/win-x64" not in top_level_sources
     assert build["win"]["extraResources"] == [
@@ -56,7 +57,11 @@ def test_release_workflow_builds_and_publishes_macos_artifacts():
     assert "macos-release:" in workflow
     assert "name: macOS arm64" in workflow
     assert "runs-on: macos-latest" in workflow
-    assert "npm run package:mac" in workflow
+    assert "Prepare macOS backend runtime" in workflow
+    assert "npm run prepare:python-runtime:mac" in workflow
+    assert "npx electron-builder --mac --publish never" in workflow
+    assert 'GITHUB_TOKEN: ""' in workflow
+    assert 'GH_TOKEN: ""' in workflow
     assert "officewhere-${{ needs.release-metadata.outputs.version }}-mac-arm64" in workflow
     assert "macos-release" in workflow.split("publish-release:", 1)[1]
     assert "github.event_name == 'workflow_dispatch'" not in workflow.split("publish-release:", 1)[1]
@@ -66,21 +71,37 @@ def test_release_workflow_builds_and_publishes_macos_artifacts():
 def test_release_docs_do_not_describe_macos_packaging_as_future_work():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     build_sh = (REPO_ROOT / "build.sh").read_text(encoding="utf-8")
-    release_note = (REPO_ROOT / "docs" / "releases" / "v0.7.6.md").read_text(encoding="utf-8")
+    release_note = (REPO_ROOT / "docs" / "releases" / "v0.7.7.md").read_text(encoding="utf-8")
     windows_runtime_readme = (REPO_ROOT / "python-runtime" / "win-x64" / "README.md").read_text(encoding="utf-8")
+    release_checklist = (REPO_ROOT / "docs" / "release-test-checklist.md").read_text(encoding="utf-8")
+    mapped_drive_backslash = "K:" + "\\"
+    mapped_drive_slash = "K:" + "/"
+    embedded_runtime_phrase = "embedded " + "Python runtime"
+    private_runtime_phrase = "private " + "Python runtime"
+    protected_doc_acronym = "D" + "RM"
 
     assert "officewhere-vX.Y.Z-mac-arm64.dmg" in readme
     assert "macOS / Linux 패키지는 embedded Python 방식으로 추후 지원 예정" not in readme
-    assert "K:\\" not in readme
-    assert "DRM" not in release_note
-    assert "DRM" not in windows_runtime_readme
+    assert mapped_drive_backslash not in readme
+    assert mapped_drive_slash not in readme
+    assert protected_doc_acronym not in release_note
+    assert protected_doc_acronym not in windows_runtime_readme
+    assert protected_doc_acronym not in release_checklist
+    assert embedded_runtime_phrase not in readme
+    assert private_runtime_phrase not in readme
     assert "npm run package:mac" in build_sh
 
 
 def test_python_runtime_asset_lookup_uses_github_token_when_available():
     prepare_script = (REPO_ROOT / "scripts" / "prepare_python_runtime.py").read_text(encoding="utf-8")
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    macos_job = workflow.split("macos-release:", 1)[1].split("publish-release:", 1)[0]
+    prepare_step = macos_job.split("Prepare macOS backend runtime", 1)[1].split("Build Electron macOS app", 1)[0]
+    package_step = macos_job.split("Build Electron macOS app", 1)[1].split("Package macOS release bundle", 1)[0]
 
     assert "os.environ.get(\"GITHUB_TOKEN\") or os.environ.get(\"GH_TOKEN\")" in prepare_script
     assert "headers[\"Authorization\"] = f\"Bearer {token}\"" in prepare_script
-    assert "GITHUB_TOKEN: ${{ github.token }}" in workflow.split("macos-release:", 1)[1]
+    assert "GITHUB_TOKEN: ${{ github.token }}" in prepare_step
+    assert "GITHUB_TOKEN: ${{ github.token }}" not in package_step
+    assert 'GITHUB_TOKEN: ""' in package_step
+    assert 'GH_TOKEN: ""' in package_step

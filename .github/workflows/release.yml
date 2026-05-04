@@ -196,7 +196,6 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PYTHONUTF8: "1"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout repository
@@ -239,9 +238,18 @@ jobs:
       - name: Run demo checks
         run: python3 scripts/run_demo_checks.py
 
+      - name: Prepare macOS backend runtime
+        working-directory: frontend
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run prepare:python-runtime:mac
+
       - name: Build Electron macOS app
         working-directory: frontend
-        run: npm run package:mac
+        env:
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+        run: npx electron-builder --mac --publish never
 
       - name: Package macOS release bundle
         id: bundle

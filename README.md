@@ -99,8 +99,7 @@ http://127.0.0.1:15173
 
 - Node.js LTS
 - 개발/테스트용 Python 3.11 이상 (`setup.*`, `dev-web.*`, pytest 실행 시; 3.13 권장)
-- Windows 배포 빌드는 repo에 포함된 `python-runtime/win-x64/python.exe`를 사용
-- macOS 배포 빌드는 Apple Silicon macOS runner에서 private Python runtime을 준비해 앱에 포함
+- Windows/macOS 배포 빌드는 앱 전용 backend runtime을 함께 포함
 
 ### Windows
 
@@ -112,7 +111,7 @@ build.bat
 결과:
 
 - `dist/electron/` 아래 Windows zip 생성
-- zip에는 OfficeWhere 전용 embedded Python runtime과 backend source가 함께 포함됨
+- zip에는 OfficeWhere 전용 backend runtime과 backend source가 함께 포함됨
 - zip 압축 해제 후 `OfficeWhere.exe` 실행
 
 ### macOS
@@ -127,7 +126,7 @@ chmod +x setup.sh build.sh
 
 - frontend / Electron main 빌드 검증
 - Apple Silicon macOS에서는 `dist/electron/` 아래 dmg/zip 생성
-- dmg/zip에는 OfficeWhere 전용 private Python runtime과 backend source가 함께 포함됨
+- dmg/zip에는 OfficeWhere 전용 backend runtime과 backend source가 함께 포함됨
 
 ### Linux
 

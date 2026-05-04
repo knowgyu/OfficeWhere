@@ -74,9 +74,9 @@ Electron 개발 실행에서 Python interpreter를 직접 지정할 때도 `OW_*
 
 ## GitHub Actions Release
 
-태그 `vX.Y.Z`를 push하면 `.github/workflows/release.yml`이 embedded Python runtime을 포함한 Windows zip과 SHA256 파일을 Actions artifact로 만든다. 태그 push만으로는 GitHub Release를 만들지 않는다.
+태그 `vX.Y.Z`를 push하면 `.github/workflows/release.yml`이 Windows zip, macOS dmg/zip, SHA256 파일을 만들고 GitHub Release에 게시한다.
 
-GitHub Release를 publish하려면 `workflow_dispatch`를 수동 실행하고 `release_tag`에 대상 태그를 입력한다. `release_tag`를 비우면 Actions artifact만 만든다.
+수동 빌드가 필요하면 `workflow_dispatch`를 실행한다. `release_tag`를 비우면 Actions artifact만 만들고, 값을 입력하면 해당 태그의 Release asset으로 게시한다.
 
 앱 내 업데이트는 GitHub Release의 정확한 `officewhere-v<version>-windows-x64.zip`과 함께 게시되는 `officewhere-v<version>-windows-x64.sha256.txt` 검증 파일을 사용한다. 사용자가 **zip 다운로드**를 누르면 앱이 Windows 다운로드 폴더에 zip을 받고 SHA256을 검증한 뒤 파일 위치를 연다. 포터블 배포판은 실행 중인 앱 폴더를 자동 교체하지 않으므로, 사용자가 받은 zip을 원하는 위치에 풀고 새 `OfficeWhere.exe`를 실행한다.
 

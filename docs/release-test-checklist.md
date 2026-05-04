@@ -54,7 +54,7 @@ Use this checklist before publishing a release tag.
 - [ ] Full reset remains behind a stronger warning/advanced path.
 - [ ] Original watched folders and Office documents remain untouched after app-data cleanup.
 - [ ] A mapped/network drive folder can be added when the current OS user can access it.
-- [ ] On a Windows PC with corporate document protection enabled, protected `.xlsx` / `.docx` / `.pptx` files index through the bundled embedded Python runtime.
+- [ ] On a Windows PC with corporate document protection enabled, protected `.xlsx` / `.docx` / `.pptx` files index in the packaged app.
 - [ ] Search, indexing, and version management read source documents only; they do not delete, move, rename, or save originals.
 - [ ] The OS “open file” action is understood as handing the document to Office; manual user edits in Office are outside app-controlled read-only scanning.
 
@@ -62,9 +62,9 @@ Use this checklist before publishing a release tag.
 - [ ] Version is bumped in `frontend/package.json` and `frontend/package-lock.json`.
 - [ ] Release notes summarize user-visible changes.
 - [ ] Git tag `vX.Y.Z` points at the verified commit.
-- [ ] Push the verified branch/tag. Tag push builds Actions artifacts but does not publish a GitHub Release.
-- [ ] If publishing a GitHub Release, run `workflow_dispatch` with `release_tag` set to the verified tag.
-- [ ] Confirm the GitHub Release contains `officewhere-vX.Y.Z-windows-x64.zip` and `officewhere-vX.Y.Z-windows-x64.sha256.txt` only when a Release was intentionally published.
+- [ ] Push the verified branch/tag. Tag push builds Actions artifacts and publishes a GitHub Release.
+- [ ] If manually rebuilding, run `workflow_dispatch` with `release_tag` set to the verified tag.
+- [ ] Confirm the GitHub Release contains Windows x64 zip, macOS arm64 dmg/zip, and matching SHA256 files.
 - [ ] From the previous packaged Windows version, confirm the update dialog shows `zip 다운로드`, downloads/verifies the zip into the Downloads folder, opens the file location, and leaves the current app/data untouched.
 - [ ] Confirm a missing/bad `.sha256.txt` aborts before extraction/replacement and the current app remains usable.
 - [ ] Confirm a download or SHA256 verification failure leaves the current app usable and shows a clear modal error.

@@ -3,8 +3,8 @@ Backend-only entrypoint for Electron.
 
 This script starts FastAPI without opening any desktop shell. Runtime settings
 can be passed as flags or environment variables so Electron can choose a free
-localhost port and a per-user data directory. Packaged Windows builds run this
-file through OfficeWhere's bundled embedded Python runtime.
+localhost port and a per-user data directory. Packaged builds run this file
+through OfficeWhere's bundled backend runtime.
 """
 
 from __future__ import annotations

@@ -22,5 +22,5 @@ cd ..
 
 echo ""
 echo "[완료] 프론트엔드와 Electron main/preload 빌드가 완료되었습니다."
-echo "Windows release zip은 bundled Python 런타임을 포함해 Windows에서 build.bat 또는 GitHub Actions로 생성하세요."
-echo "macOS release dmg/zip은 Apple Silicon macOS에서 private Python 런타임을 준비해 생성합니다."
+echo "Windows release zip은 Windows에서 build.bat 또는 GitHub Actions로 생성하세요."
+echo "macOS release dmg/zip은 Apple Silicon macOS에서 앱 전용 backend runtime을 준비해 생성합니다."
