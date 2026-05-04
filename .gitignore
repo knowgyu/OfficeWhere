@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 !python-runtime/**/*.pyd
+!python-runtime/**/*.so
 venv/
 env/
 .env
