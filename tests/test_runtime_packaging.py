@@ -59,7 +59,22 @@ def test_frontend_dependency_cache_key_ignores_release_version_only_changes():
 def test_release_workflow_caches_downloads_and_reusable_install_outputs():
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
 
-    assert workflow.count('cache: "pip"') == 2
+    windows_job = workflow.split("  windows-release:", 1)[1].split("  macos-release:", 1)[0]
+    macos_job = workflow.split("  macos-release:", 1)[1].split("  publish-release:", 1)[0]
+    publish_job = workflow.split("  publish-release:", 1)[1]
+
+    assert "backend-verification:" in workflow
+    assert workflow.count('cache: "pip"') == 1
+    assert workflow.count("Cache Python virtualenv") == 1
+    assert "steps.backend-venv-cache.outputs.cache-hit != 'true'" in workflow
+    assert "steps.prepare-python-venv.outputs.needs_install == 'true'" in workflow
+    assert ".venv/bin/python -m pip install -r requirements-dev.txt" in workflow
+    assert workflow.count("Run backend tests") == 1
+    assert workflow.count("Run demo checks") == 1
+    assert "Run backend tests" not in windows_job
+    assert "Run backend tests" not in macos_job
+    assert "Run demo checks" not in windows_job
+    assert "Run demo checks" not in macos_job
     assert workflow.count("Cache npm downloads") == 2
     assert workflow.count("Cache frontend node_modules") == 2
     assert workflow.count("Cache Electron package downloads") == 2
@@ -68,6 +83,7 @@ def test_release_workflow_caches_downloads_and_reusable_install_outputs():
     assert "npm ci --prefer-offline --no-audit --fund=false" in workflow
     assert "pip install --upgrade pip" not in workflow
     assert "electron_config_cache" in workflow
+    assert "- backend-verification" in publish_job
 
 
 def test_mac_runtime_layout_contract_is_documented():

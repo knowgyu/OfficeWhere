@@ -456,10 +456,10 @@ body,
 .attention-pulse::after {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: -3px;
   border-radius: 9999px;
   pointer-events: none;
-  border: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 70%, transparent);
+  border: 2px solid color-mix(in srgb, var(--md-sys-color-primary) 56%, transparent);
   animation: attention-ring 1.1s var(--md-motion-standard) infinite;
 }
 
@@ -473,16 +473,16 @@ body,
 .tour-target::before {
   content: '';
   position: absolute;
-  inset: -7px;
+  inset: -5px;
   border-radius: 9999px;
   pointer-events: none;
   background:
     radial-gradient(
       circle,
-      color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent),
-      transparent 68%
+      color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent),
+      transparent 70%
     );
-  opacity: 0.9;
+  opacity: 0.72;
   z-index: -1;
 }
 
@@ -633,24 +633,11 @@ body,
   overflow: visible;
 }
 
-.tour-spotlight-scrim {
-  fill: rgba(8, 11, 22, 0.22);
-}
-
-:root[data-theme='dark'] .tour-spotlight-scrim {
-  fill: rgba(0, 0, 0, 0.34);
-}
-
 .tour-spotlight-ring {
   fill: transparent;
-  stroke: color-mix(in srgb, var(--md-sys-color-primary) 72%, white 28%);
+  stroke: color-mix(in srgb, var(--md-sys-color-primary) 76%, var(--md-sys-color-on-surface) 24%);
   stroke-width: 2;
-  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent));
-}
-
-.tour-spotlight-ring.is-dimmed {
-  stroke-width: 2.5;
-  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent));
+  filter: drop-shadow(0 1px 5px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent));
 }
 
 @keyframes attention-ring {

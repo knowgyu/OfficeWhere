@@ -28,6 +28,7 @@ env:
   PYTHON_VERSION: "3.13"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONUTF8: "1"
+  VENV_CACHE_VERSION: "v1"
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
   NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
   ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
@@ -92,6 +93,55 @@ jobs:
             echo "draft=$draft"
           } >> "$GITHUB_OUTPUT"
 
+  backend-verification:
+    name: Backend verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Cache Python virtualenv
+        id: backend-venv-cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-venv-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}-${{ env.VENV_CACHE_VERSION }}
+          restore-keys: |
+            ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-venv-
+
+      - name: Prepare Python virtualenv
+        id: prepare-python-venv
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -x .venv/bin/python ]]; then
+            echo "needs_install=false" >> "$GITHUB_OUTPUT"
+          else
+            rm -rf .venv
+            python -m venv .venv
+            echo "needs_install=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Python dependencies for tests
+        if: steps.backend-venv-cache.outputs.cache-hit != 'true' || steps.prepare-python-venv.outputs.needs_install == 'true'
+        run: .venv/bin/python -m pip install -r requirements-dev.txt
+
+      - name: Run backend tests
+        run: .venv/bin/python -m pytest -q
+
+      - name: Run demo checks
+        run: .venv/bin/python scripts/run_demo_checks.py
+
   windows-release:
     name: Windows x64
     needs: release-metadata
@@ -107,10 +157,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -154,10 +200,6 @@ jobs:
             throw "Bundled Python runtime is missing: python-runtime/win-x64/python.exe"
           }
 
-      - name: Install Python dependencies for tests
-        shell: pwsh
-        run: python -m pip install -r requirements-dev.txt
-
       - name: Install frontend dependencies
         if: steps.frontend-node-modules-cache.outputs.cache-hit != 'true'
         working-directory: frontend
@@ -173,14 +215,6 @@ jobs:
         working-directory: frontend
         shell: pwsh
         run: npm run build:electron
-
-      - name: Run backend tests
-        shell: pwsh
-        run: pytest -q
-
-      - name: Run demo checks
-        shell: pwsh
-        run: python scripts/run_demo_checks.py
 
       - name: Build Electron Windows zip
         working-directory: frontend
@@ -241,10 +275,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -291,9 +321,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-python-runtime-mac-arm64-
 
-      - name: Install Python dependencies for tests
-        run: python3 -m pip install -r requirements-dev.txt
-
       - name: Install frontend dependencies
         if: steps.frontend-node-modules-cache.outputs.cache-hit != 'true'
         working-directory: frontend
@@ -306,12 +333,6 @@ jobs:
       - name: Build Electron main process
         working-directory: frontend
         run: npm run build:electron
-
-      - name: Run backend tests
-        run: python3 -m pytest -q
-
-      - name: Run demo checks
-        run: python3 scripts/run_demo_checks.py
 
       - name: Prepare macOS backend runtime
         working-directory: frontend
@@ -372,6 +393,7 @@ jobs:
     if: needs.release-metadata.outputs.tag != ''
     needs:
       - release-metadata
+      - backend-verification
       - windows-release
       - macos-release
     runs-on: ubuntu-latest

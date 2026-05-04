@@ -586,7 +586,7 @@ export function ExcelDiffGridModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[140] flex items-center justify-center overflow-hidden overscroll-contain bg-[var(--ow-dialog-backdrop)] backdrop-blur-md p-2 sm:p-4"
+      className="fixed inset-0 z-[140] flex items-center justify-center overflow-hidden overscroll-contain bg-[var(--ow-dialog-backdrop)] backdrop-blur-md p-4 sm:p-5 lg:p-6"
       role="dialog"
       aria-modal="true"
       aria-label="Excel 표로 보기"
@@ -601,7 +601,7 @@ export function ExcelDiffGridModal({
       }}
     >
       <div
-        className="flex h-[96dvh] min-h-[620px] w-[96vw] max-w-[1500px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--ow-dialog-surface)] shadow-elev-5"
+        className="flex h-[92dvh] min-h-[560px] w-[calc(100vw-2rem)] max-w-[1400px] flex-col overflow-hidden overscroll-contain rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--ow-dialog-surface)] shadow-elev-5 sm:w-[calc(100vw-3rem)] lg:w-[92vw]"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="shrink-0 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/96">
@@ -631,7 +631,7 @@ export function ExcelDiffGridModal({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 space-y-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-3">
           {modal.loading ? (
             <div className="flex items-center justify-center gap-2 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
               <Spinner size={20} /> Excel 표 범위를 계산하는 중…
@@ -796,18 +796,18 @@ function ExcelDiffGridSectionView({
       </div>
       <div
         ref={scrollRef}
-        className="max-h-[52vh] overflow-auto overscroll-contain"
+        className="max-h-[50vh] overflow-auto overscroll-contain"
       >
         <table className="min-w-max table-fixed border-separate border-spacing-0 text-xs">
           <thead>
             <tr>
-              <th className="min-w-[4rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm">
+              <th className="min-w-[3.25rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm sm:min-w-[4rem]">
                 행
               </th>
               {section.columns.map((column) => (
                 <th
                   key={column.index}
-                  className="w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm"
+                  className="w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-2 text-left type-label-sm sm:w-[7.5rem] sm:min-w-[7.5rem] sm:max-w-[7.5rem] xl:w-[8rem] xl:min-w-[8rem] xl:max-w-[8rem]"
                 >
                   <span className="font-mono">{column.letter}</span>
                 </th>
@@ -817,7 +817,7 @@ function ExcelDiffGridSectionView({
           <tbody>
             {section.rows.map((row) => (
               <tr key={row.row_index}>
-                <th className="border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 text-left font-mono">
+                <th className="min-w-[3.25rem] border-b border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 py-1 text-left font-mono sm:min-w-[4rem]">
                   {row.row_number}
                 </th>
                 {row.cells.map((cell) => {
@@ -834,7 +834,7 @@ function ExcelDiffGridSectionView({
                     <td
                       key={`${cell.sheet_name ?? ''}-${cell.row_index}-${cell.column_index}`}
                       title={excelGridCellTitle(cell)}
-                      className={`w-[8rem] min-w-[8rem] max-w-[8rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-pointer hover:ring-1 hover:ring-inset hover:ring-[var(--md-sys-color-primary)] ${excelGridHighlightClass(cell.highlight)} ${
+                      className={`w-[6.5rem] min-w-[6.5rem] max-w-[6.5rem] border-b border-r border-[var(--md-sys-color-outline-variant)] px-2 py-1 align-top font-mono whitespace-nowrap cursor-pointer hover:ring-1 hover:ring-inset hover:ring-[var(--md-sys-color-primary)] sm:w-[7.5rem] sm:min-w-[7.5rem] sm:max-w-[7.5rem] xl:w-[8rem] xl:min-w-[8rem] xl:max-w-[8rem] ${excelGridHighlightClass(cell.highlight)} ${
                         selected ? 'outline outline-2 outline-[var(--md-sys-color-primary)] outline-offset-[-2px]' : ''
                       } ${isTutorialCell ? 'attention-pulse tour-target' : ''}`}
                       data-tour-target={isTutorialCell ? 'excel-table-cell' : undefined}

@@ -579,10 +579,10 @@ async function openLatestReleasePage(): Promise<void> {
 
 async function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 980,
-    minHeight: 680,
+    width: 1400,
+    height: 900,
+    minWidth: 1040,
+    minHeight: 700,
     icon: getAppIconPath(),
     show: false,
     autoHideMenuBar: true,

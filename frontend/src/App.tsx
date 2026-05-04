@@ -113,10 +113,9 @@ const TUTORIAL_CONFIRMATION_ADVANCE_MS = 1400
 const TUTORIAL_CONFIRMATION_ADVANCE_BY_STEP: Partial<Record<TutorialStep, number>> = {
   'search-review': 1800,
   'version-ppt-detail': 1500,
-  'version-excel-review': 1600,
+  'version-excel-review': 3200,
   'excel-table-history': 1800,
 }
-const TUTORIAL_DIM_STEPS = new Set<TutorialStep>(['version-ppt-detail', 'excel-table-history'])
 
 function getTutorialAutoAdvanceDelay(step: TutorialStep) {
   return TUTORIAL_CONFIRMATION_ADVANCE_BY_STEP[step] ?? TUTORIAL_CONFIRMATION_ADVANCE_MS
@@ -239,8 +238,19 @@ function getTutorialCopy(step: TutorialStep | null, activeTab: Tab): TourCopy | 
 }
 
 function getTutorialTargetElement(step: TutorialStep) {
-  const targeted = document.querySelector<HTMLElement>(`[data-tour-target="${step}"]`)
-  return targeted ?? document.querySelector<HTMLElement>('.tour-target')
+  return document.querySelector<HTMLElement>(`[data-tour-target="${step}"]`)
+}
+
+function isTutorialTargetVisible(rect: DOMRect, viewport: { width: number; height: number }) {
+  const margin = 8
+  return (
+    rect.width > 2 &&
+    rect.height > 2 &&
+    rect.right > margin &&
+    rect.bottom > margin &&
+    rect.left < viewport.width - margin &&
+    rect.top < viewport.height - margin
+  )
 }
 
 function clearOfficeWhereLocalState() {
@@ -802,24 +812,59 @@ function GuidedTourHud({
     }
 
     let frame = 0
+    let observedTarget: HTMLElement | null = null
+    let targetObserver: ResizeObserver | null = null
+    let layoutObserver: ResizeObserver | null = null
+    const syncViewport = () => {
+      const currentViewport = getViewport()
+      setViewport((previous) =>
+        previous.width === currentViewport.width && previous.height === currentViewport.height
+          ? previous
+          : currentViewport,
+      )
+      return currentViewport
+    }
     const readTarget = () => {
       if (step === 'done') {
         setTargetRect(null)
         return
       }
 
+      const currentViewport = syncViewport()
       const target = getTutorialTargetElement(step)
-      if (!target) {
+      if (targetObserver && target !== observedTarget) {
+        if (observedTarget) targetObserver.unobserve(observedTarget)
+        if (target) targetObserver.observe(target)
+        observedTarget = target
+      }
+      if (!target || !target.isConnected || target.getClientRects().length === 0) {
         setTargetRect(null)
         return
       }
 
       const rect = target.getBoundingClientRect()
-      setTargetRect({
+      if (!isTutorialTargetVisible(rect, currentViewport)) {
+        setTargetRect(null)
+        return
+      }
+
+      const nextRect = {
         left: rect.left,
         top: rect.top,
         width: rect.width,
         height: rect.height,
+      }
+      setTargetRect((previous) => {
+        if (
+          previous &&
+          Math.abs(previous.left - nextRect.left) < 0.5 &&
+          Math.abs(previous.top - nextRect.top) < 0.5 &&
+          Math.abs(previous.width - nextRect.width) < 0.5 &&
+          Math.abs(previous.height - nextRect.height) < 0.5
+        ) {
+          return previous
+        }
+        return nextRect
       })
     }
 
@@ -828,21 +873,34 @@ function GuidedTourHud({
       frame = window.requestAnimationFrame(readTarget)
     }
     const handleResize = () => {
-      setViewport(getViewport())
+      syncViewport()
       scheduleRead()
     }
 
-    const firstRead = window.setTimeout(readTarget, 80)
+    if (typeof ResizeObserver !== 'undefined') {
+      targetObserver = new ResizeObserver(scheduleRead)
+      layoutObserver = new ResizeObserver(scheduleRead)
+      layoutObserver.observe(document.documentElement)
+      layoutObserver.observe(document.body)
+    }
+    readTarget()
+    const settleReads = [80, 220, 520].map((delay) => window.setTimeout(readTarget, delay))
     const retryRead = window.setInterval(readTarget, 360)
     window.addEventListener('scroll', scheduleRead, true)
     window.addEventListener('resize', handleResize)
+    window.visualViewport?.addEventListener('resize', handleResize)
+    window.visualViewport?.addEventListener('scroll', scheduleRead)
 
     return () => {
-      window.clearTimeout(firstRead)
+      settleReads.forEach((timer) => window.clearTimeout(timer))
       window.clearInterval(retryRead)
       window.cancelAnimationFrame(frame)
+      targetObserver?.disconnect()
+      layoutObserver?.disconnect()
       window.removeEventListener('scroll', scheduleRead, true)
       window.removeEventListener('resize', handleResize)
+      window.visualViewport?.removeEventListener('resize', handleResize)
+      window.visualViewport?.removeEventListener('scroll', scheduleRead)
     }
   }, [activeTab, step, targetTab])
 
@@ -899,44 +957,18 @@ function GuidedTourHud({
     : null
   const stepIndex = getTutorialStepIndex(step)
   const section = getTutorialSection(step)
-  const shouldDim = TUTORIAL_DIM_STEPS.has(step)
 
   return (
     <div className="fixed inset-0 z-[90] pointer-events-none">
       {!isDone && spotlight && (
         <svg className="tour-spotlight-canvas" aria-hidden="true">
-          {shouldDim && (
-            <defs>
-              <mask id="tour-spotlight-mask">
-                <rect x="0" y="0" width={viewport.width} height={viewport.height} fill="white" />
-                <rect
-                  x={spotlight.left}
-                  y={spotlight.top}
-                  width={spotlight.width}
-                  height={spotlight.height}
-                  rx={spotlight.radius}
-                  fill="black"
-                />
-              </mask>
-            </defs>
-          )}
-          {shouldDim && (
-            <rect
-              x="0"
-              y="0"
-              width={viewport.width}
-              height={viewport.height}
-              className="tour-spotlight-scrim"
-              mask="url(#tour-spotlight-mask)"
-            />
-          )}
           <rect
             x={spotlight.left}
             y={spotlight.top}
             width={spotlight.width}
             height={spotlight.height}
             rx={spotlight.radius}
-            className={`tour-spotlight-ring${shouldDim ? ' is-dimmed' : ''}`}
+            className="tour-spotlight-ring"
           />
         </svg>
       )}
