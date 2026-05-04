@@ -29,6 +29,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PYTHON_VERSION = "3.13"
 PYTHON_STANDALONE_API = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
 PYTHON_STANDALONE_RELEASES_PAGE = "https://github.com/astral-sh/python-build-standalone/releases"
+PYTHON_STANDALONE_EXPANDED_ASSETS = (
+    "https://github.com/astral-sh/python-build-standalone/releases/expanded_assets"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,8 +86,14 @@ def fetch_json(url: str) -> Any:
     raise last_error
 
 
-def fetch_text(url: str) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": "OfficeWhere-runtime-prep"})
+def fetch_text(url: str, *, ajax: bool = False) -> str:
+    headers = {"User-Agent": "OfficeWhere-runtime-prep"}
+    if ajax:
+        headers["X-Requested-With"] = "XMLHttpRequest"
+    request = urllib.request.Request(
+        url,
+        headers=headers,
+    )
     last_error: Exception | None = None
     for attempt in range(1, 4):
         try:
@@ -112,14 +121,26 @@ def find_asset_from_releases_page(python_version: str) -> tuple[str, str]:
         rf'{version_pattern}[^"]*?aarch64-apple-darwin[^"]*?install_only[^"]*?\.tar\.gz)"'
     )
     page = fetch_text(PYTHON_STANDALONE_RELEASES_PAGE)
+    expanded_asset_ids = list(
+        dict.fromkeys(
+            re.findall(r"/astral-sh/python-build-standalone/releases/expanded_assets/([^\"?#&]+)", page)
+        )
+    )
+    pages = [page]
+    for expanded_asset_id in expanded_asset_ids[:6]:
+        pages.append(
+            fetch_text(f"{PYTHON_STANDALONE_EXPANDED_ASSETS}/{expanded_asset_id}", ajax=True)
+        )
+
     candidates: list[tuple[int, str, str]] = []
-    for match in pattern.finditer(page):
-        href = html.unescape(match.group("href"))
-        if "debug" in href or "freethreaded" in href:
-            continue
-        url = href if href.startswith("http") else f"https://github.com{href}"
-        name = url.rsplit("/", 1)[-1].replace("%2B", "+")
-        candidates.append((score_asset_name(name), name, url))
+    for page_html in pages:
+        for match in pattern.finditer(page_html):
+            href = html.unescape(match.group("href"))
+            if "debug" in href or "freethreaded" in href:
+                continue
+            url = href if href.startswith("http") else f"https://github.com{href}"
+            name = url.rsplit("/", 1)[-1].replace("%2B", "+")
+            candidates.append((score_asset_name(name), name, url))
     if not candidates:
         raise RuntimeError("GitHub releases page did not expose a matching runtime asset link")
     _, name, url = sorted(candidates, key=lambda item: item[0])[0]

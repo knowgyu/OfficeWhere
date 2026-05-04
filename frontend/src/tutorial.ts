@@ -14,7 +14,7 @@ export type TutorialStep =
   | 'excel-table-history'
   | 'done'
 
-export const EXAMPLE_SEARCH_QUERY = '회의록'
+export const EXAMPLE_SEARCH_QUERY = '일정'
 export const EXAMPLE_PPT_QUERY = '프로젝트상태'
 export const EXAMPLE_EXCEL_QUERY = '사업예산'
 

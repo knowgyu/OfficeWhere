@@ -141,7 +141,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   search: {
     eyebrow: '문서 검색',
-    title: '회의록을 입력해 보세요',
+    title: '일정을 입력해 보세요',
     description: '검색창에 입력하면 잠시 뒤 자동으로 파일명과 본문 결과가 함께 나타납니다.',
     icon: 'search',
     keyword: EXAMPLE_SEARCH_QUERY,
@@ -900,39 +900,50 @@ function GuidedTourHud({
   const isDone = step === 'done'
   const bubbleWidth = Math.min(isDone ? 380 : 352, Math.max(280, viewport.width - 32))
   const bubbleHeight = isDone ? 300 : 214
-  const targetCenter = targetRect
-    ? {
-        x: targetRect.left + targetRect.width / 2,
-        y: targetRect.top + targetRect.height / 2,
-      }
-    : null
+  const target = targetRect
+  const canPlaceBubbleRight = target ? target.left + target.width + bubbleWidth + 18 <= viewport.width - 16 : false
+  const canPlaceBubbleLeft = target ? target.left - bubbleWidth - 18 >= 16 : false
+  const placeBubbleBeside =
+    target !== null && target.width < bubbleWidth * 0.82 && (canPlaceBubbleRight || canPlaceBubbleLeft)
+  const placeBubbleBelow = target ? target.top + target.height + bubbleHeight + 18 <= viewport.height - 16 : false
+  const targetBubbleLeft = target
+    ? placeBubbleBeside
+      ? canPlaceBubbleRight
+        ? target.left + target.width + 18
+        : target.left - bubbleWidth - 18
+      : target.left + target.width / 2 - bubbleWidth / 2
+    : pointer.x > viewport.width - bubbleWidth - 44
+      ? pointer.x - bubbleWidth - 26
+      : pointer.x + 26
+  const targetBubbleTop = target
+    ? placeBubbleBeside
+      ? target.top + target.height / 2 - bubbleHeight / 2
+      : placeBubbleBelow
+        ? target.top + target.height + 18
+        : target.top - bubbleHeight - 18
+    : pointer.y > viewport.height - bubbleHeight - 44
+      ? pointer.y - bubbleHeight - 24
+      : pointer.y + 22
   const bubbleLeft = isDone
     ? Math.max(16, (viewport.width - bubbleWidth) / 2)
-    : clamp(
-        pointer.x > viewport.width - bubbleWidth - 44 ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
-        16,
-        Math.max(16, viewport.width - bubbleWidth - 16),
-      )
+    : clamp(targetBubbleLeft, 16, Math.max(16, viewport.width - bubbleWidth - 16))
   const bubbleTop = isDone
     ? Math.max(16, (viewport.height - bubbleHeight) / 2)
-    : clamp(
-        pointer.y > viewport.height - bubbleHeight - 44 ? pointer.y - bubbleHeight - 24 : pointer.y + 22,
-        16,
-        Math.max(16, viewport.height - bubbleHeight - 16),
-      )
-  const bubbleRect: TourRect = { left: bubbleLeft, top: bubbleTop, width: bubbleWidth, height: bubbleHeight }
-  const targetAnchor = targetRect && targetCenter ? getRectBoundaryPoint(targetRect, {
-    x: bubbleLeft + bubbleWidth / 2,
-    y: bubbleTop + bubbleHeight / 2,
-  }) : null
-  const bubbleAnchor = targetCenter ? getRectBoundaryPoint(bubbleRect, targetCenter) : null
-  const curve = !isDone && targetAnchor && bubbleAnchor
+    : clamp(targetBubbleTop, 16, Math.max(16, viewport.height - bubbleHeight - 16))
+  const pointerAnchor = {
+    x: clamp(pointer.x, 8, Math.max(8, viewport.width - 8)),
+    y: clamp(pointer.y, 8, Math.max(8, viewport.height - 8)),
+  }
+  const pointerHintLeft = clamp(pointerAnchor.x + 14, 16, Math.max(16, viewport.width - 104))
+  const pointerHintTop = clamp(pointerAnchor.y + 14, 16, Math.max(16, viewport.height - 40))
+  const targetAnchor = target ? getRectBoundaryPoint(target, pointerAnchor) : null
+  const curve = !isDone && targetAnchor
     ? {
-        startX: bubbleAnchor.x,
-        startY: bubbleAnchor.y,
-        c1X: bubbleAnchor.x + (targetAnchor.x - bubbleAnchor.x) * 0.36,
-        c1Y: bubbleAnchor.y,
-        c2X: bubbleAnchor.x + (targetAnchor.x - bubbleAnchor.x) * 0.74,
+        startX: pointerAnchor.x,
+        startY: pointerAnchor.y,
+        c1X: pointerAnchor.x + (targetAnchor.x - pointerAnchor.x) * 0.32,
+        c1Y: pointerAnchor.y,
+        c2X: pointerAnchor.x + (targetAnchor.x - pointerAnchor.x) * 0.74,
         c2Y: targetAnchor.y,
         endX: targetAnchor.x,
         endY: targetAnchor.y,
@@ -949,9 +960,17 @@ function GuidedTourHud({
             d={`M ${curve.startX} ${curve.startY} C ${curve.c1X} ${curve.c1Y}, ${curve.c2X} ${curve.c2Y}, ${curve.endX} ${curve.endY}`}
             className="tour-hud-line"
           />
+          <circle cx={curve.startX} cy={curve.startY} r="5" className="tour-hud-pointer-core" />
+          <circle cx={curve.startX} cy={curve.startY} r="13" className="tour-hud-pointer-halo" />
           <circle cx={curve.endX} cy={curve.endY} r="7" className="tour-hud-target-core" />
           <circle cx={curve.endX} cy={curve.endY} r="18" className="tour-hud-target-halo" />
         </svg>
+      )}
+      {curve && (
+        <div className="tour-pointer-hint" style={{ left: pointerHintLeft, top: pointerHintTop }}>
+          <Icon name="near_me" size={14} />
+          <span>이쪽으로</span>
+        </div>
       )}
       <div
         className={`tour-hud-bubble${isDone ? ' tour-hud-bubble-interactive' : ''}`}

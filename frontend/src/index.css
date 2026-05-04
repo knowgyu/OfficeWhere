@@ -731,6 +731,21 @@ body,
   filter: none;
 }
 
+.tour-hud-pointer-core {
+  fill: var(--md-sys-color-tertiary);
+  stroke: var(--md-sys-color-surface-container-lowest);
+  stroke-width: 2;
+}
+
+.tour-hud-pointer-halo {
+  fill: none;
+  stroke: color-mix(in srgb, var(--md-sys-color-tertiary) 64%, transparent);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tour-hud-halo 1.35s ease-out infinite;
+}
+
 .tour-hud-target-core {
   fill: var(--md-sys-color-primary);
   stroke: var(--md-sys-color-surface-container-lowest);
@@ -745,6 +760,23 @@ body,
   transform-box: fill-box;
   transform-origin: center;
   animation: tour-hud-halo 1.35s ease-out infinite;
+}
+
+.tour-pointer-hint {
+  position: fixed;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-tertiary) 34%, var(--md-sys-color-outline-variant));
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 90%, var(--md-sys-color-tertiary-container) 10%);
+  padding: 0.2rem 0.5rem;
+  color: var(--md-sys-color-on-surface);
+  font-size: 0.7rem;
+  font-weight: 730;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.14),
+    0 1px 0 var(--ow-inset-highlight) inset;
 }
 
 @keyframes attention-ring {
@@ -1044,6 +1076,7 @@ body,
   .tour-hud-bubble,
   .tour-hud-line,
   .tour-hud-target-halo,
+  .tour-hud-pointer-halo,
   .tour-review-target,
   .tour-review-target::before,
   .tour-review-target::after,

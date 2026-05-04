@@ -660,7 +660,7 @@ export default function FileSearch({
             >
               <TextField
                 leadingIcon="search"
-                placeholder={tutorialStep === 'search' ? `따라 쓰세요: ${EXAMPLE_SEARCH_QUERY}` : '파일 안의 단어를 검색 (예: 회의록, 예산안, 실험 결과)'}
+                placeholder={tutorialStep === 'search' ? `따라 쓰세요: ${EXAMPLE_SEARCH_QUERY}` : '파일 안의 단어를 검색 (예: 일정, 예산안, 실험 결과)'}
                 value={query}
                 onChange={(event) => handleQueryChange(event.target.value)}
                 className="h-12 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_var(--ow-inset-highlight)_inset,0_0_0_1px_color-mix(in_srgb,var(--md-sys-color-outline-variant)_55%,transparent)]"
