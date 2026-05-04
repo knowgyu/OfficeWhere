@@ -64,7 +64,7 @@ def test_release_workflow_builds_and_publishes_macos_artifacts():
 def test_release_docs_do_not_describe_macos_packaging_as_future_work():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     build_sh = (REPO_ROOT / "build.sh").read_text(encoding="utf-8")
-    release_note = (REPO_ROOT / "docs" / "releases" / "v0.7.4.md").read_text(encoding="utf-8")
+    release_note = (REPO_ROOT / "docs" / "releases" / "v0.7.5.md").read_text(encoding="utf-8")
     windows_runtime_readme = (REPO_ROOT / "python-runtime" / "win-x64" / "README.md").read_text(encoding="utf-8")
 
     assert "officewhere-vX.Y.Z-mac-arm64.dmg" in readme
@@ -73,3 +73,12 @@ def test_release_docs_do_not_describe_macos_packaging_as_future_work():
     assert "DRM" not in release_note
     assert "DRM" not in windows_runtime_readme
     assert "npm run package:mac" in build_sh
+
+
+def test_python_runtime_asset_lookup_uses_github_token_when_available():
+    prepare_script = (REPO_ROOT / "scripts" / "prepare_python_runtime.py").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert "os.environ.get(\"GITHUB_TOKEN\") or os.environ.get(\"GH_TOKEN\")" in prepare_script
+    assert "headers[\"Authorization\"] = f\"Bearer {token}\"" in prepare_script
+    assert "GITHUB_TOKEN: ${{ github.token }}" in workflow.split("macos-release:", 1)[1]

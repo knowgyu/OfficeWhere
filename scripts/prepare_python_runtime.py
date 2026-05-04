@@ -58,12 +58,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def fetch_json(url: str) -> Any:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "OfficeWhere-runtime-prep",
+    }
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     request = urllib.request.Request(
         url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "OfficeWhere-runtime-prep",
-        },
+        headers=headers,
     )
     last_error: Exception | None = None
     for attempt in range(1, 4):
