@@ -129,87 +129,87 @@ function getTutorialAutoAdvanceDelay(step: TutorialStep) {
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
     eyebrow: '예제 폴더',
-    title: '임시 예제 폴더를 추가하세요',
-    description: '튜토리얼용으로 방금 만든 폴더입니다. 대상 추가만 누르면 됩니다.',
+    title: '예제 폴더를 추가해 볼게요',
+    description: '방금 만든 임시 폴더입니다. 대상 추가를 누르면 예제 문서가 등록됩니다.',
     icon: 'drive_folder_upload',
   },
   'document-refresh': {
     eyebrow: '문서 준비',
-    title: '문서 새로고침을 눌러보세요',
-    description: '파일이 바뀌었을 때 이 버튼으로 다시 확인합니다.',
+    title: '문서를 한 번 새로고침하세요',
+    description: '폴더 안의 문서를 읽어 검색과 변경 이력에 쓸 정보를 준비합니다.',
     icon: 'sync',
   },
   search: {
     eyebrow: '문서 검색',
-    title: '일정을 입력해 보세요',
-    description: '검색창에 입력하면 잠시 뒤 자동으로 파일명과 본문 결과가 함께 나타납니다.',
+    title: '검색창에 일정을 입력하세요',
+    description: '입력이 끝나면 잠시 후 파일명과 본문에서 찾은 결과가 함께 나옵니다.',
     icon: 'search',
     keyword: EXAMPLE_SEARCH_QUERY,
   },
   'search-results': {
     eyebrow: '본문 매칭',
-    title: '본문 위치가 열려 있어요',
-    description: '기본으로 펼쳐진 본문 위치에서 어떤 문장에 걸렸는지 천천히 확인합니다.',
+    title: '본문에서 찾은 위치를 확인하세요',
+    description: '결과 아래에 검색어가 들어간 문장과 위치가 펼쳐져 있습니다.',
     icon: 'unfold_more',
   },
   'search-review': {
     eyebrow: '검색 결과',
-    title: '문서 내용에서 찾았어요',
-    description: '강조된 줄에서 검색어가 나온 위치를 확인합니다.',
+    title: '이 문장에서 검색어를 찾았습니다',
+    description: '강조된 줄을 확인하면 다음 안내로 넘어갑니다.',
     icon: 'visibility',
   },
   'version-ppt': {
     eyebrow: 'PPT 변경 이력',
-    title: 'PPT 변경 증거를 엽니다',
-    description: '변경점 보기로 바뀐 슬라이드를 확인합니다.',
+    title: 'PPT 변경점을 열어보세요',
+    description: '변경점 보기를 누르면 슬라이드별로 달라진 부분을 볼 수 있습니다.',
     icon: 'timeline',
   },
   'version-ppt-review': {
     eyebrow: 'PPT 변경',
-    title: '자세히 보기를 눌러보세요',
-    description: '접힌 슬라이드를 열면 실제 변경 내용을 볼 수 있습니다.',
+    title: '접힌 내용을 펼쳐보세요',
+    description: '자세히 보기를 누르면 어떤 문장이 바뀌었는지 바로 확인할 수 있습니다.',
     icon: 'unfold_more',
   },
   'version-ppt-detail': {
     eyebrow: 'PPT 변경 상세',
-    title: '실제 변경 내용입니다',
-    description: '슬라이드별 변경을 확인하면 곧바로 Excel 변경 이력으로 이어집니다.',
+    title: 'PPT에서 달라진 부분입니다',
+    description: '슬라이드 변경 내용을 확인하면 다음 안내로 이어집니다.',
     icon: 'visibility',
   },
   'version-excel': {
     eyebrow: 'Excel 변경 이력',
-    title: 'Excel 값 변경을 엽니다',
-    description: '변경점 보기로 바뀐 값을 확인합니다.',
+    title: 'Excel 변경점도 확인해 볼게요',
+    description: '변경점 보기를 누르면 바뀐 셀과 값을 먼저 보여줍니다.',
     icon: 'difference',
   },
   'version-excel-review': {
     eyebrow: 'Excel 변경',
-    title: '값 차이가 잡혔어요',
-    description: '노랑·초록·빨강 요약이 변경 지점입니다.',
+    title: '바뀐 셀이 표시됐습니다',
+    description: '색으로 표시된 셀이 추가·삭제·수정된 위치입니다.',
     icon: 'fact_check',
   },
   'excel-table': {
     eyebrow: '셀 단위 보기',
-    title: '표로 보기를 눌러보세요',
-    description: '셀 단위로 바뀐 지점을 색으로 확인합니다.',
+    title: '표로 자세히 보세요',
+    description: '표로 보기를 누르면 시트 위에서 바뀐 셀을 바로 볼 수 있습니다.',
     icon: 'table_chart',
   },
   'excel-table-cell': {
     eyebrow: '셀 변경',
-    title: 'D7 셀을 눌러보세요',
-    description: '색이 있는 셀을 누르면 아래에 변경 이력이 열립니다.',
+    title: 'D7 셀을 선택하세요',
+    description: '색이 있는 셀을 누르면 아래에 이전 값과 현재 값이 열립니다.',
     icon: 'table_view',
   },
   'excel-table-history': {
     eyebrow: '셀 변경 이력',
-    title: '이 셀이 어떻게 바뀌었는지 확인하세요',
-    description: '수정 전과 수정 후 값이 아래에 따로 정리됩니다.',
+    title: '셀 값의 변화가 정리됐습니다',
+    description: '이전 값과 현재 값을 확인하면 튜토리얼이 끝납니다.',
     icon: 'history',
   },
   done: {
     eyebrow: '둘러보기 완료',
-    title: '핵심 흐름을 모두 확인했어요',
-    description: '임시 예제는 정리됩니다. 이제 내 문서 폴더에서도 같은 방식으로 확인해 보세요.',
+    title: '기본 흐름을 모두 확인했습니다',
+    description: '예제는 정리되고, 이제 설정에서 내 문서 폴더를 추가해 보세요.',
     icon: 'task_alt',
   },
 }
@@ -632,7 +632,10 @@ export default function App() {
         activeTab={activeTab}
         targetTab={tutorialTargetTab}
         onAdvance={(next) => setTutorialStep(next)}
-        onCloseDone={() => setTutorialStep(null)}
+        onCloseDone={() => {
+          setTutorialStep(null)
+          setActiveTab('files')
+        }}
         onReplayOnboarding={() => {
           setTutorialStep(null)
           setOnboardingReplay(true)
@@ -982,14 +985,14 @@ function GuidedTourHud({
               <Icon name="task_alt" size={28} filled />
             </div>
             <p className="tour-hud-eyebrow">둘러보기 완료</p>
-            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">핵심 흐름을 모두 확인했어요</p>
+            <p className="type-title-md text-[var(--md-sys-color-on-surface)]">기본 흐름을 모두 확인했습니다</p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              임시 예제는 정리됩니다. 이제 내 문서 폴더에서도 같은 방식으로 확인해 보세요.
+              예제는 정리되고, 이제 설정에서 내 문서 폴더를 추가해 보세요.
             </p>
             <ul className="tour-hud-summary">
-              <li><Icon name="search" size={16} /><span>파일명·본문 통합 검색</span></li>
-              <li><Icon name="timeline" size={16} /><span>PPT·Excel 변경 이력 추적</span></li>
-              <li><Icon name="grid_on" size={16} /><span>Excel 셀 단위 차이와 이력</span></li>
+              <li><Icon name="search" size={16} /><span>파일명과 본문을 함께 검색</span></li>
+              <li><Icon name="timeline" size={16} /><span>PPT·Excel 변경점 확인</span></li>
+              <li><Icon name="grid_on" size={16} /><span>Excel 셀 값 변화 확인</span></li>
             </ul>
             <div className="tour-hud-done-actions">
               <button
@@ -999,7 +1002,7 @@ function GuidedTourHud({
                 onClick={onCloseDone}
               >
                 <Icon name="folder_open" size={16} />
-                <span>내 폴더로 시작하기</span>
+                <span>설정에서 폴더 추가하기</span>
               </button>
               <button
                 type="button"
@@ -1007,7 +1010,7 @@ function GuidedTourHud({
                 onClick={onReplayOnboarding}
               >
                 <Icon name="replay" size={16} />
-                <span>처음부터 다시 보기</span>
+                <span>온보딩 다시 보기</span>
               </button>
             </div>
           </div>
