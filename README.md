@@ -20,7 +20,7 @@ OfficeWhere는 회사 폴더, 연구 자료, 수업 과제, 프로젝트 산출�
 
 ### 네트워크 드라이브나 공유 폴더에서 문서를 찾아야 할 때
 
-회사에서 `K:\` 같은 네트워크 드라이브를 사용하거나 팀 공유 폴더에 문서를 모아두는 경우에도, 로컬 PC에서 접근 가능한 경로라면 대상 폴더로 등록할 수 있습니다. 앱은 원본 파일을 읽기만 하므로 검색 색인과 앱 데이터는 별도로 저장되고, 공유 폴더 안의 원본 문서를 삭제하거나 수정하지 않습니다.
+회사에서 네트워크 드라이브나 팀 공유 폴더에 문서를 모아두는 경우에도, 로컬 PC에서 접근 가능한 경로라면 대상 폴더로 등록할 수 있습니다. 앱은 원본 파일을 읽기만 하므로 검색 색인과 앱 데이터는 별도로 저장되고, 공유 폴더 안의 원본 문서를 삭제하거나 수정하지 않습니다.
 
 ## 지원 파일
 
@@ -36,8 +36,9 @@ OfficeWhere는 회사 폴더, 연구 자료, 수업 과제, 프로젝트 산출�
 
 - [Releases](../../releases) 페이지에서 최신 배포 파일 다운로드
 - Windows: `officewhere-vX.Y.Z-windows-x64.zip` 압축 해제 후 `OfficeWhere.exe` 실행
+- macOS Apple Silicon: `officewhere-vX.Y.Z-mac-arm64.dmg` 또는 `.zip` 다운로드 후 실행
 - 별도 설치 과정 없음
-- macOS / Linux 패키지는 embedded Python 방식으로 추후 지원 예정
+- Linux 패키지는 아직 제공하지 않습니다.
 
 ## 웹 브라우저에서 빠르게 테스트하기
 
@@ -88,7 +89,7 @@ http://127.0.0.1:15173
 
 - 종료: 실행 중인 터미널에서 `Ctrl+C`
 - backend도 함께 종료됩니다.
-- WSL에서도 실행은 가능하지만, Windows 네트워크 드라이브나 `K:\...` 경로 테스트는 Windows에서 `dev-web.bat`으로 실행하는 편이 안전합니다.
+- WSL에서도 실행은 가능하지만, Windows 네트워크 드라이브 경로 테스트는 Windows에서 `dev-web.bat`으로 실행하는 편이 안전합니다.
 
 ## 직접 빌드하기
 
@@ -99,6 +100,7 @@ http://127.0.0.1:15173
 - Node.js LTS
 - 개발/테스트용 Python 3.11 이상 (`setup.*`, `dev-web.*`, pytest 실행 시; 3.13 권장)
 - Windows 배포 빌드는 repo에 포함된 `python-runtime/win-x64/python.exe`를 사용
+- macOS 배포 빌드는 Apple Silicon macOS runner에서 private Python runtime을 준비해 앱에 포함
 
 ### Windows
 
@@ -113,7 +115,7 @@ build.bat
 - zip에는 OfficeWhere 전용 embedded Python runtime과 backend source가 함께 포함됨
 - zip 압축 해제 후 `OfficeWhere.exe` 실행
 
-### Linux / macOS
+### macOS
 
 ```bash
 chmod +x setup.sh build.sh
@@ -124,8 +126,21 @@ chmod +x setup.sh build.sh
 결과:
 
 - frontend / Electron main 빌드 검증
-- macOS / Linux packaged release는 Windows와 같은 embedded Python 방향으로 추후 정리 예정
-- Windows zip은 build.bat 또는 GitHub Actions에서 생성
+- Apple Silicon macOS에서는 `dist/electron/` 아래 dmg/zip 생성
+- dmg/zip에는 OfficeWhere 전용 private Python runtime과 backend source가 함께 포함됨
+
+### Linux
+
+```bash
+chmod +x setup.sh build.sh
+./setup.sh
+./build.sh
+```
+
+결과:
+
+- frontend / Electron main 빌드 검증
+- Linux packaged release는 아직 제공하지 않습니다.
 
 ## 데이터 저장 위치
 

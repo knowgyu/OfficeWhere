@@ -6,9 +6,8 @@ and exact-pinned site-packages used by packaged OfficeWhere Windows releases.
 Source runtime: https://www.python.org/downloads/release/python-31313/
 Runtime file: `python-3.13.13-embed-amd64.zip`
 
-OfficeWhere launches this private `python.exe` directly so company DRM agents
-that trust Python can provide decrypted OOXML bytes to the backend parser. Users
-should not install Python or run pip for packaged releases.
+OfficeWhere launches this private `python.exe` directly so packaged releases can
+run the backend without requiring users to install Python or run pip.
 
 Vendored packages are the exact pins in the repository root `requirements.txt`.
 Package test directories, console-script shims, `__pycache__`, and `.pyc` files

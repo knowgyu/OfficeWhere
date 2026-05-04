@@ -54,7 +54,7 @@ Use this checklist before publishing a release tag.
 - [ ] Full reset remains behind a stronger warning/advanced path.
 - [ ] Original watched folders and Office documents remain untouched after app-data cleanup.
 - [ ] A mapped/network drive folder can be added when the current OS user can access it.
-- [ ] On a DRM policy Windows PC, protected `.xlsx` / `.docx` / `.pptx` files index through the bundled embedded Python runtime.
+- [ ] On a Windows PC with corporate document protection enabled, protected `.xlsx` / `.docx` / `.pptx` files index through the bundled embedded Python runtime.
 - [ ] Search, indexing, and version management read source documents only; they do not delete, move, rename, or save originals.
 - [ ] The OS “open file” action is understood as handing the document to Office; manual user edits in Office are outside app-controlled read-only scanning.
 

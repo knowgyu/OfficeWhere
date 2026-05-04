@@ -12,9 +12,15 @@ cd frontend
 npm ci
 npm run build
 npm run build:electron
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "[officewhere] macOS Electron 패키징 중..."
+    npm run package:mac
+else
+    echo "[officewhere] 패키징은 Windows build.bat 또는 macOS GitHub Actions/release runner에서 수행하세요."
+fi
 cd ..
 
 echo ""
 echo "[완료] 프론트엔드와 Electron main/preload 빌드가 완료되었습니다."
 echo "Windows release zip은 bundled Python 런타임을 포함해 Windows에서 build.bat 또는 GitHub Actions로 생성하세요."
-echo "macOS/Linux packaged releases will use the embedded-Python direction in a later pass."
+echo "macOS release dmg/zip은 Apple Silicon macOS에서 private Python 런타임을 준비해 생성합니다."
