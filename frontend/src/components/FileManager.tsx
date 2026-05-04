@@ -3,6 +3,7 @@ import { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent,
 import {
   api,
   AppDataCandidate,
+  AppStartupSettings,
   ClearAppDataResult,
   CloseBehavior,
   FileInfo,
@@ -246,10 +247,20 @@ export default function FileManager({
   const [excludedFolderInput, setExcludedFolderInput] = useState('')
   const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>('ask')
   const [closeBehaviorLoading, setCloseBehaviorLoading] = useState(false)
+  const [startupSettings, setStartupSettings] = useState<AppStartupSettings>({
+    supported: false,
+    enabled: false,
+    executablePath: '',
+    reason: '데스크톱 앱에서만 시작프로그램 설정을 사용할 수 있습니다.',
+  })
+  const [startupSettingsLoading, setStartupSettingsLoading] = useState(false)
   const officeWhereBridge = getOfficeWhereBridge()
   const appDataAvailable = Boolean(officeWhereBridge?.getAppDataPaths && officeWhereBridge?.clearAppData)
   const closeBehaviorAvailable = Boolean(
     officeWhereBridge?.getCloseBehavior && officeWhereBridge?.setCloseBehavior,
+  )
+  const startupSettingsAvailable = Boolean(
+    officeWhereBridge?.getStartupSettings && officeWhereBridge?.setStartupSettings,
   )
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
@@ -302,11 +313,25 @@ export default function FileManager({
     }
   }
 
+  const fetchStartupSettings = async () => {
+    if (!startupSettingsAvailable) return
+    setStartupSettingsLoading(true)
+    try {
+      const response = await api.app.getStartupSettings()
+      setStartupSettings(response.data)
+    } catch {
+      snackbar.error('시작프로그램 설정을 불러오지 못했습니다.')
+    } finally {
+      setStartupSettingsLoading(false)
+    }
+  }
+
   useEffect(() => {
     void fetchFiles(0, '')
     void fetchLibrarySettings()
     void fetchAppDataPaths()
     void fetchCloseBehavior()
+    void fetchStartupSettings()
   }, [])
 
   useEffect(() => {
@@ -475,6 +500,27 @@ export default function FileManager({
       snackbar.error('창 닫기 동작을 저장하지 못했습니다.')
     } finally {
       setCloseBehaviorLoading(false)
+    }
+  }
+
+  const handleUpdateStartupSettings = async (enabled: boolean) => {
+    setStartupSettingsLoading(true)
+    try {
+      const response = await api.app.setStartupSettings(enabled)
+      setStartupSettings(response.data)
+      if (!response.data.supported) {
+        snackbar.warn(response.data.reason || '이 환경에서는 시작프로그램 설정을 사용할 수 없습니다.')
+        return
+      }
+      snackbar.success(
+        response.data.enabled
+          ? '시작프로그램에 등록했습니다. 앱 위치를 옮기면 다시 켜 주세요.'
+          : '시작프로그램 등록을 껐습니다.',
+      )
+    } catch {
+      snackbar.error('시작프로그램 설정을 저장하지 못했습니다.')
+    } finally {
+      setStartupSettingsLoading(false)
     }
   }
 
@@ -758,9 +804,13 @@ export default function FileManager({
         closeBehaviorLabels={CLOSE_BEHAVIOR_LABELS}
         closeBehaviorAvailable={closeBehaviorAvailable}
         closeBehaviorLoading={closeBehaviorLoading}
+        startupSettings={startupSettings}
+        startupSettingsAvailable={startupSettingsAvailable}
+        startupSettingsLoading={startupSettingsLoading}
         onTextSizeChange={setTextSize}
         onThemeModeChange={setThemeMode}
         onCloseBehaviorChange={(behavior) => void handleUpdateCloseBehavior(behavior)}
+        onStartupSettingsChange={(enabled) => void handleUpdateStartupSettings(enabled)}
       />
       <Card variant="elevated" className="console-panel">
         <CardSection

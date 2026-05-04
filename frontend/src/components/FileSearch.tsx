@@ -15,7 +15,7 @@ import {
   TextField,
   useSnackbar,
 } from '../ui'
-import { TutorialStep } from '../tutorial'
+import { EXAMPLE_SEARCH_QUERY, TutorialStep } from '../tutorial'
 
 const FILE_TYPE_FILTERS = [
   { label: '.xlsx', value: 'xlsx', icon: 'table_chart' },
@@ -239,6 +239,7 @@ export default function FileSearch({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRequestSeq = useRef(0)
   const prefetchedSearchRef = useRef<PrefetchedSearch | null>(null)
+  const tutorialSearchAdvanceRef = useRef<string | null>(null)
 
   const buildModifiedDateParams = useCallback(
     (
@@ -630,48 +631,67 @@ export default function FileSearch({
 
   useEffect(() => {
     if (tutorialStep !== 'search-results' || contentFileKeys.length === 0) return undefined
-    const timer = window.setTimeout(() => onTutorialStep?.('search-review'), 650)
+    const timer = window.setTimeout(() => onTutorialStep?.('search-review'), 1650)
     return () => window.clearTimeout(timer)
   }, [contentFileKeys.length, onTutorialStep, tutorialStep])
+
+  useEffect(() => {
+    if (tutorialStep !== 'search') {
+      tutorialSearchAdvanceRef.current = null
+      return undefined
+    }
+    if (!searched || loading || results.length === 0) return undefined
+    if (!query.trim().includes(EXAMPLE_SEARCH_QUERY)) return undefined
+    const advanceKey = `${query.trim()}:${results.length}:${contentFileKeys.length}`
+    if (tutorialSearchAdvanceRef.current === advanceKey) return undefined
+    tutorialSearchAdvanceRef.current = advanceKey
+    const timer = window.setTimeout(() => onTutorialStep?.('search-results'), 700)
+    return () => window.clearTimeout(timer)
+  }, [contentFileKeys.length, loading, onTutorialStep, query, results.length, searched, tutorialStep])
 
   return (
     <div className="space-y-6">
       <Card variant="elevated" className="console-panel p-5 md:p-6 space-y-5">
         <div className="flex flex-col md:flex-row gap-3 md:items-center">
           <div className="flex-1">
-            <TextField
-              leadingIcon="search"
-              placeholder="파일 안의 단어를 검색 (예: 회의록, 예산안, 실험 결과)"
-              value={query}
-              onChange={(event) => handleQueryChange(event.target.value)}
-              className="h-12 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_var(--ow-inset-highlight)_inset,0_0_0_1px_color-mix(in_srgb,var(--md-sys-color-outline-variant)_55%,transparent)]"
-              trailing={
-                query ? (
-                  <IconButton
-                    icon="close"
-                    label="검색어 지우기"
-                    size="sm"
-                    onClick={() => {
-                      if (debounceRef.current) clearTimeout(debounceRef.current)
-                      searchRequestSeq.current += 1
-                      setQuery('')
-                      setResults([])
-                      setSearchMeta({
-                        fileCount: 0,
-                        fileLimit: INITIAL_SEARCH_FILE_LIMIT,
-                        hasMore: false,
-                      })
-                      setSearched(false)
-                      setExpandedContentFiles(new Set())
-                      setLoading(false)
-                      setLoadingMore(false)
-                      setPrefetching(false)
-                      prefetchedSearchRef.current = null
-                    }}
-                  />
-                ) : null
-              }
-            />
+            <div
+              className={tutorialStep === 'search' ? 'attention-pulse tour-target rounded-xl' : undefined}
+              data-tour-target={tutorialStep === 'search' ? 'search' : undefined}
+            >
+              <TextField
+                leadingIcon="search"
+                placeholder={tutorialStep === 'search' ? `따라 쓰세요: ${EXAMPLE_SEARCH_QUERY}` : '파일 안의 단어를 검색 (예: 회의록, 예산안, 실험 결과)'}
+                value={query}
+                onChange={(event) => handleQueryChange(event.target.value)}
+                className="h-12 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_var(--ow-inset-highlight)_inset,0_0_0_1px_color-mix(in_srgb,var(--md-sys-color-outline-variant)_55%,transparent)]"
+                trailing={
+                  query ? (
+                    <IconButton
+                      icon="close"
+                      label="검색어 지우기"
+                      size="sm"
+                      onClick={() => {
+                        if (debounceRef.current) clearTimeout(debounceRef.current)
+                        searchRequestSeq.current += 1
+                        setQuery('')
+                        setResults([])
+                        setSearchMeta({
+                          fileCount: 0,
+                          fileLimit: INITIAL_SEARCH_FILE_LIMIT,
+                          hasMore: false,
+                        })
+                        setSearched(false)
+                        setExpandedContentFiles(new Set())
+                        setLoading(false)
+                        setLoadingMore(false)
+                        setPrefetching(false)
+                        prefetchedSearchRef.current = null
+                      }}
+                    />
+                  ) : null
+                }
+              />
+            </div>
           </div>
           <div className="flex gap-2 items-center">
             <Button
@@ -688,8 +708,6 @@ export default function FileSearch({
                 })
               }}
               disabled={!query.trim() || loading}
-              className={tutorialStep === 'search' ? 'attention-pulse tour-target' : ''}
-              data-tour-target={tutorialStep === 'search' ? 'search' : undefined}
             >
               검색
             </Button>
@@ -703,7 +721,12 @@ export default function FileSearch({
           {tutorialStep === 'search' && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-primary)]/20 bg-[var(--md-sys-color-primary-container)]/55 px-3 py-1 text-[var(--md-sys-color-on-primary-container)]">
               <Icon name="visibility" size={16} />
-              프로젝트를 입력하면 파일명과 본문을 함께 찾아요
+              <span className="inline-flex items-center gap-1.5">
+                <kbd className="rounded-md border border-[var(--md-sys-color-primary)]/25 bg-[var(--md-sys-color-surface-container-lowest)] px-1.5 py-0.5 font-mono text-[0.78rem]">
+                  {EXAMPLE_SEARCH_QUERY}
+                </kbd>
+                입력 후 자동으로 검색됩니다
+              </span>
             </span>
           )}
         </div>

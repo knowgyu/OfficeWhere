@@ -56,6 +56,14 @@ type ClearAppDataResult = {
 type CloseBehavior = 'ask' | 'hide' | 'quit'
 type AppResetReason = 'safe' | 'full' | 'custom'
 
+type AppStartupSettings = {
+  supported: boolean
+  enabled: boolean
+  executablePath: string
+  reason?: string
+  requiresApproval?: boolean
+}
+
 type AppResetState = {
   resetPending: boolean
   reason?: AppResetReason
@@ -156,6 +164,8 @@ function registerIpcHandlers() {
   ipcMain.handle('app:consume-reset-state', () => consumeResetState())
   ipcMain.handle('app:get-close-behavior', () => readCloseBehavior())
   ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
+  ipcMain.handle('app:get-startup-settings', () => readStartupSettings())
+  ipcMain.handle('app:set-startup-settings', (_event, payload: unknown) => setStartupSettings(payload))
   ipcMain.handle('app:get-example-library-path', () => getExampleLibraryPath())
   ipcMain.handle('app:check-for-updates', () => checkForUpdates())
   ipcMain.handle('app:install-update', () => downloadLatestUpdateZip())
@@ -935,6 +945,74 @@ function setCloseBehavior(payload: unknown): CloseBehavior {
   }
   writeSettings({ closeBehavior: value })
   return value
+}
+
+function startupSettingsSupported(): boolean {
+  return app.isPackaged && (process.platform === 'win32' || process.platform === 'darwin')
+}
+
+function startupUnsupportedReason(): string {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    return 'Windows와 macOS 패키지 앱에서만 시작프로그램 등록을 지원합니다.'
+  }
+  if (!app.isPackaged) {
+    return '개발 실행 중에는 시작프로그램을 등록하지 않습니다. 패키지 앱에서 사용할 수 있습니다.'
+  }
+  return ''
+}
+
+function startupLoginItemOptions(): Electron.LoginItemSettingsOptions | undefined {
+  if (process.platform !== 'win32') return undefined
+  return { path: process.execPath, args: [] }
+}
+
+function readStartupSettings(): AppStartupSettings {
+  if (!startupSettingsSupported()) {
+    return {
+      supported: false,
+      enabled: false,
+      executablePath: process.execPath,
+      reason: startupUnsupportedReason(),
+    }
+  }
+
+  try {
+    const settings = app.getLoginItemSettings(startupLoginItemOptions())
+    return {
+      supported: true,
+      enabled: Boolean(settings.openAtLogin),
+      executablePath: process.execPath,
+      requiresApproval: settings.status === 'requires-approval',
+      reason:
+        settings.status === 'requires-approval'
+          ? 'macOS 시스템 설정에서 로그인을 허용해야 시작프로그램으로 실행됩니다.'
+          : undefined,
+    }
+  } catch (error) {
+    return {
+      supported: false,
+      enabled: false,
+      executablePath: process.execPath,
+      reason: error instanceof Error ? error.message : '시작프로그램 상태를 확인하지 못했습니다.',
+    }
+  }
+}
+
+function setStartupSettings(payload: unknown): AppStartupSettings {
+  const enabled =
+    typeof payload === 'object' && payload && 'enabled' in payload
+      ? Boolean((payload as { enabled?: unknown }).enabled)
+      : Boolean(payload)
+
+  if (!startupSettingsSupported()) return readStartupSettings()
+
+  const settings: Electron.Settings =
+    process.platform === 'win32'
+      ? { openAtLogin: enabled, enabled, path: process.execPath, args: [], name: 'OfficeWhere' }
+      : { openAtLogin: enabled }
+
+  app.setLoginItemSettings(settings)
+  return readStartupSettings()
 }
 
 function ensureTray() {

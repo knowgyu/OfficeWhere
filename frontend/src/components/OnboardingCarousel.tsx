@@ -34,16 +34,16 @@ const slides: Slide[] = [
     eyebrow: '문서 찾기',
     title: '흩어진 문서를 빠르게 찾습니다',
     description: '파일명과 문서 내용을 함께 살펴 필요한 문서를 바로 찾습니다.',
-    proof: '프로젝트를 검색하면 파일명과 문서 내용 속 결과까지 이어집니다.',
+    proof: '회의록처럼 익숙한 단어를 입력하면 파일명과 문서 내용 속 결과까지 이어집니다.',
     accent: '#4257b2',
-    previewTitle: '프로젝트 검색',
-    previewSubtitle: 'A 프로젝트 본문 결과 8개',
+    previewTitle: '회의록 검색',
+    previewSubtitle: '파일명·본문 결과 4개',
     metric: '파일명 + 내용',
-    chips: ['프로젝트 검색', '본문 미리보기', '내 PC에서 확인'],
+    chips: ['회의록 검색', '본문 위치', '내 PC에서 확인'],
     rows: [
-      { icon: 'description', title: '주간보고_v4.0_260517.docx', meta: '본문 일치 · "프로젝트" 12회', state: 'Word' },
-      { icon: 'slideshow', title: '프로젝트상태_v4.0_260517.pptx', meta: '슬라이드 2 · 본문 일치', state: 'PPT' },
-      { icon: 'table_chart', title: '사업예산_v4.0_260517.xlsx', meta: '시트 "예산총괄" · 셀 12개', state: 'Excel' },
+      { icon: 'description', title: '회의록.docx', meta: '본문 일치 · 주요 안건', state: 'Word' },
+      { icon: 'description', title: '부서A_회의록.docx', meta: '파일명 일치 · 본문 위치 열림', state: 'Word' },
+      { icon: 'article', title: '체험 메모.txt', meta: '본문 일치 · 예제 안내', state: 'TXT' },
     ],
   },
   {
@@ -71,10 +71,10 @@ const slides: Slide[] = [
     previewTitle: '예제 둘러보기 경로',
     previewSubtitle: '핵심 흐름 안내 · 직접 클릭',
     metric: '짧은 체험',
-    chips: ['프로젝트 검색', '문서 새로고침', '표로 보기'],
+    chips: ['회의록 검색', '문서 새로고침', '표로 보기'],
     rows: [
       { icon: 'folder_open', title: '1. 임시 예제 폴더 추가', meta: '튜토리얼 완료 후 자동 정리', state: '준비' },
-      { icon: 'search', title: '2. "프로젝트"로 검색', meta: '파일명·본문 동시 검색', state: '검색' },
+      { icon: 'search', title: '2. "회의록"으로 검색', meta: '입력 후 자동 검색', state: '검색' },
       { icon: 'grid_on', title: '3. Excel 표에서 셀 차이 확인', meta: 'D7 셀 클릭 시 이력 펼침', state: '비교' },
     ],
   },
@@ -121,14 +121,14 @@ export default function OnboardingCarousel({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-[#050711] p-4 text-slate-950"
+      className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-[#111827] p-4 text-slate-950"
       role="dialog"
       aria-modal="true"
       aria-labelledby="officewhere-onboarding-title"
       onMouseDown={(event) => event.stopPropagation()}
       style={accentStyle}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_18%,rgba(83,58,253,0.24),transparent_24rem),radial-gradient(circle_at_86%_16%,rgba(20,108,46,0.18),transparent_24rem),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_35%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),transparent_42%),linear-gradient(120deg,rgba(66,87,178,0.14),transparent_34rem)]" />
       <button
         type="button"
         aria-label="둘러보기 닫기"
@@ -149,8 +149,7 @@ export default function OnboardingCarousel({
                   {replay ? '처음 둘러보기 다시 보기' : 'OfficeWhere 시작하기'}
                 </div>
                 <span
-                  key={index}
-                  className="tour-step-pop tabular-nums rounded-md border border-[#e5edf5] bg-white/70 px-2.5 py-1 text-[0.72rem] font-medium text-[#64748d]"
+                  className="tabular-nums rounded-md border border-[#e5edf5] bg-white/70 px-2.5 py-1 text-[0.72rem] font-medium text-[#64748d]"
                 >
                   {index + 1} / {slides.length}
                 </span>
@@ -208,7 +207,7 @@ export default function OnboardingCarousel({
                   </>
                 ) : (
                   <>
-                    <Button size="lg" leadingIcon="play_circle" className="attention-pulse" onClick={onStartExample}>
+                    <Button size="lg" leadingIcon="play_circle" onClick={onStartExample}>
                       예제로 둘러보기
                     </Button>
                     <Button size="lg" variant="outlined" leadingIcon="folder_open" onClick={onStartOwnFolder}>
@@ -225,8 +224,8 @@ export default function OnboardingCarousel({
             </div>
           </section>
 
-          <section className="relative overflow-hidden bg-[#0b1020] p-5 md:p-8 lg:p-10">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_10%,color-mix(in_srgb,var(--ow-onboarding-accent)_36%,transparent),transparent_18rem),linear-gradient(160deg,rgba(255,255,255,0.08),transparent_42%)]" />
+          <section className="relative overflow-hidden bg-[#0f172a] p-5 md:p-8 lg:p-10">
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(160deg,rgba(255,255,255,0.08),transparent_42%)]" />
             <ProductPreview slide={slide} />
           </section>
         </div>
@@ -238,12 +237,13 @@ export default function OnboardingCarousel({
 function ProductPreview({ slide }: { slide: Slide }) {
   return (
     <div className="relative flex h-full min-h-[32rem] items-center justify-center">
-      <div className="onboarding-preview-lift w-full max-w-[34rem] rounded-[1.35rem] border border-white/10 bg-[#0f1424]/95 p-4 shadow-[0_28px_70px_rgba(0,0,0,0.36)]">
+      <div className="w-full max-w-[34rem] rounded-[1.35rem] border border-white/10 bg-[#0f1424]/95 p-4 shadow-[0_28px_70px_rgba(0,0,0,0.36)]">
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
-          <div className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#ef4444]" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#f59e0b]" />
-            <span className="h-2.5 w-2.5 rounded-full bg-[#22c55e]" />
+          <div className="flex items-center gap-2 text-[0.76rem] font-semibold text-white/75">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/[0.06]">
+              <Icon name="folder_open" size={16} />
+            </span>
+            <span>OfficeWhere 문서 콘솔</span>
           </div>
           <div className="rounded-md border border-white/10 bg-white/[0.04] px-3 py-1 text-[0.72rem] font-medium text-slate-300">
             내 PC · 원본 보존
@@ -279,7 +279,6 @@ function ProductPreview({ slide }: { slide: Slide }) {
           </div>
 
           <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#090d18]">
-            <div className="onboarding-scan-line" />
             {slide.rows.map((row, rowIndex) => (
               <div
                 key={`${row.title}-${rowIndex}`}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type WheelEvent } from 'react'
 
 import FileManager from './components/FileManager'
 import ConsistencyCheck from './components/ConsistencyCheck'
@@ -14,6 +14,7 @@ import {
   TutorialStep,
   TUTORIAL_TOTAL_STEPS,
   TUTORIAL_SECTIONS,
+  EXAMPLE_SEARCH_QUERY,
   getTutorialStepIndex,
   getTutorialSection,
 } from './tutorial'
@@ -87,6 +88,7 @@ interface TourCopy {
   title: string
   description: string
   icon: string
+  keyword?: string
 }
 
 const TUTORIAL_TARGET_TAB: Record<TutorialStep, Tab | null> = {
@@ -98,7 +100,6 @@ const TUTORIAL_TARGET_TAB: Record<TutorialStep, Tab | null> = {
   'version-ppt': 'check',
   'version-ppt-review': 'check',
   'version-ppt-detail': 'check',
-  'version-excel-search': 'check',
   'version-excel': 'check',
   'version-excel-review': 'check',
   'excel-table': 'check',
@@ -109,11 +110,21 @@ const TUTORIAL_TARGET_TAB: Record<TutorialStep, Tab | null> = {
 
 const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
   'search-review': 'version-ppt',
-  'version-ppt-detail': 'version-excel-search',
+  'version-ppt-detail': 'version-excel',
   'version-excel-review': 'excel-table',
   'excel-table-history': 'done',
 }
-const TUTORIAL_CONFIRMATION_ADVANCE_MS = 520
+const TUTORIAL_CONFIRMATION_ADVANCE_MS = 1400
+const TUTORIAL_CONFIRMATION_ADVANCE_BY_STEP: Partial<Record<TutorialStep, number>> = {
+  'search-review': 1800,
+  'version-ppt-detail': 1500,
+  'version-excel-review': 1600,
+  'excel-table-history': 1800,
+}
+
+function getTutorialAutoAdvanceDelay(step: TutorialStep) {
+  return TUTORIAL_CONFIRMATION_ADVANCE_BY_STEP[step] ?? TUTORIAL_CONFIRMATION_ADVANCE_MS
+}
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
@@ -130,14 +141,15 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   search: {
     eyebrow: '문서 검색',
-    title: '프로젝트로 검색해 보세요',
-    description: '검색어를 직접 입력하고 찾기 버튼을 눌러 예제 문서의 파일명과 내용을 함께 찾습니다.',
+    title: '회의록을 입력해 보세요',
+    description: '검색창에 입력하면 잠시 뒤 자동으로 파일명과 본문 결과가 함께 나타납니다.',
     icon: 'search',
+    keyword: EXAMPLE_SEARCH_QUERY,
   },
   'search-results': {
     eyebrow: '본문 매칭',
-    title: '본문 매칭을 확인하세요',
-    description: '결과가 열리면 어디에서 검색됐는지 바로 확인합니다.',
+    title: '본문 위치가 열려 있어요',
+    description: '기본으로 펼쳐진 본문 위치에서 어떤 문장에 걸렸는지 천천히 확인합니다.',
     icon: 'unfold_more',
   },
   'search-review': {
@@ -161,14 +173,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'version-ppt-detail': {
     eyebrow: 'PPT 변경 상세',
     title: '실제 변경 내용입니다',
-    description: '슬라이드별로 바뀐 텍스트만 펼쳐서 확인합니다.',
+    description: '슬라이드별 변경을 확인하면 곧바로 Excel 변경 이력으로 이어집니다.',
     icon: 'visibility',
-  },
-  'version-excel-search': {
-    eyebrow: 'Excel 찾기',
-    title: '사업예산을 찾아보세요',
-    description: '검색어를 직접 입력하고 찾기 버튼을 눌러 Excel 예제 묶음을 좁혀보세요.',
-    icon: 'search',
   },
   'version-excel': {
     eyebrow: 'Excel 변경 이력',
@@ -798,6 +804,7 @@ function GuidedTourHud({
 
   const content = useMemo(() => getTutorialCopy(step, activeTab), [activeTab, step])
   const nextCheckpoint = step ? TUTORIAL_REVIEW_ADVANCE[step] : undefined
+  const autoAdvanceDelay = step ? getTutorialAutoAdvanceDelay(step) : TUTORIAL_CONFIRMATION_ADVANCE_MS
 
   useEffect(() => {
     if (!step) return undefined
@@ -884,9 +891,9 @@ function GuidedTourHud({
     if (!step || !nextCheckpoint || targetTab !== activeTab) return undefined
     if (autoAdvancedStepRef.current === step) return undefined
     autoAdvancedStepRef.current = step
-    const timer = window.setTimeout(() => onAdvance(nextCheckpoint), TUTORIAL_CONFIRMATION_ADVANCE_MS)
+    const timer = window.setTimeout(() => onAdvance(nextCheckpoint), autoAdvanceDelay)
     return () => window.clearTimeout(timer)
-  }, [activeTab, nextCheckpoint, onAdvance, step, targetTab])
+  }, [activeTab, autoAdvanceDelay, nextCheckpoint, onAdvance, step, targetTab])
 
   if (!step || !content) return null
 
@@ -899,33 +906,20 @@ function GuidedTourHud({
         y: targetRect.top + targetRect.height / 2,
       }
     : null
-  const preferLeftSide = targetCenter ? targetCenter.x > viewport.width * 0.58 : false
   const bubbleLeft = isDone
     ? Math.max(16, (viewport.width - bubbleWidth) / 2)
-    : targetRect
-      ? clamp(
-          preferLeftSide ? targetRect.left - bubbleWidth - 24 : targetRect.left + targetRect.width + 24,
-          16,
-          Math.max(16, viewport.width - bubbleWidth - 16),
-        )
-      : clamp(
-          pointer.x > viewport.width - bubbleWidth - 44 ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
-          16,
-          Math.max(16, viewport.width - bubbleWidth - 16),
-        )
+    : clamp(
+        pointer.x > viewport.width - bubbleWidth - 44 ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
+        16,
+        Math.max(16, viewport.width - bubbleWidth - 16),
+      )
   const bubbleTop = isDone
     ? Math.max(16, (viewport.height - bubbleHeight) / 2)
-    : targetRect
-      ? clamp(
-          targetRect.top + targetRect.height / 2 - bubbleHeight / 2,
-          16,
-          Math.max(16, viewport.height - bubbleHeight - 16),
-        )
-      : clamp(
-          pointer.y > viewport.height - bubbleHeight - 44 ? pointer.y - bubbleHeight - 24 : pointer.y + 22,
-          16,
-          Math.max(16, viewport.height - bubbleHeight - 16),
-        )
+    : clamp(
+        pointer.y > viewport.height - bubbleHeight - 44 ? pointer.y - bubbleHeight - 24 : pointer.y + 22,
+        16,
+        Math.max(16, viewport.height - bubbleHeight - 16),
+      )
   const bubbleRect: TourRect = { left: bubbleLeft, top: bubbleTop, width: bubbleWidth, height: bubbleHeight }
   const targetAnchor = targetRect && targetCenter ? getRectBoundaryPoint(targetRect, {
     x: bubbleLeft + bubbleWidth / 2,
@@ -959,7 +953,10 @@ function GuidedTourHud({
           <circle cx={curve.endX} cy={curve.endY} r="18" className="tour-hud-target-halo" />
         </svg>
       )}
-      <div className="tour-hud-bubble" style={{ left: bubbleLeft, top: bubbleTop, width: bubbleWidth }}>
+      <div
+        className={`tour-hud-bubble${isDone ? ' tour-hud-bubble-interactive' : ''}`}
+        style={{ left: bubbleLeft, top: bubbleTop, width: bubbleWidth }}
+      >
         {isDone ? (
           <div className="tour-hud-done">
             <div className="tour-hud-done-icon">
@@ -1014,6 +1011,12 @@ function GuidedTourHud({
                 <p className="tour-hud-eyebrow">{content.eyebrow}</p>
                 <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{content.title}</p>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{content.description}</p>
+                {content.keyword && (
+                  <div className="tour-hud-keyword">
+                    <span>따라 입력</span>
+                    <kbd>{content.keyword}</kbd>
+                  </div>
+                )}
                 <div className="tour-hud-progress" aria-hidden="true">
                   {TUTORIAL_SECTIONS.map((seg) => {
                     const segSize = seg.range[1] - seg.range[0] + 1
@@ -1037,9 +1040,12 @@ function GuidedTourHud({
                     <span>그만보기</span>
                   </span>
                   {nextCheckpoint && (
-                    <span className="tour-auto-advance-pill inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 py-1 type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                    <span
+                      className="tour-auto-advance-pill inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 py-1 type-label-md text-[var(--md-sys-color-on-surface-variant)]"
+                      style={{ '--tour-auto-advance-ms': `${autoAdvanceDelay}ms` } as CSSProperties}
+                    >
                       <Icon name="progress_activity" size={16} />
-                      <span>확인 완료 · 곧 다음 안내로 넘어갑니다</span>
+                      <span>확인 완료 · 잠시 후 다음 안내로 넘어갑니다</span>
                     </span>
                   )}
                 </div>

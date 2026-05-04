@@ -20,6 +20,14 @@ export interface ClearAppDataResult {
 export type CloseBehavior = 'ask' | 'hide' | 'quit'
 export type AppResetReason = 'safe' | 'full' | 'custom'
 
+export interface AppStartupSettings {
+  supported: boolean
+  enabled: boolean
+  executablePath: string
+  reason?: string
+  requiresApproval?: boolean
+}
+
 export interface AppResetState {
   resetPending: boolean
   reason?: AppResetReason
@@ -91,6 +99,8 @@ declare global {
     consumeResetState?: () => Promise<AppResetState>
     getCloseBehavior?: () => Promise<CloseBehavior>
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
+    getStartupSettings?: () => Promise<AppStartupSettings>
+    setStartupSettings?: (enabled: boolean) => Promise<AppStartupSettings>
     getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>
     checkForUpdates?: () => Promise<UpdateCheckResult>
     installUpdate?: () => Promise<UpdateInstallResult>

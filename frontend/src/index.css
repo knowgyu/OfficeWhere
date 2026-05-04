@@ -463,22 +463,6 @@ body,
   animation: attention-ring 1.1s var(--md-motion-standard) infinite;
 }
 
-.onboarding-preview-lift {
-  animation: onboarding-preview-lift 7s var(--md-motion-standard) infinite;
-  transform-origin: center;
-}
-
-.onboarding-scan-line {
-  position: absolute;
-  inset-inline: 1rem;
-  top: 0;
-  height: 1px;
-  pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--ow-onboarding-accent), transparent);
-  opacity: 0.72;
-  animation: onboarding-scan-line 3.8s ease-in-out infinite;
-}
-
 .tour-target {
   position: relative;
   z-index: 65;
@@ -684,6 +668,33 @@ body,
   color: var(--md-sys-color-primary);
 }
 
+.tour-hud-keyword {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.2rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 24%, var(--md-sys-color-outline-variant));
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 42%, var(--md-sys-color-surface-container-lowest));
+  padding: 0.28rem 0.55rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.tour-hud-keyword kbd {
+  border-radius: 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
+  background: var(--md-sys-color-surface-container-lowest);
+  padding: 0.12rem 0.48rem;
+  color: var(--md-sys-color-on-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  letter-spacing: 0;
+  box-shadow: 0 1px 0 var(--ow-inset-highlight) inset;
+}
+
 .tour-hud-kbd {
   display: inline-flex;
   align-items: center;
@@ -734,32 +745,6 @@ body,
   transform-box: fill-box;
   transform-origin: center;
   animation: tour-hud-halo 1.35s ease-out infinite;
-}
-
-@keyframes onboarding-preview-lift {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-8px);
-  }
-}
-
-@keyframes onboarding-scan-line {
-  0%,
-  100% {
-    transform: translateY(0);
-    opacity: 0;
-  }
-  18%,
-  72% {
-    opacity: 0.72;
-  }
-  82% {
-    transform: translateY(17.8rem);
-    opacity: 0;
-  }
 }
 
 @keyframes attention-ring {
@@ -861,25 +846,6 @@ body,
   transform: scale(0.96);
 }
 
-/* ── 슬라이드 카운터 chip pop ──────────────────────────────────── */
-@keyframes tour-step-pop {
-  0% {
-    opacity: 0;
-    transform: translateY(-2px) scale(0.92);
-  }
-  60% {
-    opacity: 1;
-    transform: translateY(0) scale(1.04);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.tour-step-pop {
-  animation: tour-step-pop 380ms var(--md-motion-standard);
-}
-
 /* ── HUD meta row (섹션 레이블 + 카운터) ──────────────────────── */
 .tour-hud-meta {
   display: flex;
@@ -943,7 +909,7 @@ body,
   background: color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent);
   transform: scaleX(0);
   transform-origin: left;
-  animation: tour-auto-advance-fill 520ms var(--md-motion-standard) forwards;
+  animation: tour-auto-advance-fill var(--tour-auto-advance-ms, 1400ms) var(--md-motion-standard) forwards;
 }
 
 .tour-auto-advance-pill > * {
@@ -973,6 +939,10 @@ body,
 
 /* ── 버블 pointer-events 수정 (버튼 클릭 수신용) ─────────────── */
 .tour-hud-bubble {
+  pointer-events: none;
+}
+
+.tour-hud-bubble-interactive {
   pointer-events: auto;
 }
 
@@ -1079,7 +1049,6 @@ body,
   .tour-review-target::after,
   .tour-evidence-note,
   .tour-version-evidence-card::after,
-  .tour-step-pop,
   .tour-hud-progress-fill,
   .tour-hud-done,
   .onboarding-close-btn {

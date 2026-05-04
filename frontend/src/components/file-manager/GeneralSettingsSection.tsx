@@ -1,4 +1,4 @@
-import type { CloseBehavior } from '../../api/client'
+import type { AppStartupSettings, CloseBehavior } from '../../api/client'
 import {
   APP_TEXT_SIZE_DESCRIPTIONS,
   APP_TEXT_SIZE_LABELS,
@@ -8,7 +8,7 @@ import {
   APP_THEME_MODE_ORDER,
 } from '../../contexts/DisplaySettingsContext'
 import type { AppTextSize, AppThemeMode, ResolvedAppTheme } from '../../contexts/DisplaySettingsContext'
-import { Card, CardSection, EmptyState, Icon, SelectField } from '../../ui'
+import { Card, CardSection, EmptyState, Icon, SelectField, Switch } from '../../ui'
 
 type GeneralSettingsSectionProps = {
   textSize: AppTextSize
@@ -18,9 +18,13 @@ type GeneralSettingsSectionProps = {
   closeBehaviorLabels: Record<CloseBehavior, string>
   closeBehaviorAvailable: boolean
   closeBehaviorLoading: boolean
+  startupSettings: AppStartupSettings
+  startupSettingsAvailable: boolean
+  startupSettingsLoading: boolean
   onTextSizeChange: (size: AppTextSize) => void
   onThemeModeChange: (mode: AppThemeMode) => void
   onCloseBehaviorChange: (behavior: CloseBehavior) => void
+  onStartupSettingsChange: (enabled: boolean) => void
 }
 
 export default function GeneralSettingsSection({
@@ -31,9 +35,13 @@ export default function GeneralSettingsSection({
   closeBehaviorLabels,
   closeBehaviorAvailable,
   closeBehaviorLoading,
+  startupSettings,
+  startupSettingsAvailable,
+  startupSettingsLoading,
   onTextSizeChange,
   onThemeModeChange,
   onCloseBehaviorChange,
+  onStartupSettingsChange,
 }: GeneralSettingsSectionProps) {
   return (
     <Card variant="elevated" className="console-panel overflow-hidden">
@@ -122,54 +130,100 @@ export default function GeneralSettingsSection({
             </div>
           </section>
 
-          <section className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/82 p-4">
-            <div className="mb-3">
-              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">창 닫기 동작</p>
-              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                X 버튼을 눌렀을 때 OfficeWhere가 백그라운드에 남을지 정합니다.
-              </p>
-            </div>
-            {!closeBehaviorAvailable ? (
-              <EmptyState
-                icon="desktop_windows"
-                title="데스크톱 앱에서만 사용할 수 있습니다"
-                description="현재 실행 환경에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
-                compact
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 items-start">
-                <SelectField
-                  label="X 버튼 동작"
-                  value={closeBehavior}
-                  onChange={(event) => onCloseBehaviorChange(event.target.value as CloseBehavior)}
-                  disabled={closeBehaviorLoading}
-                  helper="트레이로 보내면 창만 닫고 백그라운드 실행을 유지합니다."
-                >
-                  <option value="ask">{closeBehaviorLabels.ask}</option>
-                  <option value="hide">{closeBehaviorLabels.hide}</option>
-                  <option value="quit">{closeBehaviorLabels.quit}</option>
-                </SelectField>
-                <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 flex items-start gap-2.5">
-                  <Icon
-                    name={closeBehavior === 'quit' ? 'power_settings_new' : 'move_to_inbox'}
-                    size={20}
-                    className="mt-0.5 text-[var(--md-sys-color-primary)]"
-                  />
-                  <div className="min-w-0 space-y-1">
-                    <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                      현재 설정 · {closeBehaviorLabels[closeBehavior]}
-                    </p>
-                    <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                      {closeBehavior === 'ask'
-                        ? '창을 닫을 때마다 백그라운드 실행/종료/취소를 고를 수 있습니다.'
-                        : closeBehavior === 'hide'
-                          ? '창을 닫으면 트레이에 남고, 트레이 메뉴에서 열기 또는 종료를 선택할 수 있습니다.'
-                          : '창을 닫으면 앱과 자동 문서 확인이 함께 종료됩니다.'}
-                    </p>
+          <section className="space-y-4">
+            <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/82 p-4">
+              <div className="mb-3">
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">창 닫기 동작</p>
+                <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  X 버튼을 눌렀을 때 OfficeWhere가 백그라운드에 남을지 정합니다.
+                </p>
+              </div>
+              {!closeBehaviorAvailable ? (
+                <EmptyState
+                  icon="desktop_windows"
+                  title="데스크톱 앱에서만 사용할 수 있습니다"
+                  description="현재 실행 환경에서는 트레이와 창 닫기 동작을 제어할 수 없습니다."
+                  compact
+                />
+              ) : (
+                <div className="grid grid-cols-1 gap-3 items-start">
+                  <SelectField
+                    label="X 버튼 동작"
+                    value={closeBehavior}
+                    onChange={(event) => onCloseBehaviorChange(event.target.value as CloseBehavior)}
+                    disabled={closeBehaviorLoading}
+                    helper="트레이로 보내면 창만 닫고 백그라운드 실행을 유지합니다."
+                  >
+                    <option value="ask">{closeBehaviorLabels.ask}</option>
+                    <option value="hide">{closeBehaviorLabels.hide}</option>
+                    <option value="quit">{closeBehaviorLabels.quit}</option>
+                  </SelectField>
+                  <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3 flex items-start gap-2.5">
+                    <Icon
+                      name={closeBehavior === 'quit' ? 'power_settings_new' : 'move_to_inbox'}
+                      size={20}
+                      className="mt-0.5 text-[var(--md-sys-color-primary)]"
+                    />
+                    <div className="min-w-0 space-y-1">
+                      <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+                        현재 설정 · {closeBehaviorLabels[closeBehavior]}
+                      </p>
+                      <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                        {closeBehavior === 'ask'
+                          ? '창을 닫을 때마다 백그라운드 실행/종료/취소를 고를 수 있습니다.'
+                          : closeBehavior === 'hide'
+                            ? '창을 닫으면 트레이에 남고, 트레이 메뉴에서 열기 또는 종료를 선택할 수 있습니다.'
+                            : '창을 닫으면 앱과 자동 문서 확인이 함께 종료됩니다.'}
+                      </p>
+                    </div>
                   </div>
                 </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/82 p-4">
+              <div className="mb-3 flex items-start gap-2.5">
+                <Icon name="rocket_launch" size={20} className="mt-0.5 text-[var(--md-sys-color-primary)]" />
+                <div>
+                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">시작프로그램</p>
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    포터블 앱도 현재 실행 파일 경로를 OS 시작 항목에 등록할 수 있습니다.
+                  </p>
+                </div>
               </div>
-            )}
+              {!startupSettingsAvailable ? (
+                <EmptyState
+                  icon="desktop_windows"
+                  title="데스크톱 앱에서만 사용할 수 있습니다"
+                  description="브라우저 실행 환경에서는 시작프로그램을 등록할 수 없습니다."
+                  compact
+                />
+              ) : (
+                <div className="space-y-3">
+                  <Switch
+                    checked={startupSettings.enabled}
+                    disabled={startupSettingsLoading || !startupSettings.supported}
+                    onChange={(event) => onStartupSettingsChange(event.currentTarget.checked)}
+                    label="로그인할 때 OfficeWhere 실행"
+                    description={
+                      startupSettings.supported
+                        ? '앱 폴더나 실행 파일 위치를 옮기면 이 설정을 한 번 껐다가 다시 켜 주세요.'
+                        : startupSettings.reason || '현재 환경에서는 시작프로그램 등록을 지원하지 않습니다.'
+                    }
+                  />
+                  {startupSettings.requiresApproval && (
+                    <p className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-secondary-container)]/45 px-3 py-2 type-body-sm text-[var(--md-sys-color-on-secondary-container)]">
+                      macOS 시스템 설정에서 OfficeWhere 로그인을 허용해야 적용됩니다.
+                    </p>
+                  )}
+                  {startupSettings.executablePath && (
+                    <p className="truncate rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 font-mono text-[0.72rem] text-[var(--md-sys-color-on-surface-variant)]">
+                      {startupSettings.executablePath}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </section>
         </div>
       </CardSection>

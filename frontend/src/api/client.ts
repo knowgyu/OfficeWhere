@@ -3,6 +3,7 @@ import { libraryApi } from './library'
 import { apiPath, getOfficeWhereBridge } from './transport'
 import type {
   AppResetState,
+  AppStartupSettings,
   CloseBehavior,
   ExampleLibraryPathResponse,
   FolderPickResponse,
@@ -17,6 +18,7 @@ export type {
   AppDataCandidate,
   AppResetReason,
   AppResetState,
+  AppStartupSettings,
   ClearAppDataResult,
   CloseBehavior,
   ExampleLibraryPathResponse,
@@ -1205,6 +1207,25 @@ export const api = {
       const electron = electronApi()
       if (!electron?.setCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
       return { data: await electron.setCloseBehavior(behavior) }
+    },
+    getStartupSettings: async () => {
+      const electron = electronApi()
+      if (!electron?.getStartupSettings) {
+        return {
+          data: {
+            supported: false,
+            enabled: false,
+            executablePath: '',
+            reason: '데스크톱 앱에서만 시작프로그램 설정을 사용할 수 있습니다.',
+          } satisfies AppStartupSettings,
+        }
+      }
+      return { data: await electron.getStartupSettings() }
+    },
+    setStartupSettings: async (enabled: boolean) => {
+      const electron = electronApi()
+      if (!electron?.setStartupSettings) desktopError('Electron 앱에서만 시작프로그램 설정을 사용할 수 있습니다.')
+      return { data: await electron.setStartupSettings(enabled) }
     },
     checkForUpdates: async () => {
       const electron = electronApi()

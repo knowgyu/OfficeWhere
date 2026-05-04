@@ -133,6 +133,7 @@ export default function ConsistencyCheck({
   const [excelGridModal, setExcelGridModal] = useState<ExcelGridModalState | null>(null)
   const historyRunRef = useRef(0)
   const groupRefreshTimerRef = useRef<number | null>(null)
+  const groupSearchDebounceRef = useRef<number | null>(null)
   const manualResultRef = useRef<HTMLDivElement | null>(null)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
@@ -210,6 +211,7 @@ export default function ConsistencyCheck({
     void fetchGroups(0, 'all')
     return () => {
       if (groupRefreshTimerRef.current !== null) window.clearTimeout(groupRefreshTimerRef.current)
+      if (groupSearchDebounceRef.current !== null) window.clearTimeout(groupSearchDebounceRef.current)
     }
   }, [])
 
@@ -692,20 +694,32 @@ export default function ConsistencyCheck({
 
   const handleGroupSearch = () => {
     const nextQuery = groupQueryDraft.trim()
+    if (groupSearchDebounceRef.current !== null) {
+      window.clearTimeout(groupSearchDebounceRef.current)
+      groupSearchDebounceRef.current = null
+    }
     setActiveGroupDetail(null)
     setHistoryState(null)
-    void fetchGroups(0, groupFilter, nextQuery, groupFileType, groupSort, showDuplicateGroups).then((response) => {
-      if (tutorialStep !== 'version-excel-search') return
-      if (response.groups.some((group) => normalizeFileType(group.file_type) === 'Excel')) {
-        onTutorialStep?.('version-excel')
-      } else {
-        snackbar.warn('예제 Excel 묶음을 찾지 못했습니다. 검색어를 확인하거나 필터를 초기화해 주세요.')
-      }
-    })
+    void fetchGroups(0, groupFilter, nextQuery, groupFileType, groupSort, showDuplicateGroups)
+  }
+
+  const handleGroupQueryDraftChange = (value: string) => {
+    setGroupQueryDraft(value)
+    if (groupSearchDebounceRef.current !== null) window.clearTimeout(groupSearchDebounceRef.current)
+    groupSearchDebounceRef.current = window.setTimeout(() => {
+      groupSearchDebounceRef.current = null
+      setActiveGroupDetail(null)
+      setHistoryState(null)
+      void fetchGroups(0, groupFilter, value.trim(), groupFileType, groupSort, showDuplicateGroups)
+    }, 600)
   }
 
   const clearGroupSearch = () => {
     setGroupQueryDraft('')
+    if (groupSearchDebounceRef.current !== null) {
+      window.clearTimeout(groupSearchDebounceRef.current)
+      groupSearchDebounceRef.current = null
+    }
     setActiveGroupDetail(null)
     setHistoryState(null)
     void fetchGroups(0, groupFilter, '', groupFileType, groupSort, showDuplicateGroups)
@@ -713,6 +727,10 @@ export default function ConsistencyCheck({
 
   const resetGroupFilters = () => {
     setGroupQueryDraft('')
+    if (groupSearchDebounceRef.current !== null) {
+      window.clearTimeout(groupSearchDebounceRef.current)
+      groupSearchDebounceRef.current = null
+    }
     setActiveGroupDetail(null)
     setHistoryState(null)
     void fetchGroups(0, 'all', '', 'all', 'recent', false)
@@ -803,24 +821,24 @@ export default function ConsistencyCheck({
           <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
             <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
               <div className="min-w-[260px] flex-1">
-                <TextField
-                  leadingIcon="search"
-                  placeholder="문서명, 파일명, 폴더명으로 찾기"
-                  value={groupQueryDraft}
-                  onChange={(event) => setGroupQueryDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') handleGroupSearch()
-                  }}
-                  helper="예: 사업예산, 주간보고, 프로젝트명, 부서명"
-                />
+                <div>
+                  <TextField
+                    leadingIcon="search"
+                    placeholder="문서명, 파일명, 폴더명으로 찾기"
+                    value={groupQueryDraft}
+                    onChange={(event) => handleGroupQueryDraftChange(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleGroupSearch()
+                    }}
+                    helper="입력하면 자동으로 좁혀집니다. 예: 사업예산, 주간보고, 부서명"
+                  />
+                </div>
               </div>
               <Button
                 variant="filled"
                 leadingIcon="search"
                 onClick={handleGroupSearch}
                 disabled={groupsLoading}
-                className={tutorialStep === 'version-excel-search' ? 'attention-pulse tour-target' : ''}
-                data-tour-target={tutorialStep === 'version-excel-search' ? 'version-excel-search' : undefined}
               >
                 찾기
               </Button>

@@ -7,7 +7,6 @@ export type TutorialStep =
   | 'version-ppt'
   | 'version-ppt-review'
   | 'version-ppt-detail'
-  | 'version-excel-search'
   | 'version-excel'
   | 'version-excel-review'
   | 'excel-table'
@@ -15,7 +14,7 @@ export type TutorialStep =
   | 'excel-table-history'
   | 'done'
 
-export const EXAMPLE_SEARCH_QUERY = '프로젝트'
+export const EXAMPLE_SEARCH_QUERY = '회의록'
 export const EXAMPLE_PPT_QUERY = '프로젝트상태'
 export const EXAMPLE_EXCEL_QUERY = '사업예산'
 
@@ -28,7 +27,6 @@ export const TUTORIAL_ACTIVE_STEPS: TutorialStep[] = [
   'version-ppt',
   'version-ppt-review',
   'version-ppt-detail',
-  'version-excel-search',
   'version-excel',
   'version-excel-review',
   'excel-table',
@@ -47,7 +45,7 @@ export interface TutorialSection {
 export const TUTORIAL_SECTIONS: TutorialSection[] = [
   { id: 'folder', label: '폴더 설정', range: [1, 2] },
   { id: 'search', label: '문서 검색', range: [3, 5] },
-  { id: 'version', label: '변경 이력', range: [6, 14] },
+  { id: 'version', label: '변경 이력', range: [6, 13] },
 ]
 
 export function getTutorialStepIndex(step: TutorialStep): number {
@@ -62,4 +60,4 @@ export function getTutorialSection(step: TutorialStep): TutorialSection | null {
   return TUTORIAL_SECTIONS.find((s) => idx >= s.range[0] && idx <= s.range[1]) ?? null
 }
 
-export const TUTORIAL_TOTAL_STEPS = 14
+export const TUTORIAL_TOTAL_STEPS = TUTORIAL_ACTIVE_STEPS.length
