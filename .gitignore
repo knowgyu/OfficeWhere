@@ -46,6 +46,9 @@ logs/
 .omc/
 .codex
 
+# Python runtime download cache (prepare_python_runtime.py)
+.cache/
+
 # Excel temp files
 ~$*.xlsx
 ~$*.xls

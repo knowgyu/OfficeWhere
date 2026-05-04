@@ -40,6 +40,30 @@ OfficeWhere는 회사 폴더, 연구 자료, 수업 과제, 프로젝트 산출�
 - 별도 설치 과정 없음
 - Linux 패키지는 아직 제공하지 않습니다.
 
+### macOS에서 "앱이 손상되어 열 수 없습니다" 메시지가 뜰 때
+
+OfficeWhere는 아직 Apple Developer ID 코드 서명 및 공증(notarization)을 적용하지 않았습니다. macOS는 인터넷에서 다운로드한 미서명 앱을 실행할 때 Gatekeeper가 quarantine 속성을 검사하여 "앱이 손상되었다"는 메시지를 보여줍니다. 실제 파일 손상은 아니며, 다음 명령어로 quarantine 속성을 제거하면 정상적으로 실행됩니다.
+
+`.dmg`로 설치한 경우 (앱을 응용 프로그램 폴더로 옮긴 뒤):
+
+```bash
+xattr -cr /Applications/OfficeWhere.app
+```
+
+`.zip`을 다운로드한 경우 (압축 해제 전):
+
+```bash
+xattr -d com.apple.quarantine ~/Downloads/officewhere-*.zip
+```
+
+이미 압축을 푼 `OfficeWhere.app`이 있다면:
+
+```bash
+xattr -cr /경로/OfficeWhere.app
+```
+
+macOS 정책상 직접 빌드한 앱(`./build.sh`)은 quarantine이 붙지 않으므로 이 단계가 필요하지 않습니다.
+
 ## 웹 브라우저에서 빠르게 테스트하기
 
 릴리스 파일을 다시 받지 않고 repo를 clone해서 브라우저로 확인하는 개발/검증용 실행입니다.
