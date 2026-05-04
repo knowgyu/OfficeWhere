@@ -459,7 +459,6 @@ export default function FileSearch({
   }
 
   const toggleContentMatches = (fileKey: string) => {
-    const willExpand = !expandedContentFiles.has(fileKey)
     setExpandedContentFiles((current) => {
       const next = new Set(current)
       if (next.has(fileKey)) {
@@ -469,7 +468,6 @@ export default function FileSearch({
       }
       return next
     })
-    if (willExpand && tutorialStep === 'search-results') onTutorialStep?.('search-review')
   }
 
   const handleOpenFile = async (fileId: number, fileName: string) => {
@@ -600,7 +598,6 @@ export default function FileSearch({
 
   const expandAllContentMatches = () => {
     setExpandedContentFiles(new Set(contentFileKeys))
-    if (tutorialStep === 'search-results') onTutorialStep?.('search-review')
   }
 
   const collapseAllContentMatches = () => {
@@ -630,12 +627,6 @@ export default function FileSearch({
   }, [])
 
   useEffect(() => {
-    if (tutorialStep !== 'search-results' || contentFileKeys.length === 0) return undefined
-    const timer = window.setTimeout(() => onTutorialStep?.('search-review'), 1650)
-    return () => window.clearTimeout(timer)
-  }, [contentFileKeys.length, onTutorialStep, tutorialStep])
-
-  useEffect(() => {
     if (tutorialStep !== 'search') {
       tutorialSearchAdvanceRef.current = null
       return undefined
@@ -645,7 +636,7 @@ export default function FileSearch({
     const advanceKey = `${query.trim()}:${results.length}:${contentFileKeys.length}`
     if (tutorialSearchAdvanceRef.current === advanceKey) return undefined
     tutorialSearchAdvanceRef.current = advanceKey
-    const timer = window.setTimeout(() => onTutorialStep?.('search-results'), 700)
+    const timer = window.setTimeout(() => onTutorialStep?.('search-review'), 1400)
     return () => window.clearTimeout(timer)
   }, [contentFileKeys.length, loading, onTutorialStep, query, results.length, searched, tutorialStep])
 
@@ -701,7 +692,7 @@ export default function FileSearch({
                 void doSearch(query, selectedFileTypes, searchScope).then((hasResults) => {
                   if (tutorialStep !== 'search') return
                   if (hasResults) {
-                    onTutorialStep?.('search-results')
+                    onTutorialStep?.('search-review')
                   } else {
                     snackbar.warn('예제 검색 결과가 아직 없습니다. 문서 새로고침 완료 후 다시 검색해 주세요.')
                   }
@@ -862,7 +853,7 @@ export default function FileSearch({
 
       {hasResults && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/80 p-3">
+          <div className="surface-summary flex items-center gap-2 flex-wrap rounded-lg p-3">
             <Chip label={`${groupedSearch.visibleGroups.length}개 파일`} tone="primary" as="span" icon="folder_open" />
             <Chip label={`${visibleLocationCount}개 위치`} tone="neutral" as="span" icon="filter_list" />
             {selectedFileTypes.length > 0 && (
@@ -872,7 +863,7 @@ export default function FileSearch({
               <Chip label={`수정일 ${activeModifiedDateLabel}`} tone="secondary" as="span" icon="event" />
             )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              파일별로 묶어서 가볍게 보여줍니다
+              파일별로 묶어서 보여줍니다
               {prefetching ? ' · 다음 결과 준비 중' : ''}
             </span>
             <div className="ml-auto flex gap-2 flex-wrap">
@@ -892,10 +883,8 @@ export default function FileSearch({
                     leadingIcon="unfold_more"
                     onClick={expandAllContentMatches}
                     disabled={allContentMatchesExpanded}
-                    className={tutorialStep === 'search-results' ? 'attention-pulse tour-target' : ''}
-                    data-tour-target={tutorialStep === 'search-results' ? 'search-results' : undefined}
                   >
-                    본문 위치 모두 보기
+                    본문 위치 펼치기
                   </Button>
                   <Button
                     variant="text"
@@ -1019,7 +1008,7 @@ export default function FileSearch({
                           highlightTour={fileKey === tutorialSearchReviewKey && index === 0}
                           tourHint={
                             fileKey === tutorialSearchReviewKey && index === 0
-                              ? '초성이 본문 매칭으로 이어졌어요'
+                              ? `본문에서 “${EXAMPLE_SEARCH_QUERY}”을 찾았습니다`
                               : undefined
                           }
                         />

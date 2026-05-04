@@ -138,15 +138,15 @@ export default function DuplicateFiles({ libraryDataRevision = 0 }: { libraryDat
           }
         >
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
+            <div className="surface-summary rounded-lg p-4">
               <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">같은 내용 묶음</p>
               <p className="mt-1 type-title-lg text-[var(--md-sys-color-on-surface)]">{total.toLocaleString('ko-KR')}개</p>
             </div>
-            <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
+            <div className="surface-summary rounded-lg p-4">
               <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">표시 중인 파일</p>
               <p className="mt-1 type-title-lg text-[var(--md-sys-color-on-surface)]">{fileCount.toLocaleString('ko-KR')}개</p>
             </div>
-            <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-tertiary-container)]/22 p-4">
+            <div className="surface-summary rounded-lg p-4">
               <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">동작 방식</p>
               <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface)]">
                 앱에서는 확인만 하고, 필요하면 폴더에서 직접 정리하세요.
@@ -180,6 +180,7 @@ export default function DuplicateFiles({ libraryDataRevision = 0 }: { libraryDat
                 지우기
               </Button>
             )}
+            <Chip label="현재 페이지 안에서 필터링" tone="neutral" icon="filter_list" as="span" />
           </div>
           {loading ? (
             <div className="flex items-center justify-center gap-2 px-6 py-12 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
@@ -253,8 +254,8 @@ function DuplicateGroupCard({
 }) {
   const newestId = newestFileId(group)
   return (
-    <article className="overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] shadow-[0_1px_0_var(--ow-inset-highlight)_inset]">
-      <header className="flex items-start justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/72 px-4 py-3">
+    <article className="console-panel overflow-hidden rounded-xl bg-[var(--md-sys-color-surface-container-lowest)]">
+      <header className="flex items-start justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-4 py-3">
         <div className="min-w-0 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <Badge tone="tertiary">

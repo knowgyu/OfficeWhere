@@ -2,7 +2,6 @@ export type TutorialStep =
   | 'example-folder'
   | 'document-refresh'
   | 'search'
-  | 'search-results'
   | 'search-review'
   | 'version-ppt'
   | 'version-ppt-review'
@@ -22,7 +21,6 @@ export const TUTORIAL_ACTIVE_STEPS: TutorialStep[] = [
   'example-folder',
   'document-refresh',
   'search',
-  'search-results',
   'search-review',
   'version-ppt',
   'version-ppt-review',
@@ -44,8 +42,8 @@ export interface TutorialSection {
 
 export const TUTORIAL_SECTIONS: TutorialSection[] = [
   { id: 'folder', label: '폴더 설정', range: [1, 2] },
-  { id: 'search', label: '문서 검색', range: [3, 5] },
-  { id: 'version', label: '변경 이력', range: [6, 13] },
+  { id: 'search', label: '문서 검색', range: [3, 4] },
+  { id: 'version', label: '변경 이력', range: [5, 12] },
 ]
 
 export function getTutorialStepIndex(step: TutorialStep): number {

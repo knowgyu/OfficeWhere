@@ -864,7 +864,7 @@ export default function ConsistencyCheck({
             />
           }
         >
-          <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
+          <div className="surface-summary rounded-lg p-4 space-y-4">
             <div className="flex gap-2 items-start flex-wrap md:flex-nowrap">
               <div className="min-w-[260px] flex-1">
                 <div>
@@ -982,7 +982,12 @@ export default function ConsistencyCheck({
                 <Chip label={`묶음 · ${groupFilterLabel}`} tone="neutral" as="span" />
                 <Chip label={`형식 · ${groupFileTypeLabel}`} tone="neutral" as="span" />
                 <Chip label={`정렬 · ${groupSortLabel}`} tone="neutral" as="span" />
-                {showDuplicateGroups && <Chip label="같은 내용 문서 포함" tone="neutral" as="span" />}
+                <Chip
+                  label={showDuplicateGroups ? '같은 내용 문서 포함' : '같은 내용 문서 숨김'}
+                  tone="neutral"
+                  as="span"
+                  icon={showDuplicateGroups ? 'visibility' : 'visibility_off'}
+                />
               </div>
               <Button
                 variant="outlined"
@@ -1385,13 +1390,13 @@ function GroupCard({
   return (
     <div
       id={versionGroupAnchorId(group.id)}
-      className={`scroll-mt-24 overflow-hidden rounded-xl border bg-[var(--md-sys-color-surface-container-lowest)] transition-colors ${
+      className={`console-panel scroll-mt-24 overflow-hidden rounded-xl border bg-[var(--md-sys-color-surface-container-lowest)] transition-colors ${
         activeDetail
           ? 'border-[var(--md-sys-color-primary)]/45 shadow-elev-1'
           : 'border-[var(--md-sys-color-outline-variant)] hover:bg-[var(--md-sys-color-surface-container-low)]'
       }`}
     >
-      <div className="grid grid-cols-1 gap-3 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+      <div className="grid grid-cols-1 gap-3 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2 flex-wrap">
             <FileTypeBadge fileType={group.file_type} />

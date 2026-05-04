@@ -33,10 +33,10 @@ type Slide = {
 const slides: Slide[] = [
   {
     eyebrow: '검색',
-    title: '필요한 문서를 바로 찾으세요',
-    description: '폴더를 등록해두면 파일명과 문서 내용에서 검색어를 함께 찾습니다.',
-    proof: '예를 들어 “일정”을 입력하면 제목에 없더라도 본문에 나온 일정까지 모아 보여줍니다.',
-    accent: '#4257b2',
+    title: '흩어진 문서를 한곳에서 찾습니다',
+    description: '폴더를 등록해두면 파일명과 문서 본문을 함께 검색할 수 있습니다.',
+    proof: '예: “일정”을 입력하면 제목에 없어도 본문에 나온 일정까지 함께 보여줍니다.',
+    accent: '#365f7d',
     previewTitle: '일정 검색',
     previewSubtitle: '본문에서 찾은 결과 6개',
     metric: '파일명 + 본문',
@@ -50,10 +50,10 @@ const slides: Slide[] = [
   },
   {
     eyebrow: '변경 이력',
-    title: '무엇이 달라졌는지 한눈에 봅니다',
-    description: '비슷한 문서를 묶고, 최신 파일과 이전 파일의 차이를 먼저 보여줍니다.',
+    title: '바뀐 문서를 빠르게 확인합니다',
+    description: '비슷한 문서를 묶고, 최신 파일과 이전 파일의 차이를 보여줍니다.',
     proof: 'PPT는 슬라이드, Excel은 셀 값을 중심으로 바뀐 부분만 확인할 수 있습니다.',
-    accent: '#6d5a86',
+    accent: '#5e6372',
     previewTitle: '프로젝트상태 수정본',
     previewSubtitle: '5개 파일 · 최신 v4.0',
     metric: '변경점',
@@ -67,10 +67,10 @@ const slides: Slide[] = [
   },
   {
     eyebrow: '처음 사용',
-    title: '예제로 먼저 익혀보세요',
-    description: '임시 예제 문서로 검색과 변경 이력 흐름을 짧게 따라가 봅니다.',
+    title: '예제로 먼저 둘러보세요',
+    description: '임시 예제 문서로 검색과 변경 이력 흐름을 짧게 확인합니다.',
     proof: '예제는 튜토리얼이 끝나면 정리됩니다. 원본 문서는 읽기 전용으로만 확인합니다.',
-    accent: '#146c2e',
+    accent: '#32704b',
     previewTitle: '예제 둘러보기',
     previewSubtitle: '검색부터 셀 변경까지',
     metric: '짧은 연습',
@@ -125,34 +125,34 @@ export default function OnboardingCarousel({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-[#101827] p-4 text-slate-950"
+      className="fixed inset-0 z-[70] flex items-center justify-center overflow-hidden bg-[color-mix(in_srgb,var(--md-sys-color-background)_88%,#111827_12%)] p-4 text-[var(--md-sys-color-on-surface)]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="officewhere-onboarding-title"
       onMouseDown={(event) => event.stopPropagation()}
       style={accentStyle}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),transparent_42%),linear-gradient(120deg,rgba(66,87,178,0.13),transparent_34rem)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_8%,color-mix(in_srgb,var(--ow-onboarding-accent)_8%,transparent),transparent_28rem)]" />
       <button
         type="button"
         aria-label="둘러보기 닫기"
         onClick={onStartOwnFolder}
-        className="onboarding-close-btn absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.14] bg-white/[0.06] text-white/80 backdrop-blur-md hover:bg-white/[0.12] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/70"
+        className="onboarding-close-btn absolute right-4 top-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] text-[var(--md-sys-color-on-surface-variant)] shadow-elev-1 hover:bg-[var(--md-sys-color-surface-container-low)] hover:text-[var(--md-sys-color-on-surface)]"
       >
         <Icon name="close" size={18} />
       </button>
-      <div className="relative w-full max-w-6xl overflow-hidden rounded-[1.5rem] border border-white/[0.12] bg-[#f7f8ff] shadow-[0_34px_90px_rgba(0,0,0,0.42)]">
+      <div className="console-panel relative w-full max-w-6xl overflow-hidden rounded-[1.25rem] bg-[var(--md-sys-color-surface-container-lowest)]">
         <div className="grid min-h-[660px] grid-cols-1 lg:grid-cols-[0.94fr_1.06fr]">
           <section className="relative flex flex-col justify-between gap-8 p-7 md:p-10 lg:p-12 lg:pr-10">
             <div className="absolute inset-x-0 top-0 h-1 bg-[linear-gradient(90deg,var(--ow-onboarding-accent),rgba(83,58,253,0.24),transparent)]" />
 
             <div className="space-y-8">
               <div className="flex items-center justify-between gap-3">
-                <div className="inline-flex items-center gap-2 rounded-md border border-[#dfe5f1] bg-white px-3 py-1.5 text-[0.78rem] font-medium text-[#42526b] shadow-[0_8px_22px_rgba(50,50,93,0.08)]">
+                <div className="inline-flex items-center gap-2 rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-1.5 text-[0.78rem] font-medium text-[var(--md-sys-color-on-surface-variant)]">
                   <span className="h-1.5 w-1.5 rounded-full bg-[var(--ow-onboarding-accent)]" />
                   {replay ? '둘러보기 다시 보기' : '처음 설정'}
                 </div>
-                <span className="tabular-nums rounded-md border border-[#e5edf5] bg-white/70 px-2.5 py-1 text-[0.72rem] font-medium text-[#64748d]">
+                <span className="tabular-nums rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-2.5 py-1 text-[0.72rem] font-medium text-[var(--md-sys-color-on-surface-variant)]">
                   {index + 1} / {slides.length}
                 </span>
               </div>
@@ -163,23 +163,23 @@ export default function OnboardingCarousel({
                 </p>
                 <h1
                   id="officewhere-onboarding-title"
-                  className="max-w-[31rem] text-[2.2rem] font-[520] leading-[1.06] tracking-[-0.045em] text-[#061b31] [text-wrap:balance] [word-break:keep-all] md:text-[3.35rem]"
+                  className="max-w-[31rem] text-[2.15rem] font-[540] leading-[1.08] tracking-[-0.04em] text-[var(--md-sys-color-on-surface)] [text-wrap:balance] [word-break:keep-all] md:text-[3.1rem]"
                 >
                   {slide.title}
                 </h1>
-                <p className="max-w-[30rem] text-[0.98rem] leading-7 text-[#64748d] [word-break:keep-all] md:text-[1.03rem]">
+                <p className="max-w-[30rem] text-[0.98rem] leading-7 text-[var(--md-sys-color-on-surface-variant)] [word-break:keep-all] md:text-[1.03rem]">
                   {slide.description}
                 </p>
               </div>
 
-              <div className="rounded-xl border border-[#e5edf5] bg-white p-4 shadow-[rgba(50,50,93,0.12)_0px_18px_42px_-24px,rgba(0,0,0,0.08)_0px_10px_24px_-18px]">
+              <div className="surface-summary rounded-xl p-4">
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f3f6ff] text-[var(--ow-onboarding-accent)]">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_12%,var(--md-sys-color-surface-container-lowest))] text-[var(--ow-onboarding-accent)]">
                     <Icon name="tips_and_updates" size={19} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#273951]">이렇게 활용할 수 있어요</p>
-                    <p className="mt-1 text-sm leading-6 text-[#64748d]">{slide.proof}</p>
+                    <p className="text-sm font-semibold text-[var(--md-sys-color-on-surface)]">이렇게 쓸 수 있어요</p>
+                    <p className="mt-1 text-sm leading-6 text-[var(--md-sys-color-on-surface-variant)]">{slide.proof}</p>
                   </div>
                 </div>
               </div>
@@ -191,7 +191,9 @@ export default function OnboardingCarousel({
                   <span
                     key={item.title}
                     className={`h-1.5 rounded-full transition-all ${
-                      slideIndex === index ? 'w-11 bg-[var(--ow-onboarding-accent)]' : 'w-5 bg-[#d7deea]'
+                      slideIndex === index
+                        ? 'w-11 bg-[var(--ow-onboarding-accent)]'
+                        : 'w-5 bg-[var(--md-sys-color-outline-variant)]'
                     }`}
                   />
                 ))}
@@ -226,8 +228,8 @@ export default function OnboardingCarousel({
             </div>
           </section>
 
-          <section className="relative overflow-hidden bg-[#0d1424] p-5 md:p-8 lg:p-10">
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(160deg,rgba(255,255,255,0.08),transparent_42%)]" />
+          <section className="relative overflow-hidden border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-5 md:p-8 lg:border-l lg:border-t-0 lg:p-10">
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(160deg,color-mix(in_srgb,var(--ow-onboarding-accent)_5%,transparent),transparent_42%)]" />
             <ProductPreview slide={slide} />
           </section>
         </div>
@@ -246,12 +248,12 @@ function ProductPreview({ slide }: { slide: Slide }) {
 
   return (
     <div className="relative flex h-full min-h-[32rem] items-center justify-center">
-      <div className="w-full max-w-[35rem] rounded-[1.25rem] border border-white/10 bg-[#0a1020]/95 p-3 shadow-[0_28px_70px_rgba(0,0,0,0.36)]">
-        <div className="grid min-h-[29rem] grid-cols-[7.7rem_minmax(0,1fr)] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d1322]">
-          <aside className="border-r border-white/[0.08] bg-[#080d19] p-3">
-            <div className="mb-4 rounded-xl border border-white/[0.08] bg-white/[0.045] p-3">
-              <p className="text-[0.7rem] font-semibold text-white/50">작업 공간</p>
-              <p className="mt-1 text-sm font-medium text-white">내 문서</p>
+      <div className="console-panel w-full max-w-[35rem] rounded-[1.15rem] bg-[var(--md-sys-color-surface-container-lowest)] p-3">
+        <div className="grid min-h-[29rem] grid-cols-[7.7rem_minmax(0,1fr)] overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]">
+          <aside className="border-r border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3">
+            <div className="mb-4 rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3">
+              <p className="text-[0.7rem] font-semibold text-[var(--md-sys-color-on-surface-variant)]">작업 공간</p>
+              <p className="mt-1 text-sm font-medium text-[var(--md-sys-color-on-surface)]">내 문서</p>
             </div>
             <div className="space-y-1.5">
               {navItems.map((item) => {
@@ -261,8 +263,8 @@ function ProductPreview({ slide }: { slide: Slide }) {
                     key={item.id}
                     className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-[0.78rem] font-medium ${
                       active
-                        ? 'bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_22%,transparent)] text-white shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]'
-                        : 'text-slate-500'
+                        ? 'bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_14%,var(--md-sys-color-surface-container-lowest))] text-[var(--md-sys-color-on-surface)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--ow-onboarding-accent)_22%,transparent)_inset]'
+                        : 'text-[var(--md-sys-color-on-surface-variant)]'
                     }`}
                   >
                     <Icon name={item.icon} size={15} />
@@ -276,36 +278,36 @@ function ProductPreview({ slide }: { slide: Slide }) {
           <div className="min-w-0 p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-white/42">미리 보기</p>
-                <h2 className="mt-2 truncate text-2xl font-medium tracking-[-0.04em] text-white">{slide.previewTitle}</h2>
-                <p className="mt-1 text-sm text-slate-400">{slide.previewSubtitle}</p>
+                <p className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[var(--md-sys-color-on-surface-variant)]">미리 보기</p>
+                <h2 className="mt-2 truncate text-2xl font-medium tracking-[-0.04em] text-[var(--md-sys-color-on-surface)]">{slide.previewTitle}</h2>
+                <p className="mt-1 text-sm text-[var(--md-sys-color-on-surface-variant)]">{slide.previewSubtitle}</p>
               </div>
-              <div className="shrink-0 rounded-xl border border-white/10 bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_20%,transparent)] px-3 py-2 text-right">
-                <p className="text-[0.68rem] uppercase tracking-[0.12em] text-white/50">보기</p>
-                <p className="mt-1 text-sm font-semibold text-white">{slide.metric}</p>
+              <div className="shrink-0 rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_10%,var(--md-sys-color-surface-container-lowest))] px-3 py-2 text-right">
+                <p className="text-[0.68rem] uppercase tracking-[0.12em] text-[var(--md-sys-color-on-surface-variant)]">보기</p>
+                <p className="mt-1 text-sm font-semibold text-[var(--md-sys-color-on-surface)]">{slide.metric}</p>
               </div>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-white/10 bg-[#070c17] p-3">
-              <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.045] px-3 py-2 text-slate-300">
+            <div className="mt-4 rounded-2xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3">
+              <div className="flex items-center gap-2 rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-[var(--md-sys-color-on-surface-variant)]">
                 <Icon name={activeIcon} size={17} />
                 <span className="truncate text-sm">{slide.previewTitle}</span>
               </div>
 
-              <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08]">
+              <div className="mt-3 overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)]">
                 {slide.rows.map((row, rowIndex) => (
                   <div
                     key={`${row.title}-${rowIndex}`}
-                    className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-white/[0.07] bg-white/[0.025] px-3.5 py-3 last:border-b-0"
+                    className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3.5 py-3 last:border-b-0"
                   >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.055] text-[var(--ow-onboarding-accent)]">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[color-mix(in_srgb,var(--ow-onboarding-accent)_10%,var(--md-sys-color-surface-container-low))] text-[var(--ow-onboarding-accent)]">
                       <Icon name={row.icon} size={18} />
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">{row.title}</p>
-                      <p className="mt-0.5 truncate text-xs text-slate-500">{row.meta}</p>
+                      <p className="truncate text-sm font-medium text-[var(--md-sys-color-on-surface)]">{row.title}</p>
+                      <p className="mt-0.5 truncate text-xs text-[var(--md-sys-color-on-surface-variant)]">{row.meta}</p>
                     </div>
-                    <span className="rounded-md border border-white/10 bg-white/[0.045] px-2 py-1 text-[0.72rem] font-medium text-slate-300">
+                    <span className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-2 py-1 text-[0.72rem] font-medium text-[var(--md-sys-color-on-surface-variant)]">
                       {row.state}
                     </span>
                   </div>
@@ -317,14 +319,14 @@ function ProductPreview({ slide }: { slide: Slide }) {
               {slide.chips.map((chip) => (
                 <span
                   key={chip}
-                  className="rounded-md border border-white/10 bg-white/[0.045] px-2.5 py-1 text-[0.76rem] font-medium text-slate-300"
+                  className="rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-2.5 py-1 text-[0.76rem] font-medium text-[var(--md-sys-color-on-surface-variant)]"
                 >
                   {chip}
                 </span>
               ))}
             </div>
 
-            <div className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-xs leading-5 text-slate-400">
+            <div className="mt-4 rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 text-xs leading-5 text-[var(--md-sys-color-on-surface-variant)]">
               원본 문서는 그대로 두고, OfficeWhere 안에서 검색 정보와 변경 이력만 관리합니다.
             </div>
           </div>

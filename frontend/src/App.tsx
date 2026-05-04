@@ -90,7 +90,6 @@ const TUTORIAL_TARGET_TAB: Record<TutorialStep, Tab | null> = {
   'example-folder': 'files',
   'document-refresh': 'files',
   search: 'search',
-  'search-results': 'search',
   'search-review': 'search',
   'version-ppt': 'check',
   'version-ppt-review': 'check',
@@ -111,10 +110,10 @@ const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
 }
 const TUTORIAL_CONFIRMATION_ADVANCE_MS = 1400
 const TUTORIAL_CONFIRMATION_ADVANCE_BY_STEP: Partial<Record<TutorialStep, number>> = {
-  'search-review': 1800,
-  'version-ppt-detail': 1500,
-  'version-excel-review': 3200,
-  'excel-table-history': 1800,
+  'search-review': 2600,
+  'version-ppt-detail': 2400,
+  'version-excel-review': 4200,
+  'excel-table-history': 2600,
 }
 
 function getTutorialAutoAdvanceDelay(step: TutorialStep) {
@@ -124,56 +123,50 @@ function getTutorialAutoAdvanceDelay(step: TutorialStep) {
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
     eyebrow: '예제 폴더',
-    title: '예제 폴더를 추가합니다',
-    description: '임시로 만든 예제 폴더입니다. 대상 추가를 누르면 예제 문서를 등록합니다.',
+    title: '예제 문서 폴더를 추가합니다',
+    description: '대상 추가를 누르면 튜토리얼용 문서 폴더를 임시로 등록합니다.',
     icon: 'drive_folder_upload',
   },
   'document-refresh': {
     eyebrow: '문서 준비',
-    title: '문서 새로고침을 눌러 준비합니다',
-    description: '폴더 안의 문서를 읽어서 검색과 변경 이력에 쓸 정보를 만듭니다.',
+    title: '문서를 한 번 읽어 둡니다',
+    description: '문서 새로고침을 누르면 검색과 변경 이력에 쓸 정보를 준비합니다.',
     icon: 'sync',
   },
   search: {
     eyebrow: '문서 검색',
-    title: '검색창에 일정을 입력하세요',
-    description: '입력이 끝나면 파일명과 본문에서 찾은 결과가 잠시 후 표시됩니다.',
+    title: '검색창에 “일정”을 입력하세요',
+    description: '입력이 끝나면 OfficeWhere가 파일명과 본문을 함께 찾아봅니다.',
     icon: 'search',
     keyword: EXAMPLE_SEARCH_QUERY,
   },
-  'search-results': {
-    eyebrow: '본문 매칭',
-    title: '본문에서 찾은 위치를 확인하세요',
-    description: '검색어가 들어간 문장과 문서 안 위치가 결과 아래에 펼쳐져 있습니다.',
-    icon: 'unfold_more',
-  },
   'search-review': {
     eyebrow: '검색 결과',
-    title: '본문에서 검색어를 찾았습니다',
-    description: '강조된 문장을 확인하면 다음 안내로 넘어갑니다.',
+    title: '본문에서 “일정”을 찾았습니다',
+    description: '검색어가 들어간 문장과 위치를 확인한 뒤, 잠시 후 변경 이력으로 넘어갑니다.',
     icon: 'visibility',
   },
   'version-ppt': {
     eyebrow: 'PPT 변경 이력',
-    title: 'PPT 변경점을 열어보세요',
+    title: 'PPT 변경점을 열어봅니다',
     description: '변경점 보기를 누르면 슬라이드별로 달라진 부분을 확인할 수 있습니다.',
     icon: 'timeline',
   },
   'version-ppt-review': {
     eyebrow: 'PPT 변경',
-    title: '자세히 보기를 눌러보세요',
-    description: '접힌 내용을 펼치면 어떤 문장이 바뀌었는지 바로 보입니다.',
+    title: '변경 내용을 펼쳐봅니다',
+    description: '자세히 보기를 누르면 어떤 문장이 바뀌었는지 바로 보입니다.',
     icon: 'unfold_more',
   },
   'version-ppt-detail': {
     eyebrow: 'PPT 변경 상세',
-    title: 'PPT에서 달라진 부분입니다',
-    description: '슬라이드별 변경 내용을 확인하면 다음 안내로 넘어갑니다.',
+    title: '슬라이드에서 달라진 부분입니다',
+    description: '변경 내용을 확인하고 나면 Excel 예제로 이어집니다.',
     icon: 'visibility',
   },
   'version-excel': {
     eyebrow: 'Excel 변경 이력',
-    title: 'Excel 변경점도 확인해 볼게요',
+    title: 'Excel 변경점도 확인합니다',
     description: '변경점 보기를 누르면 바뀐 셀과 값을 먼저 보여줍니다.',
     icon: 'difference',
   },
@@ -198,7 +191,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'excel-table-history': {
     eyebrow: '셀 변경 이력',
     title: '셀 값의 변화가 정리됐습니다',
-    description: '이전 값과 현재 값을 확인하면 튜토리얼이 끝납니다.',
+    description: '이전 값과 현재 값을 확인하면 둘러보기가 마무리됩니다.',
     icon: 'history',
   },
   done: {
@@ -243,13 +236,17 @@ function getTutorialTargetElement(step: TutorialStep) {
 
 function isTutorialTargetVisible(rect: DOMRect, viewport: { width: number; height: number }) {
   const margin = 8
+  const visibleWidth = Math.max(0, Math.min(rect.right, viewport.width - margin) - Math.max(rect.left, margin))
+  const visibleHeight = Math.max(0, Math.min(rect.bottom, viewport.height - margin) - Math.max(rect.top, margin))
+  const widthRatio = visibleWidth / Math.max(1, rect.width)
+  const heightRatio = visibleHeight / Math.max(1, rect.height)
   return (
     rect.width > 2 &&
     rect.height > 2 &&
-    rect.right > margin &&
-    rect.bottom > margin &&
-    rect.left < viewport.width - margin &&
-    rect.top < viewport.height - margin
+    visibleWidth >= Math.min(48, rect.width * 0.6) &&
+    visibleHeight >= Math.min(32, rect.height * 0.6) &&
+    widthRatio >= 0.45 &&
+    heightRatio >= 0.45
   )
 }
 
@@ -1064,7 +1061,7 @@ function GuidedTourHud({
                       style={{ '--tour-auto-advance-ms': `${autoAdvanceDelay}ms` } as CSSProperties}
                     >
                       <Icon name="progress_activity" size={16} />
-                      <span>확인 완료 · 잠시 후 다음 안내로 넘어갑니다</span>
+                      <span>잠시 후 다음 안내로 이어집니다</span>
                     </span>
                   )}
                 </div>
@@ -1141,9 +1138,6 @@ function TopAppBar({ title, hint }: { title: string; hint: string }) {
     <header className="sticky top-0 z-20 bg-[var(--md-sys-color-background)]/78 backdrop-blur-xl supports-[backdrop-filter]:bg-[var(--md-sys-color-background)]/68 border-b border-[var(--md-sys-color-outline-variant)]">
       <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 h-[4.25rem] flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <p className="type-label-md text-[var(--md-sys-color-primary)] uppercase tracking-[0.14em]">
-            OfficeWhere
-          </p>
           <h1 className="type-title-lg text-[var(--md-sys-color-on-surface)] truncate -tracking-[0.01em]">
             {title}
           </h1>

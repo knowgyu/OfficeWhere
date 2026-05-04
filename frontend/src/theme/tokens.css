@@ -7,22 +7,22 @@
   color-scheme: light;
 
   /* Primary — action / accent */
-  --md-sys-color-primary: #2f5f8f;
+  --md-sys-color-primary: #365f7d;
   --md-sys-color-on-primary: #ffffff;
-  --md-sys-color-primary-container: #d9e8f8;
-  --md-sys-color-on-primary-container: #0d2b45;
+  --md-sys-color-primary-container: #dce8f1;
+  --md-sys-color-on-primary-container: #0c2739;
 
   /* Secondary — supportive, neutral-warm */
-  --md-sys-color-secondary: #596273;
+  --md-sys-color-secondary: #5d6572;
   --md-sys-color-on-secondary: #ffffff;
-  --md-sys-color-secondary-container: #e8ecf2;
+  --md-sys-color-secondary-container: #e7ebf0;
   --md-sys-color-on-secondary-container: #171b27;
 
   /* Tertiary — search highlight / warm contrast */
-  --md-sys-color-tertiary: #76531f;
+  --md-sys-color-tertiary: #73552d;
   --md-sys-color-on-tertiary: #ffffff;
-  --md-sys-color-tertiary-container: #f5ead5;
-  --md-sys-color-on-tertiary-container: #281906;
+  --md-sys-color-tertiary-container: #f1e7d8;
+  --md-sys-color-on-tertiary-container: #25190b;
 
   /* Error */
   --md-sys-color-error: #ba1a1a;
@@ -41,32 +41,32 @@
   --md-sys-color-on-success-container: #00210a;
 
   /* Background & surface tonal layers */
-  --md-sys-color-background: #f7f8fb;
+  --md-sys-color-background: #f5f6f8;
   --md-sys-color-on-background: #1a1c1e;
-  --md-sys-color-surface: #f7f8fb;
+  --md-sys-color-surface: #f5f6f8;
   --md-sys-color-on-surface: #1a1c1e;
-  --md-sys-color-surface-variant: #e5e8ef;
+  --md-sys-color-surface-variant: #e3e7ee;
   --md-sys-color-on-surface-variant: #4b5563;
 
-  --md-sys-color-surface-dim: #d9dde7;
-  --md-sys-color-surface-bright: #fbfcff;
+  --md-sys-color-surface-dim: #d8dde5;
+  --md-sys-color-surface-bright: #fafbfc;
   --md-sys-color-surface-container-lowest: #ffffff;
-  --md-sys-color-surface-container-low: #f8f9fc;
-  --md-sys-color-surface-container: #f2f4f8;
-  --md-sys-color-surface-container-high: #e7ebf1;
-  --md-sys-color-surface-container-highest: #dfe5ee;
+  --md-sys-color-surface-container-low: #f7f8fa;
+  --md-sys-color-surface-container: #eef1f5;
+  --md-sys-color-surface-container-high: #e4e8ef;
+  --md-sys-color-surface-container-highest: #dce2eb;
 
   /* Outline */
-  --md-sys-color-outline: #687386;
-  --md-sys-color-outline-variant: #d1d8e3;
+  --md-sys-color-outline: #687385;
+  --md-sys-color-outline-variant: #d4dae4;
 
   /* OfficeWhere app-level layers */
-  --ow-app-bg-start: #fbfcff;
-  --ow-app-accent-glow: rgba(49, 95, 143, 0.045);
-  --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 88%, transparent);
-  --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 96%, transparent);
+  --ow-app-bg-start: #fafbfc;
+  --ow-app-accent-glow: rgba(54, 95, 125, 0.032);
+  --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 92%, transparent);
+  --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 98%, transparent);
   --ow-inset-highlight: rgba(255, 255, 255, 0.86);
-  --ow-panel-shadow: 0 14px 36px rgba(15, 23, 42, 0.065), 0 1px 0 var(--ow-inset-highlight) inset;
+  --ow-panel-shadow: 0 10px 26px rgba(15, 23, 42, 0.052), 0 1px 0 var(--ow-inset-highlight) inset;
   --ow-dialog-backdrop: rgba(8, 11, 22, 0.62);
   --ow-dialog-surface: var(--md-sys-color-surface-container-lowest);
   --ow-kbd-background: linear-gradient(180deg, #ffffff, #eef1f7);
@@ -87,11 +87,11 @@
   --md-state-dragged: 0.16;
 
   /* Elevation shadows */
-  --md-elev-1: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 0 rgba(255, 255, 255, 0.75) inset;
-  --md-elev-2: 0 10px 24px rgba(15, 23, 42, 0.07), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
-  --md-elev-3: 0 18px 42px rgba(15, 23, 42, 0.10), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
-  --md-elev-4: 0 24px 56px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.88) inset;
-  --md-elev-5: 0 32px 72px rgba(15, 23, 42, 0.14), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  --md-elev-1: 0 1px 2px rgba(15, 23, 42, 0.045), 0 1px 0 rgba(255, 255, 255, 0.74) inset;
+  --md-elev-2: 0 8px 20px rgba(15, 23, 42, 0.06), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
+  --md-elev-3: 0 14px 34px rgba(15, 23, 42, 0.082), 0 1px 0 rgba(255, 255, 255, 0.82) inset;
+  --md-elev-4: 0 20px 46px rgba(15, 23, 42, 0.10), 0 1px 0 rgba(255, 255, 255, 0.86) inset;
+  --md-elev-5: 0 28px 62px rgba(15, 23, 42, 0.12), 0 1px 0 rgba(255, 255, 255, 0.88) inset;
 
   /* Shape (corner radius) */
   --md-shape-xs: 4px;
@@ -110,20 +110,20 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --md-sys-color-primary: #9bc7f2;
-  --md-sys-color-on-primary: #082134;
-  --md-sys-color-primary-container: #1b3c5f;
-  --md-sys-color-on-primary-container: #e8f3ff;
+  --md-sys-color-primary: #93bad8;
+  --md-sys-color-on-primary: #092233;
+  --md-sys-color-primary-container: #21394c;
+  --md-sys-color-on-primary-container: #e3edf6;
 
-  --md-sys-color-secondary: #c3c7d7;
-  --md-sys-color-on-secondary: #2c3040;
-  --md-sys-color-secondary-container: #3f4354;
-  --md-sys-color-on-secondary-container: #e0e3f3;
+  --md-sys-color-secondary: #c3c8d3;
+  --md-sys-color-on-secondary: #2c3038;
+  --md-sys-color-secondary-container: #383f4b;
+  --md-sys-color-on-secondary-container: #e3e7ef;
 
-  --md-sys-color-tertiary: #dfbb77;
-  --md-sys-color-on-tertiary: #402900;
-  --md-sys-color-tertiary-container: #443520;
-  --md-sys-color-on-tertiary-container: #f7dfb5;
+  --md-sys-color-tertiary: #d1b284;
+  --md-sys-color-on-tertiary: #38270f;
+  --md-sys-color-tertiary-container: #3f3527;
+  --md-sys-color-on-tertiary-container: #f3e3c9;
 
   --md-sys-color-error: #ffb4ab;
   --md-sys-color-on-error: #690005;
@@ -138,30 +138,30 @@
   --md-sys-color-success-container: #183f29;
   --md-sys-color-on-success-container: #c5f5c7;
 
-  --md-sys-color-background: #0b0e13;
+  --md-sys-color-background: #0c1016;
   --md-sys-color-on-background: #e5e7ef;
-  --md-sys-color-surface: #0b0e13;
+  --md-sys-color-surface: #0c1016;
   --md-sys-color-on-surface: #e5e7ef;
-  --md-sys-color-surface-variant: #444854;
+  --md-sys-color-surface-variant: #414854;
   --md-sys-color-on-surface-variant: #c4c9d3;
 
-  --md-sys-color-surface-dim: #0b0e13;
-  --md-sys-color-surface-bright: #343844;
-  --md-sys-color-surface-container-lowest: #11151c;
-  --md-sys-color-surface-container-low: #171c25;
-  --md-sys-color-surface-container: #1e2430;
-  --md-sys-color-surface-container-high: #28303d;
-  --md-sys-color-surface-container-highest: #343d4c;
+  --md-sys-color-surface-dim: #0c1016;
+  --md-sys-color-surface-bright: #303743;
+  --md-sys-color-surface-container-lowest: #11161d;
+  --md-sys-color-surface-container-low: #171c24;
+  --md-sys-color-surface-container: #1d2430;
+  --md-sys-color-surface-container-high: #27303c;
+  --md-sys-color-surface-container-highest: #323b48;
 
   --md-sys-color-outline: #8d93a3;
-  --md-sys-color-outline-variant: #444b59;
+  --md-sys-color-outline-variant: #414957;
 
-  --ow-app-bg-start: #0e1118;
-  --ow-app-accent-glow: rgba(94, 149, 206, 0.07);
-  --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 88%, transparent);
-  --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-low) 94%, transparent);
+  --ow-app-bg-start: #0f131a;
+  --ow-app-accent-glow: rgba(147, 186, 216, 0.048);
+  --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 92%, transparent);
+  --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-low) 96%, transparent);
   --ow-inset-highlight: rgba(255, 255, 255, 0.07);
-  --ow-panel-shadow: 0 18px 46px rgba(0, 0, 0, 0.34), 0 1px 0 var(--ow-inset-highlight) inset;
+  --ow-panel-shadow: 0 14px 36px rgba(0, 0, 0, 0.30), 0 1px 0 var(--ow-inset-highlight) inset;
   --ow-dialog-backdrop: rgba(0, 0, 0, 0.78);
   --ow-dialog-surface: var(--md-sys-color-surface-container-high);
   --ow-kbd-background: linear-gradient(180deg, #2c3140, #181b24);
@@ -181,8 +181,8 @@
   --md-state-dragged: 0.18;
 
   --md-elev-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  --md-elev-2: 0 12px 28px rgba(0, 0, 0, 0.34), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
-  --md-elev-3: 0 20px 46px rgba(0, 0, 0, 0.42), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
-  --md-elev-4: 0 26px 62px rgba(0, 0, 0, 0.50), 0 1px 0 rgba(255, 255, 255, 0.07) inset;
-  --md-elev-5: 0 34px 78px rgba(0, 0, 0, 0.58), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+  --md-elev-2: 0 10px 24px rgba(0, 0, 0, 0.30), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+  --md-elev-3: 0 16px 38px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  --md-elev-4: 0 22px 52px rgba(0, 0, 0, 0.46), 0 1px 0 rgba(255, 255, 255, 0.07) inset;
+  --md-elev-5: 0 30px 66px rgba(0, 0, 0, 0.52), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
 }
