@@ -24,8 +24,10 @@ def test_electron_builder_runtime_resources_are_platform_scoped():
     scripts = package["scripts"]
     build = package["build"]
 
+    assert scripts["package:win"] == "electron-builder --win zip --publish never"
     assert scripts["prepare:python-runtime:mac"] == "python3 ../scripts/prepare_python_runtime.py mac-arm64"
     assert scripts["package:mac"].startswith("npm run prepare:python-runtime:mac && ")
+    assert scripts["package:mac"].endswith("electron-builder --mac --publish never")
     top_level_sources = {item["from"] for item in build["extraResources"]}
     assert "../python-runtime/win-x64" not in top_level_sources
     assert build["win"]["extraResources"] == [
@@ -64,7 +66,7 @@ def test_release_workflow_builds_and_publishes_macos_artifacts():
 def test_release_docs_do_not_describe_macos_packaging_as_future_work():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     build_sh = (REPO_ROOT / "build.sh").read_text(encoding="utf-8")
-    release_note = (REPO_ROOT / "docs" / "releases" / "v0.7.5.md").read_text(encoding="utf-8")
+    release_note = (REPO_ROOT / "docs" / "releases" / "v0.7.6.md").read_text(encoding="utf-8")
     windows_runtime_readme = (REPO_ROOT / "python-runtime" / "win-x64" / "README.md").read_text(encoding="utf-8")
 
     assert "officewhere-vX.Y.Z-mac-arm64.dmg" in readme

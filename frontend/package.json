@@ -1,16 +1,16 @@
 {
   "name": "officewhere",
   "productName": "OfficeWhere",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "electron:dev": "npm run build && npm run build:electron && electron .",
-    "package:win": "electron-builder --win zip",
+    "package:win": "electron-builder --win zip --publish never",
     "prepare:python-runtime:mac": "python3 ../scripts/prepare_python_runtime.py mac-arm64",
-    "package:mac": "npm run prepare:python-runtime:mac && electron-builder --mac",
+    "package:mac": "npm run prepare:python-runtime:mac && electron-builder --mac --publish never",
     "preview": "vite preview"
   },
   "dependencies": {
