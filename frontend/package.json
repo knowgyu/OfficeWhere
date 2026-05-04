@@ -1,7 +1,7 @@
 {
   "name": "officewhere",
   "productName": "OfficeWhere",
-  "version": "0.7.10",
+  "version": "0.7.11",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
