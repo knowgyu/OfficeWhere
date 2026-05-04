@@ -38,6 +38,8 @@ frontend/dist-electron/
 frontend/.vite/
 frontend/coverage/
 frontend/*.tsbuildinfo
+frontend/test-results/
+frontend/playwright-report/
 
 # Logs
 *.log
