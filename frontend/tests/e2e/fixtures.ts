@@ -151,3 +151,46 @@ export const test = base.extend<OfficeWhereFixtures>({
 })
 
 export { expect } from '@playwright/test'
+
+/**
+ * Register the given library folder and poll the rescan endpoint until it
+ * completes. Used by Tier 2 specs that need an indexed library before
+ * exercising search / consistency / duplicates flows.
+ */
+export async function registerAndRescan(window: Page, libraryPath: string) {
+  // Open the settings tab.
+  await window
+    .getByRole('navigation', { name: '메인 내비게이션' })
+    .getByRole('button', { name: '설정' })
+    .click()
+
+  await window.getByPlaceholder('검색/검사 대상 폴더 경로').fill(libraryPath)
+  await window.getByRole('button', { name: '대상 추가' }).click()
+
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    const status = await window.evaluate(async () => {
+      const url = await window.officeWhere?.getBackendBaseUrl?.()
+      if (!url) return null
+      const response = await fetch(`${url}/api/library/rescan/status`)
+      if (!response.ok) return null
+      return (await response.json()) as {
+        running: boolean
+        stage: string
+        registered: number
+        updated: number
+        skipped: number
+      }
+    })
+    if (
+      status
+      && !status.running
+      && status.stage === 'completed'
+      && (status.registered + status.updated + status.skipped) > 0
+    ) {
+      return status
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new Error('library rescan did not complete within 90s')
+}
