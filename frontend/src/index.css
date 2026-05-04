@@ -625,158 +625,27 @@ body,
   box-shadow: inset 0 0 0 1px var(--ow-diff-changed-border);
 }
 
-.tour-soft-scrim {
-  background: rgba(15, 23, 42, 0.03);
+.tour-spotlight-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
-.tour-hud-bubble {
-  position: fixed;
-  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 82%, var(--md-sys-color-primary) 18%);
-  border-radius: 1rem;
-  padding: 0.9rem 0.95rem;
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 94%, var(--md-sys-color-surface-container-low) 6%);
-  box-shadow:
-    0 18px 44px rgba(15, 23, 42, 0.18),
-    0 1px 0 var(--ow-inset-highlight) inset;
-  backdrop-filter: blur(12px) saturate(1.08);
-  transform-origin: 18% 0;
-  animation: none;
+.tour-spotlight-scrim {
+  fill: rgba(8, 11, 22, 0.46);
 }
 
-.tour-hud-bubble::before {
-  content: none;
+:root[data-theme='dark'] .tour-spotlight-scrim {
+  fill: rgba(0, 0, 0, 0.58);
 }
 
-.tour-hud-icon {
-  display: inline-flex;
-  height: 2.75rem;
-  width: 2.75rem;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  color: var(--md-sys-color-primary);
-  background: color-mix(in srgb, var(--md-sys-color-primary-container) 86%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--md-sys-color-primary) 18%, transparent) inset;
-}
-
-.tour-hud-eyebrow {
-  font-size: 0.68rem;
-  font-weight: 760;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--md-sys-color-primary);
-}
-
-.tour-hud-keyword {
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.2rem;
-  border-radius: 0.6rem;
-  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 24%, var(--md-sys-color-outline-variant));
-  background: color-mix(in srgb, var(--md-sys-color-primary-container) 42%, var(--md-sys-color-surface-container-lowest));
-  padding: 0.28rem 0.55rem;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: 0.76rem;
-  font-weight: 700;
-}
-
-.tour-hud-keyword kbd {
-  border-radius: 0.42rem;
-  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
-  background: var(--md-sys-color-surface-container-lowest);
-  padding: 0.12rem 0.48rem;
-  color: var(--md-sys-color-on-surface);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.82rem;
-  letter-spacing: 0;
-  box-shadow: 0 1px 0 var(--ow-inset-highlight) inset;
-}
-
-.tour-hud-kbd {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: 0.76rem;
-}
-
-.tour-hud-kbd kbd {
-  min-width: 2rem;
-  border-radius: 0.45rem;
-  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline) 54%, white 46%);
-  padding: 0.12rem 0.38rem 0.16rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.28)),
-    var(--md-sys-color-surface-container-lowest);
-  color: var(--md-sys-color-on-surface);
-  text-align: center;
-  font-size: 0.72rem;
-  font-weight: 700;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.9) inset,
-    0 1px 2px rgba(15, 23, 42, 0.12);
-}
-
-.tour-hud-line {
-  fill: none;
-  stroke: color-mix(in srgb, var(--md-sys-color-primary) 74%, white 26%);
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-dasharray: 2 12;
-  animation: tour-hud-dash 1.05s linear infinite;
-  filter: none;
-}
-
-.tour-hud-pointer-core {
-  fill: var(--md-sys-color-tertiary);
-  stroke: var(--md-sys-color-surface-container-lowest);
+.tour-spotlight-ring {
+  fill: transparent;
+  stroke: color-mix(in srgb, var(--md-sys-color-primary) 78%, white 22%);
   stroke-width: 2;
-}
-
-.tour-hud-pointer-halo {
-  fill: none;
-  stroke: color-mix(in srgb, var(--md-sys-color-tertiary) 64%, transparent);
-  stroke-width: 2;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: tour-hud-halo 1.35s ease-out infinite;
-}
-
-.tour-hud-target-core {
-  fill: var(--md-sys-color-primary);
-  stroke: var(--md-sys-color-surface-container-lowest);
-  stroke-width: 2;
-  filter: none;
-}
-
-.tour-hud-target-halo {
-  fill: none;
-  stroke: color-mix(in srgb, var(--md-sys-color-primary) 70%, transparent);
-  stroke-width: 2;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: tour-hud-halo 1.35s ease-out infinite;
-}
-
-.tour-pointer-hint {
-  position: fixed;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  border-radius: 9999px;
-  border: 1px solid color-mix(in srgb, var(--md-sys-color-tertiary) 34%, var(--md-sys-color-outline-variant));
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 90%, var(--md-sys-color-tertiary-container) 10%);
-  padding: 0.2rem 0.5rem;
-  color: var(--md-sys-color-on-surface);
-  font-size: 0.7rem;
-  font-weight: 730;
-  box-shadow:
-    0 10px 24px rgba(15, 23, 42, 0.14),
-    0 1px 0 var(--ow-inset-highlight) inset;
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent));
 }
 
 @keyframes attention-ring {
@@ -791,32 +660,6 @@ body,
   }
 }
 
-@keyframes tour-hud-float {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-  50% {
-    transform: translate3d(0, -4px, 0);
-  }
-}
-
-@keyframes tour-hud-dash {
-  to {
-    stroke-dashoffset: -20;
-  }
-}
-
-@keyframes tour-hud-halo {
-  0% {
-    opacity: 0.86;
-    transform: scale(0.7);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.5);
-  }
-}
 
 @keyframes tour-evidence-breathe {
   0%,
@@ -1074,9 +917,6 @@ body,
 
 @media (prefers-reduced-motion: reduce) {
   .tour-hud-bubble,
-  .tour-hud-line,
-  .tour-hud-target-halo,
-  .tour-hud-pointer-halo,
   .tour-review-target,
   .tour-review-target::before,
   .tour-review-target::after,

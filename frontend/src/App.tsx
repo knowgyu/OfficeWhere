@@ -71,11 +71,6 @@ const LS_ONBOARDING_DONE = 'officewhere:onboarding-complete:v1'
 const LS_UPDATE_DISMISSED_VERSION = 'officewhere:update-dismissed-version'
 const LOCAL_STATE_PREFIXES = ['officewhere:', 'odj:']
 
-interface Point {
-  x: number
-  y: number
-}
-
 interface TourRect {
   left: number
   top: number
@@ -216,42 +211,10 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
-function getRectBoundaryPoint(rect: TourRect, from: Point): Point {
-  const center = {
-    x: rect.left + rect.width / 2,
-    y: rect.top + rect.height / 2,
-  }
-  const dx = from.x - center.x
-  const dy = from.y - center.y
-  if (dx === 0 && dy === 0) {
-    return { x: center.x, y: rect.top }
-  }
-
-  const halfWidth = Math.max(rect.width / 2, 1)
-  const halfHeight = Math.max(rect.height / 2, 1)
-  const scale = Math.min(
-    dx === 0 ? Number.POSITIVE_INFINITY : halfWidth / Math.abs(dx),
-    dy === 0 ? Number.POSITIVE_INFINITY : halfHeight / Math.abs(dy),
-  )
-
-  return {
-    x: center.x + dx * scale,
-    y: center.y + dy * scale,
-  }
-}
-
 const getViewport = () => ({
   width: typeof window === 'undefined' ? 1280 : window.innerWidth,
   height: typeof window === 'undefined' ? 800 : window.innerHeight,
 })
-
-const getInitialPointer = (): Point => {
-  const viewport = getViewport()
-  return {
-    x: Math.max(96, viewport.width - 360),
-    y: Math.max(96, viewport.height - 180),
-  }
-}
 
 function getTutorialTargetTab(step: TutorialStep | null): Tab | null {
   return step ? TUTORIAL_TARGET_TAB[step] : null
@@ -624,9 +587,6 @@ export default function App() {
         </main>
       </div>
       <GlobalRescanProgress />
-      {tutorialStep && tutorialStep !== 'done' && (
-        <div className="tour-soft-scrim fixed inset-0 z-[64] pointer-events-none" />
-      )}
       <GuidedTourHud
         step={tutorialStep}
         activeTab={activeTab}
@@ -799,7 +759,6 @@ function GuidedTourHud({
   onCloseDone: () => void
   onReplayOnboarding: () => void
 }) {
-  const [pointer, setPointer] = useState<Point>(getInitialPointer)
   const [viewport, setViewport] = useState(getViewport)
   const [targetRect, setTargetRect] = useState<TourRect | null>(null)
   const primaryButtonRef = useRef<HTMLButtonElement>(null)
@@ -809,16 +768,6 @@ function GuidedTourHud({
   const nextCheckpoint = step ? TUTORIAL_REVIEW_ADVANCE[step] : undefined
   const autoAdvanceDelay = step ? getTutorialAutoAdvanceDelay(step) : TUTORIAL_CONFIRMATION_ADVANCE_MS
 
-  useEffect(() => {
-    if (!step) return undefined
-
-    const handlePointerMove = (event: PointerEvent) => {
-      setPointer({ x: event.clientX, y: event.clientY })
-    }
-
-    window.addEventListener('pointermove', handlePointerMove, { passive: true })
-    return () => window.removeEventListener('pointermove', handlePointerMove)
-  }, [step])
 
   useEffect(() => {
     if (step !== 'done') return undefined
@@ -915,41 +864,30 @@ function GuidedTourHud({
         ? target.left + target.width + 18
         : target.left - bubbleWidth - 18
       : target.left + target.width / 2 - bubbleWidth / 2
-    : pointer.x > viewport.width - bubbleWidth - 44
-      ? pointer.x - bubbleWidth - 26
-      : pointer.x + 26
+    : (viewport.width - bubbleWidth) / 2
   const targetBubbleTop = target
     ? placeBubbleBeside
       ? target.top + target.height / 2 - bubbleHeight / 2
       : placeBubbleBelow
         ? target.top + target.height + 18
         : target.top - bubbleHeight - 18
-    : pointer.y > viewport.height - bubbleHeight - 44
-      ? pointer.y - bubbleHeight - 24
-      : pointer.y + 22
+    : Math.min(96, Math.max(16, viewport.height * 0.16))
   const bubbleLeft = isDone
     ? Math.max(16, (viewport.width - bubbleWidth) / 2)
     : clamp(targetBubbleLeft, 16, Math.max(16, viewport.width - bubbleWidth - 16))
   const bubbleTop = isDone
     ? Math.max(16, (viewport.height - bubbleHeight) / 2)
     : clamp(targetBubbleTop, 16, Math.max(16, viewport.height - bubbleHeight - 16))
-  const pointerAnchor = {
-    x: clamp(pointer.x, 8, Math.max(8, viewport.width - 8)),
-    y: clamp(pointer.y, 8, Math.max(8, viewport.height - 8)),
-  }
-  const pointerHintLeft = clamp(pointerAnchor.x + 14, 16, Math.max(16, viewport.width - 104))
-  const pointerHintTop = clamp(pointerAnchor.y + 14, 16, Math.max(16, viewport.height - 40))
-  const targetAnchor = target ? getRectBoundaryPoint(target, pointerAnchor) : null
-  const curve = !isDone && targetAnchor
+  const spotlightPadding = target && target.width < 160 ? 10 : 12
+  const spotlightWidth = target ? Math.min(target.width + spotlightPadding * 2, Math.max(24, viewport.width - 16)) : 0
+  const spotlightHeight = target ? Math.min(target.height + spotlightPadding * 2, Math.max(24, viewport.height - 16)) : 0
+  const spotlight = !isDone && target
     ? {
-        startX: pointerAnchor.x,
-        startY: pointerAnchor.y,
-        c1X: pointerAnchor.x + (targetAnchor.x - pointerAnchor.x) * 0.32,
-        c1Y: pointerAnchor.y,
-        c2X: pointerAnchor.x + (targetAnchor.x - pointerAnchor.x) * 0.74,
-        c2Y: targetAnchor.y,
-        endX: targetAnchor.x,
-        endY: targetAnchor.y,
+        left: clamp(target.left - spotlightPadding, 8, Math.max(8, viewport.width - spotlightWidth - 8)),
+        top: clamp(target.top - spotlightPadding, 8, Math.max(8, viewport.height - spotlightHeight - 8)),
+        width: spotlightWidth,
+        height: spotlightHeight,
+        radius: Math.min(18, Math.max(10, Math.min(target.width, target.height) / 3)),
       }
     : null
   const stepIndex = getTutorialStepIndex(step)
@@ -957,23 +895,42 @@ function GuidedTourHud({
 
   return (
     <div className="fixed inset-0 z-[90] pointer-events-none">
-      {curve && (
-        <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
-          <path
-            d={`M ${curve.startX} ${curve.startY} C ${curve.c1X} ${curve.c1Y}, ${curve.c2X} ${curve.c2Y}, ${curve.endX} ${curve.endY}`}
-            className="tour-hud-line"
+      {!isDone && (
+        <svg className="tour-spotlight-canvas" aria-hidden="true">
+          <defs>
+            <mask id="tour-spotlight-mask">
+              <rect x="0" y="0" width={viewport.width} height={viewport.height} fill="white" />
+              {spotlight && (
+                <rect
+                  x={spotlight.left}
+                  y={spotlight.top}
+                  width={spotlight.width}
+                  height={spotlight.height}
+                  rx={spotlight.radius}
+                  fill="black"
+                />
+              )}
+            </mask>
+          </defs>
+          <rect
+            x="0"
+            y="0"
+            width={viewport.width}
+            height={viewport.height}
+            className="tour-spotlight-scrim"
+            mask="url(#tour-spotlight-mask)"
           />
-          <circle cx={curve.startX} cy={curve.startY} r="5" className="tour-hud-pointer-core" />
-          <circle cx={curve.startX} cy={curve.startY} r="13" className="tour-hud-pointer-halo" />
-          <circle cx={curve.endX} cy={curve.endY} r="7" className="tour-hud-target-core" />
-          <circle cx={curve.endX} cy={curve.endY} r="18" className="tour-hud-target-halo" />
+          {spotlight && (
+            <rect
+              x={spotlight.left}
+              y={spotlight.top}
+              width={spotlight.width}
+              height={spotlight.height}
+              rx={spotlight.radius}
+              className="tour-spotlight-ring"
+            />
+          )}
         </svg>
-      )}
-      {curve && (
-        <div className="tour-pointer-hint" style={{ left: pointerHintLeft, top: pointerHintTop }}>
-          <Icon name="near_me" size={14} />
-          <span>이쪽으로</span>
-        </div>
       )}
       <div
         className={`tour-hud-bubble${isDone ? ' tour-hud-bubble-interactive' : ''}`}
