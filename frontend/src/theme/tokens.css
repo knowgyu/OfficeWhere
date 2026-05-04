@@ -19,10 +19,10 @@
   --md-sys-color-on-secondary-container: #171b27;
 
   /* Tertiary — search highlight / warm contrast */
-  --md-sys-color-tertiary: #8a5a10;
+  --md-sys-color-tertiary: #76531f;
   --md-sys-color-on-tertiary: #ffffff;
-  --md-sys-color-tertiary-container: #fff1cf;
-  --md-sys-color-on-tertiary-container: #2a1700;
+  --md-sys-color-tertiary-container: #f5ead5;
+  --md-sys-color-on-tertiary-container: #281906;
 
   /* Error */
   --md-sys-color-error: #ba1a1a;
@@ -31,13 +31,13 @@
   --md-sys-color-on-error-container: #410002;
 
   /* Warning */
-  --md-sys-color-warning: #a05200;
-  --md-sys-color-warning-container: #ffdcbe;
+  --md-sys-color-warning: #94540b;
+  --md-sys-color-warning-container: #ffead4;
   --md-sys-color-on-warning-container: #2a1700;
 
   /* Success (custom) */
-  --md-sys-color-success: #146c2e;
-  --md-sys-color-success-container: #c2f0c5;
+  --md-sys-color-success: #17683a;
+  --md-sys-color-success-container: #ddf3e2;
   --md-sys-color-on-success-container: #00210a;
 
   /* Background & surface tonal layers */
@@ -62,11 +62,11 @@
 
   /* OfficeWhere app-level layers */
   --ow-app-bg-start: #fbfcff;
-  --ow-app-accent-glow: rgba(49, 95, 143, 0.07);
+  --ow-app-accent-glow: rgba(49, 95, 143, 0.045);
   --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 88%, transparent);
   --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 96%, transparent);
   --ow-inset-highlight: rgba(255, 255, 255, 0.86);
-  --ow-panel-shadow: 0 18px 48px rgba(15, 23, 42, 0.08), 0 1px 0 var(--ow-inset-highlight) inset;
+  --ow-panel-shadow: 0 14px 36px rgba(15, 23, 42, 0.065), 0 1px 0 var(--ow-inset-highlight) inset;
   --ow-dialog-backdrop: rgba(8, 11, 22, 0.62);
   --ow-dialog-surface: var(--md-sys-color-surface-container-lowest);
   --ow-kbd-background: linear-gradient(180deg, #ffffff, #eef1f7);
@@ -120,22 +120,22 @@
   --md-sys-color-secondary-container: #3f4354;
   --md-sys-color-on-secondary-container: #e0e3f3;
 
-  --md-sys-color-tertiary: #f1c76d;
+  --md-sys-color-tertiary: #dfbb77;
   --md-sys-color-on-tertiary: #402900;
-  --md-sys-color-tertiary-container: #4d3714;
-  --md-sys-color-on-tertiary-container: #ffe9b5;
+  --md-sys-color-tertiary-container: #443520;
+  --md-sys-color-on-tertiary-container: #f7dfb5;
 
   --md-sys-color-error: #ffb4ab;
   --md-sys-color-on-error: #690005;
   --md-sys-color-error-container: #93000a;
   --md-sys-color-on-error-container: #ffdad6;
 
-  --md-sys-color-warning: #ffb86b;
-  --md-sys-color-warning-container: #5f3900;
+  --md-sys-color-warning: #e5ad73;
+  --md-sys-color-warning-container: #4d351f;
   --md-sys-color-on-warning-container: #ffddb7;
 
-  --md-sys-color-success: #88dc96;
-  --md-sys-color-success-container: #0f4d23;
+  --md-sys-color-success: #8fd79b;
+  --md-sys-color-success-container: #183f29;
   --md-sys-color-on-success-container: #c5f5c7;
 
   --md-sys-color-background: #0b0d11;
@@ -157,11 +157,11 @@
   --md-sys-color-outline-variant: #3c414f;
 
   --ow-app-bg-start: #0e1118;
-  --ow-app-accent-glow: rgba(94, 149, 206, 0.11);
+  --ow-app-accent-glow: rgba(94, 149, 206, 0.07);
   --ow-surface-glass: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 88%, transparent);
   --ow-surface-glass-strong: color-mix(in srgb, var(--md-sys-color-surface-container-low) 94%, transparent);
   --ow-inset-highlight: rgba(255, 255, 255, 0.07);
-  --ow-panel-shadow: 0 22px 58px rgba(0, 0, 0, 0.38), 0 1px 0 var(--ow-inset-highlight) inset;
+  --ow-panel-shadow: 0 18px 46px rgba(0, 0, 0, 0.34), 0 1px 0 var(--ow-inset-highlight) inset;
   --ow-dialog-backdrop: rgba(0, 0, 0, 0.78);
   --ow-dialog-surface: var(--md-sys-color-surface-container-high);
   --ow-kbd-background: linear-gradient(180deg, #2c3140, #181b24);

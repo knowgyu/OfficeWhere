@@ -109,7 +109,7 @@ async def schema_reset_state():
         "resetPending": bool(raw),
         "detail": raw,
         "message": (
-            "검색/버전 관리용 색인 구조가 정리되어 등록 목록을 새로 만들었습니다. "
+            "검색/변경 이력용 문서 데이터 구조가 정리되어 등록 목록을 새로 만들었습니다. "
             "원본 문서는 삭제되지 않았으며, 대상 폴더를 다시 추가하거나 새로고침해 주세요."
             if raw
             else ""

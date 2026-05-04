@@ -47,7 +47,7 @@ export interface TutorialSection {
 export const TUTORIAL_SECTIONS: TutorialSection[] = [
   { id: 'folder', label: '폴더 설정', range: [1, 2] },
   { id: 'search', label: '문서 검색', range: [3, 5] },
-  { id: 'version', label: '버전 비교', range: [6, 14] },
+  { id: 'version', label: '변경 이력', range: [6, 14] },
 ]
 
 export function getTutorialStepIndex(step: TutorialStep): number {

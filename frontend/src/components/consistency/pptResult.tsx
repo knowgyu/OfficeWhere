@@ -182,7 +182,7 @@ export function PptCheckResult({
                     >
                       {isTutorialDetailTarget && (
                         <span className="tour-evidence-note">
-                          <Icon name="auto_awesome" size={14} />
+                          <Icon name="check_circle" size={14} />
                           슬라이드 안에서 바뀐 문구만 모아 보여줍니다
                         </span>
                       )}

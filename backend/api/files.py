@@ -17,6 +17,7 @@ from ..database import (
     delete_file,
     get_all_files,
     get_file_by_id,
+    list_duplicate_content_groups,
     list_files_page,
     save_indexed_file,
 )
@@ -25,6 +26,7 @@ from ..models.schemas import (
     BulkRegisterRequest,
     BulkRegisterResponse,
     BulkRegisterResult,
+    DuplicateFilesResponse,
     FileInfo,
     FileInspectRequest,
     FileInspectResponse,
@@ -265,6 +267,18 @@ def list_files_bounded(
         limit=safe_limit,
         offset=safe_offset,
     )
+
+
+@router.get("/duplicates", response_model=DuplicateFilesResponse)
+def list_duplicate_files(
+    limit: int = DEFAULT_FILE_PAGE_LIMIT,
+    offset: int = 0,
+):
+    groups = list_duplicate_content_groups(
+        limit=_normalize_file_page_limit(limit),
+        offset=max(0, offset),
+    )
+    return DuplicateFilesResponse(**groups)
 
 
 @router.get("/{file_id}/schema", response_model=SchemaResponse)

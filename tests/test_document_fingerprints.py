@@ -93,8 +93,8 @@ def test_group_content_status_uses_fingerprint_evidence(tmp_path, monkeypatch):
     assert group.content_status == "content_differs"
     assert group.fingerprint_coverage == 2
     assert group.fingerprint_unique_count == 2
-    assert "fingerprint" in group.content_evidence
-    assert "내용 fingerprint가 달라" in group.reason
+    assert "본문 서명" in group.content_evidence
+    assert "본문 서명이 달라" in group.reason
 
 
 def test_group_fingerprints_backfill_from_existing_chunks(tmp_path, monkeypatch):

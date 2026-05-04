@@ -262,7 +262,7 @@ def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
             "error_code": "database_locked",
             "error_stage": "database",
             "error_type": error_type,
-            "error_hint": "다른 OfficeWhere 프로세스나 백그라운드 색인이 DB를 쓰는 중일 수 있습니다. 잠시 뒤 문서 새로고침을 다시 실행해 주세요.",
+            "error_hint": "다른 OfficeWhere 프로세스나 백그라운드 작업이 DB를 쓰는 중일 수 있습니다. 잠시 뒤 문서 새로고침을 다시 실행해 주세요.",
         }
     if error_type in {"ValueError", "TypeError", "KeyError"}:
         return {
@@ -418,7 +418,7 @@ def _rescan_library_impl(
         progress_callback(
             {
                 "stage": "scanning",
-                "message": "대상 폴더를 확인하는 중입니다." if mode == "normal" else "고속 색인을 위해 대상 폴더를 확인하는 중입니다.",
+                "message": "대상 폴더를 확인하는 중입니다." if mode == "normal" else "빠른 문서 확인을 위해 대상 폴더를 확인하는 중입니다.",
                 "mode": mode,
                 "worker_count": worker_count,
                 "folders_total": folders_total,
@@ -656,7 +656,7 @@ def _rescan_library_impl(
                 "message": (
                     "정지 요청을 처리하는 중입니다."
                     if _cancel_event.is_set()
-                    else f"{'고속 ' if mode == 'fast' else ''}변경 확인 및 색인 중 · {processed}/{total}"
+                    else f"{'빠른 ' if mode == 'fast' else ''}변경 확인 및 문서 준비 중 · {processed}/{total}"
                 ),
                 "mode": mode,
                 "worker_count": worker_count,
@@ -746,7 +746,7 @@ def _rescan_library_impl(
             progress_callback(
                 {
                     "stage": "saving",
-                    "message": f"색인 결과 저장 중 · {len(batch)}개 문서 · 청크 {batch_chunk_count:,}개",
+                    "message": f"문서 정보 저장 중 · {len(batch)}개 문서 · 청크 {batch_chunk_count:,}개",
                     "mode": mode,
                     "worker_count": worker_count,
                     "found": total,
@@ -871,7 +871,7 @@ def _rescan_library_impl(
                 "message": (
                     "정지 요청을 처리하는 중입니다."
                     if _cancel_event.is_set()
-                    else f"{'고속 ' if mode == 'fast' else ''}변경 여부 확인 및 색인 준비 중 · 파일 {total}개 발견"
+                    else f"{'빠른 ' if mode == 'fast' else ''}변경 여부 확인 및 문서 준비 중 · 파일 {total}개 발견"
                 ),
                 "mode": mode,
                 "worker_count": worker_count,
@@ -1008,7 +1008,7 @@ def _rescan_library_impl(
                 progress_callback(
                     {
                         "stage": "saving",
-                        "message": "검색 인덱스를 마무리하는 중입니다.",
+                        "message": "검색 준비를 마무리하는 중입니다.",
                         "mode": mode,
                         "worker_count": worker_count,
                         "found": total,
@@ -1059,7 +1059,7 @@ def _rescan_library_impl(
         progress_callback(
             {
                 "stage": "cancelled" if cancelled else "completed",
-                "message": "문서 새로고침이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
+                "message": "문서 새로고침이 정지되었습니다." if cancelled else "문서 새로고침이 완료되었습니다.",
                 "mode": mode,
                 "worker_count": worker_count,
                 "found": total,
@@ -1087,7 +1087,7 @@ def _run_rescan_job(mode: str, owns_execution_lock: bool = False) -> None:
             {
                 "running": False,
                 "stage": "cancelled" if cancelled else "completed",
-                "message": "문서 새로고침이 정지되었습니다." if cancelled else "대상 폴더 색인이 완료되었습니다.",
+                "message": "문서 새로고침이 정지되었습니다." if cancelled else "문서 새로고침이 완료되었습니다.",
                 "mode": mode,
                 "percent": _rescan_status.get("percent", 100.0),
                 "eta_seconds": None,
@@ -1103,7 +1103,7 @@ def _run_rescan_job(mode: str, owns_execution_lock: bool = False) -> None:
             {
                 "running": False,
                 "stage": "failed",
-                "message": "대상 폴더 색인에 실패했습니다.",
+                "message": "문서 새로고침에 실패했습니다.",
                 "mode": mode,
                 "eta_seconds": None,
                 "error": str(exc),
@@ -1133,7 +1133,7 @@ def start_library_rescan(mode: str = "normal") -> LibraryRescanStatus:
     initial_status = LibraryRescanStatus(
         running=True,
         stage="queued",
-        message="대상 폴더 색인을 준비하는 중입니다." if mode == "normal" else "고속 색인을 준비하는 중입니다.",
+        message="문서 새로고침을 준비하는 중입니다." if mode == "normal" else "빠른 문서 확인을 준비하는 중입니다.",
         mode=mode,
         worker_count=worker_count,
         started_at=_now_iso(),
@@ -1204,19 +1204,19 @@ def _content_evidence(
 
     if not fingerprints:
         status = "pending"
-        evidence = "내용 fingerprint가 아직 준비되지 않았습니다. 재색인 후 더 정확히 판단합니다."
+        evidence = "내용 서명이 아직 준비되지 않았습니다. 문서 새로고침 후 더 정확히 판단합니다."
     elif not usable:
         status = "not_enough_content"
         evidence = "추출된 본문이 부족해 내용 동일 여부를 판단하지 않습니다."
     elif len(usable) < total_count:
         status = "partial"
-        evidence = f"{total_count}개 중 {len(usable)}개 파일만 내용 fingerprint가 있어 단정하지 않습니다."
+        evidence = f"{total_count}개 중 {len(usable)}개 파일만 내용 서명이 있어 단정하지 않습니다."
     elif len(unique_hashes) == 1:
         status = "same_content"
-        evidence = f"{len(usable)}개 파일의 추출 내용 fingerprint가 같습니다."
+        evidence = f"{len(usable)}개 파일의 추출 본문 서명이 같습니다."
     else:
         status = "content_differs"
-        evidence = f"{len(usable)}개 파일에서 {len(unique_hashes)}가지 추출 내용 fingerprint가 발견되었습니다."
+        evidence = f"{len(usable)}개 파일에서 {len(unique_hashes)}가지 추출 본문 서명이 발견되었습니다."
 
     return {
         "content_status": status,
@@ -1229,9 +1229,9 @@ def _content_evidence(
 def _reason_with_content_evidence(reason: str, content: Dict[str, Any]) -> str:
     status = content["content_status"]
     if status == "same_content":
-        return f"{reason} 내용 fingerprint 기준으로는 같은 내용으로 보입니다."
+        return f"{reason} 본문 서명 기준으로는 같은 내용으로 보입니다."
     if status == "content_differs":
-        return f"{reason} 내용 fingerprint가 달라 실제 변경 가능성이 있습니다."
+        return f"{reason} 본문 서명이 달라 실제 변경 가능성이 있습니다."
     return reason
 
 
@@ -1483,7 +1483,7 @@ def _group_detail_for_key(
             base_name=base_name,
             files=[file for file, _identity in identities],
             confidence="filename_tokens",
-            reason="파일명에서 버전/날짜/상태 표시를 감지했습니다. 같은 문서 계열 후보로 확인해 보세요.",
+            reason="파일명에서 수정본/날짜/상태 표시를 감지했습니다. 같은 문서 계열 후보로 확인해 보세요.",
             tokens_summary=_tokens_summary([identity for _file, identity in identities]),
             fingerprint_by_id=fingerprint_by_id,
             manual_latest_by_group=manual_latest_by_group,

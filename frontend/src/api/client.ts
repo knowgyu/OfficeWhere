@@ -64,6 +64,28 @@ export interface FileListParams {
   sort?: string
 }
 
+export interface DuplicateFileItem extends FileInfo {
+  content_chars: number
+  chunk_count: number
+}
+
+export interface DuplicateFileGroup {
+  content_signature: string
+  file_count: number
+  distinct_name_count: number
+  total_content_chars: number
+  latest_mtime?: number | null
+  file_types: string[]
+  files: DuplicateFileItem[]
+}
+
+export interface DuplicateFilesResponse {
+  total: number
+  groups: DuplicateFileGroup[]
+  limit: number
+  offset: number
+}
+
 export interface PreviewBlock {
   id: string
   blockType: string
@@ -467,6 +489,16 @@ async function getFilePage(params: FileListParams = {}) {
   const url = await apiPath('/api/files/page')
   const suffix = searchParams.toString()
   return axios.get<FileListResponse>(suffix ? `${url}?${suffix}` : url)
+}
+
+async function getDuplicateFiles(params: { limit?: number; offset?: number } = {}) {
+  const searchParams = new URLSearchParams()
+  if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
+  if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
+
+  const url = await apiPath('/api/files/duplicates')
+  const suffix = searchParams.toString()
+  return axios.get<DuplicateFilesResponse>(suffix ? `${url}?${suffix}` : url)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1103,6 +1135,7 @@ export const api = {
   files: {
     list: async () => axios.get<FileInfo[]>(await apiPath('/api/files')),
     page: getFilePage,
+    duplicates: getDuplicateFiles,
     inspect: (data: FileInspectRequest) =>
       apiPath('/api/files/inspect').then((url) => axios.post<FileInspectResponse>(url, data)),
     pick: pickFileWithBestAvailableDialog,

@@ -77,9 +77,9 @@ def _artifact_warning(status: str, file_info: Dict[str, Any]) -> Dict[str, Any]:
         "type": warning_type,
         "severity": "info" if status == "missing" else "warning",
         "message": (
-            "PowerPoint 비교용 색인 데이터가 없어 원본에서 다시 읽었습니다."
+            "PowerPoint 비교용 문서 데이터가 없어 원본에서 다시 읽었습니다."
             if status == "missing"
-            else "PowerPoint 비교용 색인 데이터를 다시 만들 필요가 있어 원본에서 다시 읽었습니다."
+            else "PowerPoint 비교용 문서 데이터를 다시 만들 필요가 있어 원본에서 다시 읽었습니다."
         ),
         "file_ids": [int(file_info["id"])],
         "details": {"artifact_status": status, "artifact_kind": PPT_COMPARISON_ARTIFACT_KIND},

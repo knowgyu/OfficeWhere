@@ -24,35 +24,35 @@ const FILE_TYPE_FILTERS = [
 ]
 
 const SEARCH_SCOPE_STATUS: Record<SearchScope, string> = {
-  filename_content: '파일명과 내용 함께 검색',
+  filename_content: '파일명 + 본문 검색',
   filename: '파일명만 검색',
-  content: '문서 내용만 검색',
+  content: '본문만 검색',
 }
 
 const SEARCH_SCOPE_DESCRIPTION: Record<SearchScope, string> = {
-  filename_content: '파일 이름과 문서 내용을 함께 찾습니다.',
+  filename_content: '파일 이름과 문서 본문을 함께 찾습니다.',
   filename: '파일 이름에 검색어가 포함된 문서만 찾습니다.',
-  content: '문서 내용에서만 검색어를 찾고, 파일명 일치는 제외합니다.',
+  content: '문서 본문에서만 검색어를 찾고, 파일명 일치는 제외합니다.',
 }
 
 const SEARCH_SCOPE_EMPTY: Record<SearchScope, string> = {
   filename_content: '오탈자를 확인하거나 더 짧은 키워드로 다시 시도해 보세요.',
-  filename: '파일명만 검색 중입니다. 파일명+내용으로 범위를 넓혀 보세요.',
-  content: '문서 내용만 검색 중입니다. 파일명+내용으로 범위를 넓혀 보세요.',
+  filename: '파일명만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.',
+  content: '본문만 검색 중입니다. 파일명+본문으로 범위를 넓혀 보세요.',
 }
 
 const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: string }> = {
   filename_content: {
-    title: '파일명과 문서 내용을 한 번에 검색',
+    title: '파일명과 본문을 한 번에 검색',
     description: '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT 문서 안의 단어까지 검색할 수 있습니다.',
   },
   filename: {
     title: '파일명으로 빠르게 검색',
-    description: '파일명만 찾거나 검색 범위를 파일명+내용으로 바꿔 문서 안의 단어까지 검색할 수 있습니다.',
+    description: '파일명만 찾거나 검색 범위를 파일명+본문으로 바꿔 문서 안의 단어까지 검색할 수 있습니다.',
   },
   content: {
-    title: '문서 내용만 정밀 검색',
-    description: '파일명 일치를 제외하고 Excel, Word, PPT 문서 내용에서만 검색합니다.',
+    title: '본문만 정밀 검색',
+    description: '파일명 일치를 제외하고 Excel, Word, PPT 문서 본문에서만 검색합니다.',
   },
 }
 
@@ -178,7 +178,7 @@ function SearchResultListItem({
 }) {
   return (
     <li
-      className={`px-5 py-3 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors ${
+      className={`px-4 py-2.5 border-t border-[var(--md-sys-color-outline-variant)] first:border-t-0 hover:bg-[var(--md-sys-color-surface-container-low)] transition-colors ${
         highlightTour ? 'tour-target tour-review-target rounded-xl' : ''
       }`}
       data-tour-target={highlightTour ? 'search-review' : undefined}
@@ -186,19 +186,21 @@ function SearchResultListItem({
       <button
         type="button"
         onClick={() => onOpen(item.file_id, item.name)}
-        className="block w-full text-left rounded-md"
+        className="grid w-full gap-2 rounded-md text-left md:grid-cols-[8.5rem_minmax(0,1fr)] md:items-start"
       >
-        <p className="type-label-md text-[var(--md-sys-color-primary)] mb-1 inline-flex items-center gap-1.5">
+        <p className="type-label-md text-[var(--md-sys-color-primary)] inline-flex items-center gap-1.5">
           <Icon name="my_location" size={14} />
           {item.location}
         </p>
-        {tourHint && (
-          <span className="tour-evidence-note mb-2">
-            <Icon name="auto_awesome" size={14} />
-            {tourHint}
-          </span>
-        )}
-        <SnippetText snippet={item.snippet} />
+        <div className="min-w-0">
+          {tourHint && (
+            <span className="tour-evidence-note mb-2">
+              <Icon name="check_circle" size={14} />
+              {tourHint}
+            </span>
+          )}
+          <SnippetText snippet={item.snippet} />
+        </div>
       </button>
     </li>
   )
@@ -208,10 +210,12 @@ export default function FileSearch({
   tutorialStep,
   libraryDataRevision = 0,
   onTutorialStep,
+  onOpenDuplicates,
 }: {
   tutorialStep?: TutorialStep | null
   libraryDataRevision?: number
   onTutorialStep?: (step: TutorialStep | null) => void
+  onOpenDuplicates?: () => void
 }) {
   const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
@@ -698,8 +702,8 @@ export default function FileSearch({
           </span>
           {tutorialStep === 'search' && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-primary)]/20 bg-[var(--md-sys-color-primary-container)]/55 px-3 py-1 text-[var(--md-sys-color-on-primary-container)]">
-              <Icon name="auto_awesome" size={16} />
-              프로젝트를 입력하면 파일명과 내용을 함께 찾아요
+              <Icon name="visibility" size={16} />
+              프로젝트를 입력하면 파일명과 본문을 함께 찾아요
             </span>
           )}
         </div>
@@ -845,13 +849,13 @@ export default function FileSearch({
               <Chip label={`수정일 ${activeModifiedDateLabel}`} tone="secondary" as="span" icon="event" />
             )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              관련도 높은 결과부터 가볍게 보여줍니다
+              파일별로 묶어서 가볍게 보여줍니다
               {prefetching ? ' · 다음 결과 준비 중' : ''}
             </span>
             <div className="ml-auto flex gap-2 flex-wrap">
               {groupedSearch.hiddenExactDuplicateCount > 0 && (
                 <Chip
-                  label={`완전 중복 ${groupedSearch.hiddenExactDuplicateCount}개 숨김`}
+                  label={`같은 이름·같은 내용 ${groupedSearch.hiddenExactDuplicateCount}개 숨김`}
                   tone="neutral"
                   as="span"
                   icon="content_copy"
@@ -868,7 +872,7 @@ export default function FileSearch({
                     className={tutorialStep === 'search-results' ? 'attention-pulse tour-target' : ''}
                     data-tour-target={tutorialStep === 'search-results' ? 'search-results' : undefined}
                   >
-                    본문 전체 열기
+                    본문 위치 모두 보기
                   </Button>
                   <Button
                     variant="text"
@@ -877,7 +881,7 @@ export default function FileSearch({
                     onClick={collapseAllContentMatches}
                     disabled={expandedContentFiles.size === 0}
                   >
-                    본문 전체 접기
+                    본문 위치 접기
                   </Button>
                 </>
               )}
@@ -889,15 +893,20 @@ export default function FileSearch({
                 <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--md-sys-color-tertiary-container)] text-[var(--md-sys-color-on-tertiary-container)]">
                   <Icon name="rule_folder" size={18} />
                 </span>
-                <div className="min-w-0 space-y-1">
+                <div className="min-w-0 flex-1 space-y-1">
                   <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                    제목만 다른 중복 문서가 보입니다
+                    파일명만 다른 같은 내용 문서가 보입니다
                   </p>
                   <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                    본문이 같은 파일은 정리 후보로 확인해 보세요. 예: {groupedSearch.duplicateContentSuggestions[0].names.slice(0, 3).join(', ')}
+                    본문이 같은 파일은 별도 화면에서 한 묶음으로 확인해 보세요. 예: {groupedSearch.duplicateContentSuggestions[0].names.slice(0, 3).join(', ')}
                     {groupedSearch.duplicateContentSuggestions[0].names.length > 3 ? ' 외' : ''}
                   </p>
                 </div>
+                {onOpenDuplicates && (
+                  <Button variant="tonal" size="sm" leadingIcon="content_copy" onClick={onOpenDuplicates}>
+                    같은 내용 문서 보기
+                  </Button>
+                )}
               </div>
             </Card>
           )}
@@ -908,51 +917,74 @@ export default function FileSearch({
               const filenameItems = items.filter((item) => item.location === '파일명')
               const contentItems = items.filter((item) => item.location !== '파일명')
               const contentExpanded = expandedContentFiles.has(fileKey)
+              const firstContentItem = contentItems[0]
               const titleSnippet = filenameItems[0]?.snippet ?? fileName
 
               return (
                 <Card key={group.fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none ring-1 ring-[var(--ow-inset-highlight)]">
                   <header className="border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/72 px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <FileTypeBadge fileType={items[0].file_type} />
-                      <span className="min-w-0 flex-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]">
-                        <HighlightedSnippet
-                          snippet={titleSnippet}
-                          className="type-title-sm text-[var(--md-sys-color-on-surface)]"
-                        />
-                      </span>
-                      <Badge tone="neutral">{items.length}건</Badge>
-                      {contentItems.length > 0 && (
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <FileTypeBadge fileType={items[0].file_type} />
+                          <span className="min-w-0 flex-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]">
+                            <HighlightedSnippet
+                              snippet={titleSnippet}
+                              className="type-title-sm text-[var(--md-sys-color-on-surface)]"
+                            />
+                          </span>
+                          <Badge tone="neutral">{items.length}건</Badge>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                          <Icon name="description" size={15} />
+                          <span className="truncate" title={items[0].path}>{items[0].path}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
+                        {contentItems.length > 0 && (
+                          <Button
+                            variant="tonal"
+                            size="sm"
+                            leadingIcon={contentExpanded ? 'expand_less' : 'subject'}
+                            onClick={() => toggleContentMatches(fileKey)}
+                          >
+                            {contentExpanded ? '본문 위치 접기' : `본문 위치 ${contentItems.length}건`}
+                          </Button>
+                        )}
                         <Button
-                          variant="tonal"
+                          variant="text"
                           size="sm"
-                          leadingIcon={contentExpanded ? 'expand_less' : 'subject'}
-                          onClick={() => toggleContentMatches(fileKey)}
+                          leadingIcon="open_in_new"
+                          onClick={() => handleOpenFile(items[0].file_id, fileName)}
                         >
-                          {contentExpanded ? '본문 접기' : `본문 ${contentItems.length}건`}
+                          열기
                         </Button>
-                      )}
-                      <Button
-                        variant="text"
-                        size="sm"
-                        leadingIcon="open_in_new"
-                        onClick={() => handleOpenFile(items[0].file_id, fileName)}
-                      >
-                        열기
-                      </Button>
-                      <Button
-                        variant="text"
-                        size="sm"
-                        leadingIcon="folder_open"
-                        onClick={() => handleShowInFolder(items[0].file_id, fileName, items[0].path)}
-                      >
-                        폴더
-                      </Button>
+                        <Button
+                          variant="text"
+                          size="sm"
+                          leadingIcon="folder_open"
+                          onClick={() => handleShowInFolder(items[0].file_id, fileName, items[0].path)}
+                        >
+                          폴더
+                        </Button>
+                      </div>
                     </div>
-                    <div className="mt-1 flex items-center gap-2 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                      <Icon name="description" size={15} />
-                      <span className="truncate" title={items[0].path}>{items[0].path}</span>
-                    </div>
+                    {firstContentItem && !contentExpanded && (
+                      <button
+                        type="button"
+                        onClick={() => toggleContentMatches(fileKey)}
+                        className="mt-3 grid w-full gap-2 rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2 text-left transition-colors hover:border-[var(--md-sys-color-primary)] hover:bg-[var(--md-sys-color-surface-container-low)] md:grid-cols-[8.5rem_minmax(0,1fr)]"
+                      >
+                        <span className="inline-flex items-center gap-1.5 type-label-md text-[var(--md-sys-color-primary)]">
+                          <Icon name="subject" size={14} />
+                          본문 미리보기
+                        </span>
+                        <HighlightedSnippet
+                          snippet={firstContentItem.snippet}
+                          className="line-clamp-2 type-body-sm text-[var(--md-sys-color-on-surface)]"
+                        />
+                      </button>
+                    )}
                   </header>
                   <ul>
                     {contentExpanded &&

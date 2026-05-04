@@ -613,7 +613,7 @@ export function ExcelDiffGridModal({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 표로 보기</p>
-                  <Badge tone="neutral">최신↔이전 기준</Badge>
+                  <Badge tone="neutral">선택 파일 비교</Badge>
                 </div>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate mt-1">
                   {modal.detail.base_name}
@@ -686,7 +686,7 @@ function ExcelDiffGridSummary({
   return (
     <div className="space-y-3">
       <div className="flex gap-2 flex-wrap">
-        <Chip label={`최신 파일 값 기준 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
+        <Chip label={`최신 파일 값 · ${data.latest_file.file_name}`} tone="primary" icon="description" as="span" />
         <Chip label={`${selectedSheetName || data.sheet_name} 시트`} tone="neutral" as="span" />
         <Chip label={`${data.row_count}행 × ${data.column_count}열`} tone="neutral" as="span" />
       </div>
@@ -732,7 +732,7 @@ function ExcelDiffGridSummary({
       </div>
 
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-        색상은 최신본과 바로 이전 버전의 차이만 표시합니다. 색이 없는 셀도 누르면 이전 버전들 사이의 변경 이력을 확인할 수 있습니다.
+        색상은 최신본과 바로 이전 파일의 차이만 표시합니다. 색이 없는 셀도 누르면 이전 파일들 사이의 변경 이력을 확인할 수 있습니다.
       </p>
 
       {data.partial && (
@@ -785,7 +785,7 @@ function ExcelDiffGridSectionView({
           <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{section.title}</p>
           {highlightReview && tutorialStep === 'excel-table-cell' && (
             <span className="tour-evidence-note">
-              <Icon name="auto_awesome" size={14} />
+              <Icon name="check_circle" size={14} />
               D7 셀을 눌러 변경 이력을 열어보세요
             </span>
           )}
@@ -868,7 +868,7 @@ function ExcelDiffGridCellDetail({
       <aside className="border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4">
         <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경 셀 상세</p>
         <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          표의 셀을 누르면 최신본 값과 버전 사이 변경 이력을 여기서 확인할 수 있습니다.
+          표의 셀을 누르면 최신본 값과 파일 사이 변경 이력을 여기서 확인할 수 있습니다.
         </p>
       </aside>
     )
@@ -898,7 +898,7 @@ function ExcelDiffGridCellDetail({
         </p>
         {isTutorialHistoryTarget && (
           <span className="tour-evidence-note">
-            <Icon name="auto_awesome" size={14} />
+            <Icon name="check_circle" size={14} />
             셀 변경 이력이 아래에 정리됩니다
           </span>
         )}

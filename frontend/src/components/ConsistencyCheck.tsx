@@ -56,12 +56,12 @@ const isCheckableFile = (file: FileInfo) =>
   ['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(file.file_type))
 
 const groupKindLabel = (kind: LibraryGroupKind) =>
-  kind === 'exact_name_conflict' ? '같은 제목' : '버전명 감지'
+  kind === 'exact_name_conflict' ? '같은 제목 후보' : '수정본 묶음'
 
 const GROUP_FILTER_OPTIONS: { value: GroupFilter; label: string }[] = [
   { value: 'all', label: '전체 보기' },
-  { value: 'exact_name_conflict', label: '같은 제목' },
-  { value: 'version_family', label: '버전명 감지' },
+  { value: 'exact_name_conflict', label: '같은 제목 후보' },
+  { value: 'version_family', label: '수정본 묶음' },
 ]
 
 const GROUP_FILE_TYPE_OPTIONS: { value: GroupFileTypeFilter; label: string }[] = [
@@ -133,6 +133,7 @@ export default function ConsistencyCheck({
   const [excelGridModal, setExcelGridModal] = useState<ExcelGridModalState | null>(null)
   const historyRunRef = useRef(0)
   const groupRefreshTimerRef = useRef<number | null>(null)
+  const manualResultRef = useRef<HTMLDivElement | null>(null)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setFilesLoading(true)
@@ -284,6 +285,7 @@ export default function ConsistencyCheck({
       const response = await api.check.run({ file_ids: ids })
       const normalized = normalizeCheckResponse(response.data)
       setResult(normalized)
+      snackbar.success('선택한 파일 비교 결과가 바로 아래에 열렸습니다.')
     } catch (error) {
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
@@ -327,6 +329,15 @@ export default function ConsistencyCheck({
   const handleCheck = () => {
     void runCheckForFiles(selectedFiles)
   }
+
+  useEffect(() => {
+    if (!loading && !result) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      manualResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      manualResultRef.current?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [loading, result])
 
   const loadGroupDetail = async (group: LibraryGroupSummary): Promise<LibraryGroupDetail | null> => {
     if (activeGroupDetail?.id === group.id) return activeGroupDetail
@@ -451,7 +462,7 @@ export default function ConsistencyCheck({
         if (!isCurrentRun()) return
         const detailMessage =
           (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-          '이 버전 사이의 변경점을 계산하지 못했습니다.'
+          '이 파일 사이의 변경점을 계산하지 못했습니다.'
         setHistoryState((current) =>
           current?.groupId === detail.id && isCurrentRun()
             ? {
@@ -764,7 +775,7 @@ export default function ConsistencyCheck({
         <EmptyState
           icon="fact_check"
           title="먼저 파일을 등록해 주세요"
-          description="버전 관리는 등록된 Office 파일 사이의 버전과 변경점을 확인합니다."
+          description="변경 이력은 등록된 Office 파일 사이의 수정본과 변경점을 확인합니다."
         />
       </Card>
     )
@@ -774,7 +785,7 @@ export default function ConsistencyCheck({
     <div className="space-y-6">
       <Card variant="elevated">
         <CardSection
-          title="문서 비교"
+          title="변경 이력"
           description="검토가 필요한 문서 그룹을 찾아 확인하세요. 문서가 많으면 문서명, 폴더명, 형식으로 좁혀볼 수 있습니다."
           trailing={
             <Chip
@@ -821,25 +832,25 @@ export default function ConsistencyCheck({
               >
                 필터{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
               </Button>
-                {groupQuery && (
-                  <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
-                    지우기
-                  </Button>
-                )}
-                <Button
-                  variant="text"
-                  leadingIcon="restart_alt"
-                  onClick={resetGroupFilters}
-                  disabled={groupsLoading || !hasActiveGroupFilters}
-                >
-                  필터 초기화
+              {groupQuery && (
+                <Button variant="text" leadingIcon="close" onClick={clearGroupSearch} disabled={groupsLoading}>
+                  지우기
                 </Button>
-              </div>
+              )}
+              <Button
+                variant="text"
+                leadingIcon="restart_alt"
+                onClick={resetGroupFilters}
+                disabled={groupsLoading || !hasActiveGroupFilters}
+              >
+                필터 초기화
+              </Button>
+            </div>
             {groupFilterOpen && (
               <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 p-3 shadow-elev-1">
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                   <div>
-                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">문서 구분</p>
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">묶음 기준</p>
                     <div className="mt-2 flex gap-2 flex-wrap">
                       {GROUP_FILTER_OPTIONS.map((option) => (
                         <Button
@@ -884,7 +895,7 @@ export default function ConsistencyCheck({
                     </div>
                   </div>
                   <div>
-                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">중복 파일</p>
+                    <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">같은 내용 문서</p>
                     <div className="mt-2 space-y-2">
                       <Button
                         size="sm"
@@ -892,10 +903,10 @@ export default function ConsistencyCheck({
                         leadingIcon={showDuplicateGroups ? 'visibility' : 'visibility_off'}
                         onClick={() => changeDuplicateGroups(!showDuplicateGroups)}
                       >
-                        내용 같은 중복도 보기
+                        같은 내용 문서도 표시
                       </Button>
                       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        기본값은 이름은 같아도 내용까지 같은 파일을 숨깁니다.
+                        변경점이 없는 동일 내용 문서는 기본적으로 숨깁니다.
                       </p>
                     </div>
                   </div>
@@ -904,10 +915,10 @@ export default function ConsistencyCheck({
             )}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex gap-2 flex-wrap">
-                <Chip label={`구분 · ${groupFilterLabel}`} tone="neutral" as="span" />
+                <Chip label={`묶음 · ${groupFilterLabel}`} tone="neutral" as="span" />
                 <Chip label={`형식 · ${groupFileTypeLabel}`} tone="neutral" as="span" />
                 <Chip label={`정렬 · ${groupSortLabel}`} tone="neutral" as="span" />
-                {showDuplicateGroups && <Chip label="내용 같은 중복 포함" tone="neutral" as="span" />}
+                {showDuplicateGroups && <Chip label="같은 내용 문서 포함" tone="neutral" as="span" />}
               </div>
               <Button
                 variant="outlined"
@@ -917,13 +928,13 @@ export default function ConsistencyCheck({
                 직접 파일 고르기
               </Button>
             </div>
-              {hasActiveGroupFilters && (
+            {hasActiveGroupFilters && (
               <div className="flex gap-2 flex-wrap">
                 {groupQuery && <Chip label={`검색어 · ${groupQuery}`} tone="secondary" icon="search" as="span" />}
-                {groupFilter !== 'all' && <Chip label={`구분 · ${groupFilterLabel}`} tone="primary" as="span" />}
+                {groupFilter !== 'all' && <Chip label={`묶음 · ${groupFilterLabel}`} tone="primary" as="span" />}
                 {groupFileType !== 'all' && <Chip label={`형식 · ${groupFileTypeLabel}`} tone="neutral" as="span" />}
                 {groupSort !== 'recent' && <Chip label={`정렬 · ${groupSortLabel}`} tone="neutral" as="span" />}
-                {showDuplicateGroups && <Chip label="내용 같은 중복 포함" tone="neutral" as="span" />}
+                {showDuplicateGroups && <Chip label="같은 내용 문서 포함" tone="neutral" as="span" />}
               </div>
             )}
           </div>
@@ -944,8 +955,8 @@ export default function ConsistencyCheck({
           ) : groups.length === 0 ? (
             <EmptyState
               icon="task_alt"
-              title="자동 감지된 버전 그룹이 없습니다"
-              description="같은 제목이거나 파일명에 버전/날짜가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
+              title="자동 감지된 변경 이력 묶음이 없습니다"
+              description="같은 제목이거나 파일명에 날짜·수정본 표시가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
               compact
             />
           ) : (
@@ -1023,8 +1034,8 @@ export default function ConsistencyCheck({
 
       <Card id="manual-version-picker" variant="outlined">
         <CardSection
-          title="수동으로 직접 고르기"
-          description="자동 그룹에 없는 문서를 비교할 때만 열어 사용하세요. 현재 페이지와 검색 결과만 보여줍니다."
+          title="직접 비교할 파일 고르기"
+          description="자동 묶음에 없는 문서를 비교할 때만 열어 사용하세요. 현재 페이지와 검색 결과만 보여줍니다."
           trailing={
             <Button
               variant={manualOpen ? 'tonal' : 'outlined'}
@@ -1048,10 +1059,16 @@ export default function ConsistencyCheck({
               onClick={handleCheck}
               loading={loading}
               disabled={selectedFiles.length < 2}
-              >
-                선택 파일 변경점 확인
-              </Button>
+            >
+              선택한 파일 비교하기
+            </Button>
           </div>
+
+          {(loading || result) && (
+            <div ref={manualResultRef} tabIndex={-1} className="outline-none">
+              <ManualCompareResultPanel loading={loading} result={result} selectedFiles={selectedFiles} />
+            </div>
+          )}
 
           {manualOpen && (
             <div className="space-y-4 pt-2">
@@ -1059,7 +1076,7 @@ export default function ConsistencyCheck({
                 <div className="flex-1 min-w-[240px]">
                   <TextField
                     leadingIcon="search"
-                      placeholder="비교할 Office 파일명 또는 경로 검색"
+                    placeholder="비교할 Office 파일명 또는 경로 검색"
                     value={fileQueryDraft}
                     onChange={(event) => setFileQueryDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -1179,10 +1196,6 @@ export default function ConsistencyCheck({
         </CardSection>
       </Card>
 
-      {result && <CompareMetadataWarnings metadata={result.metadata} />}
-      {result?.mode === 'excel' && <ExcelCheckResult result={result} />}
-      {result?.mode === 'word' && <WordCheckResult diffs={result.diffs} />}
-      {result?.mode === 'ppt' && <PptCheckResult slides={result.slides} />}
       {excelGridModal && (
         <ExcelDiffGridModal
           modal={excelGridModal}
@@ -1192,6 +1205,62 @@ export default function ConsistencyCheck({
           onTutorialStep={onTutorialStep}
         />
       )}
+    </div>
+  )
+}
+
+function manualResultSummary(result: CheckResponse | null) {
+  if (!result) return ''
+  if (result.mode === 'excel') {
+    const count = result.issues.reduce((total, issue) => total + issue.conflicts.length, 0)
+    return `${count.toLocaleString('ko-KR')}개 셀/값 변경`
+  }
+  if (result.mode === 'word') {
+    return `${result.diffs.length.toLocaleString('ko-KR')}개 문단/표 변경`
+  }
+  return `${result.slides.length.toLocaleString('ko-KR')}개 슬라이드 변경`
+}
+
+function ManualCompareResultPanel({
+  loading,
+  result,
+  selectedFiles,
+}: {
+  loading: boolean
+  result: CheckResponse | null
+  selectedFiles: FileInfo[]
+}) {
+  return (
+    <div className="mt-4 overflow-hidden rounded-xl border border-[var(--md-sys-color-primary)]/35 bg-[var(--md-sys-color-surface-container-lowest)] shadow-elev-1">
+      <div className="flex items-start justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-primary-container)]/18 px-4 py-3">
+        <div className="min-w-0 space-y-1">
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
+            {loading ? '선택한 파일을 비교하는 중입니다' : '선택한 파일 비교 결과가 열렸습니다'}
+          </p>
+          <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate">
+            {selectedFiles.map((file) => file.name).join(' · ')}
+          </p>
+        </div>
+        {loading ? (
+          <span className="inline-flex items-center gap-2 rounded-full bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-1 type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+            <Spinner size={14} /> 계산 중
+          </span>
+        ) : result ? (
+          <Badge tone="primary">{manualResultSummary(result)}</Badge>
+        ) : null}
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-2 px-4 py-5 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          <Spinner size={18} /> 결과가 준비되면 이 자리에서 바로 펼쳐집니다.
+        </div>
+      ) : result ? (
+        <div className="space-y-4 p-4">
+          <CompareMetadataWarnings metadata={result.metadata} />
+          {result.mode === 'excel' && <ExcelCheckResult result={result} />}
+          {result.mode === 'word' && <WordCheckResult diffs={result.diffs} />}
+          {result.mode === 'ppt' && <PptCheckResult slides={result.slides} />}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1252,87 +1321,35 @@ function GroupCard({
           : 'border-[var(--md-sys-color-outline-variant)] hover:bg-[var(--md-sys-color-surface-container-low)]'
       }`}
     >
-      <div className="border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 px-4 py-3">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="min-w-0 space-y-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
-                비교 대상
-              </span>
-              <FileTypeBadge fileType={group.file_type} />
-              <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
-                {groupKindLabel(group.group_kind)}
-              </Badge>
-            </div>
-            <p className="type-title-md text-[var(--md-sys-color-on-surface)] break-words">
-              {group.base_name}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap justify-end">
+      <div className="grid grid-cols-1 gap-3 border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/70 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+        <div className="min-w-0">
+          <div className="mb-2 flex items-center gap-2 flex-wrap">
+            <FileTypeBadge fileType={group.file_type} />
+            <Badge tone={group.group_kind === 'exact_name_conflict' ? 'warning' : 'neutral'}>
+              {groupKindLabel(group.group_kind)}
+            </Badge>
             <Badge tone="neutral">{group.file_count}개 파일</Badge>
           </div>
+          <p className="truncate type-title-md text-[var(--md-sys-color-on-surface)]" title={group.latest_file?.name ?? group.base_name}>
+            {group.latest_file?.name ?? group.base_name}
+          </p>
+          <p className="mt-1 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+            {group.base_name}
+          </p>
         </div>
-      </div>
-
-      <div className="space-y-4 p-4">
-        {(group.latest_file || group.previous_file) && (
-          <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)]/75 px-3 py-2">
-            <div className="grid grid-cols-1 gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-center">
-              {group.latest_file && (
-                <button
-                  type="button"
-                  className="min-w-0 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--md-sys-color-surface-container-high)]"
-                  onClick={() => onOpenFile(group.latest_file!)}
-                >
-                  <span className="mr-2 type-label-md text-[var(--md-sys-color-on-surface-variant)]">기준</span>
-                  <span className="inline-block max-w-[calc(100%-3.5rem)] truncate align-bottom type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.latest_file.name}>
-                    {group.latest_file.name}
-                  </span>
-                </button>
-              )}
-              {group.previous_file && (
-                <button
-                  type="button"
-                  className="min-w-0 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--md-sys-color-surface-container-high)]"
-                  onClick={() => onOpenFile(group.previous_file!)}
-                >
-                  <span className="mr-2 type-label-md text-[var(--md-sys-color-on-surface-variant)]">직전</span>
-                  <span className="inline-block max-w-[calc(100%-3.5rem)] truncate align-bottom type-title-sm text-[var(--md-sys-color-on-surface)]" title={group.previous_file.name}>
-                    {group.previous_file.name}
-                  </span>
-                </button>
-              )}
-              <div className="flex justify-end">
-                <Button
-                  variant={activeDetail ? 'tonal' : 'filled'}
-                  size="sm"
-                  leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
-                  onClick={onOpen}
-                  loading={historyLoading}
-                  className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
-                  data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
-                >
-                  {activeDetail ? '접기' : '변경점'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!(group.latest_file || group.previous_file) && (
-          <div className="flex justify-end">
-            <Button
-              variant={activeDetail ? 'tonal' : 'filled'}
-              leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
-              onClick={onOpen}
-              loading={historyLoading}
-              className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
-              data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
-            >
-              {activeDetail ? '접기' : '변경점 보기'}
-            </Button>
-          </div>
-        )}
+        <div className="flex justify-end">
+          <Button
+            variant={activeDetail ? 'tonal' : 'filled'}
+            size="sm"
+            leadingIcon={activeDetail ? 'expand_less' : 'timeline'}
+            onClick={onOpen}
+            loading={historyLoading}
+            className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
+            data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
+          >
+            {activeDetail ? '접기' : '변경점 보기'}
+          </Button>
+        </div>
       </div>
 
       {activeDetail && (

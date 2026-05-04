@@ -77,7 +77,7 @@ def _source_stat_metadata(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
             {
                 "type": "source_may_be_newer",
                 "severity": "warning",
-                "message": "원본 파일이 마지막 색인 이후 수정된 것으로 보입니다. 현재 결과는 마지막 색인 기준일 수 있습니다.",
+                "message": "원본 파일이 마지막 문서 새로고침 이후 수정된 것으로 보입니다. 현재 결과는 마지막 확인 시점 기준일 수 있습니다.",
                 "file_ids": newer_file_ids,
                 "details": {"source": "api_check_stat"},
             }

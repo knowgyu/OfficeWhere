@@ -29,6 +29,28 @@ class FileListResponse(BaseModel):
     offset: int
 
 
+class DuplicateFileItem(FileInfo):
+    content_chars: int = 0
+    chunk_count: int = 0
+
+
+class DuplicateFileGroup(BaseModel):
+    content_signature: str
+    file_count: int
+    distinct_name_count: int
+    total_content_chars: int
+    latest_mtime: Optional[float] = None
+    file_types: List[str] = Field(default_factory=list)
+    files: List[DuplicateFileItem] = Field(default_factory=list)
+
+
+class DuplicateFilesResponse(BaseModel):
+    total: int
+    groups: List[DuplicateFileGroup]
+    limit: int
+    offset: int
+
+
 class FileRegisterResponse(BaseModel):
     id: int
     name: str

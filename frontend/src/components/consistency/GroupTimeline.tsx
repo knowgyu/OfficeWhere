@@ -94,7 +94,7 @@ export function GroupTimeline({
   const hiddenFileCount = Math.max(0, detail.files.length - visibleFiles.length)
   const progressLabel = historyState
     ? historyState.total === 0
-      ? '비교할 이전 버전 없음'
+      ? '비교할 이전 파일 없음'
       : historyState.loading
         ? '선택한 두 파일 계산 중…'
         : '선택한 두 파일 계산 완료'
@@ -117,7 +117,7 @@ export function GroupTimeline({
             <Button
               variant="outlined"
               size="sm"
-              leadingIcon="auto_awesome"
+              leadingIcon="star"
               loading={clearingLatestGroupId === detail.id}
               disabled={Boolean(settingLatestFileId) || Boolean(historyState?.loading)}
               onClick={onClearLatestFile}
@@ -155,7 +155,7 @@ export function GroupTimeline({
             </p>
             {shouldMarkReviewContainer && (
               <span className="tour-evidence-note tour-version-note mt-2">
-                <Icon name="auto_awesome" size={14} />
+                <Icon name="check_circle" size={14} />
                 변경 증거를 찾았습니다
               </span>
             )}
@@ -184,9 +184,9 @@ export function GroupTimeline({
       </div>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">파일 버전 순서</p>
+        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">파일 순서</p>
         <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          별표로 최신 기준을 바꾸고, 1/2로 비교할 두 파일을 고릅니다.
+          별표로 대표 파일을 바꾸고, 1/2로 비교할 두 파일을 고릅니다.
         </p>
       </div>
       <ol className="overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]">
@@ -219,16 +219,16 @@ export function GroupTimeline({
                   aria-label={
                     isLatest
                       ? isManualLatest
-                        ? '직접 지정한 최신 기준 파일'
-                        : '현재 최신 기준 파일'
-                      : '최신 기준으로 지정'
+                        ? '직접 지정한 대표 파일'
+                        : '현재 대표 파일'
+                      : '대표 파일로 지정'
                   }
                   title={
                     isLatest
                       ? isManualLatest
-                        ? '직접 지정한 최신 기준 파일'
-                        : '현재 최신 기준 파일'
-                      : '최신 기준으로 지정'
+                        ? '직접 지정한 대표 파일'
+                        : '현재 대표 파일'
+                      : '대표 파일로 지정'
                   }
                   disabled={!isLatest && latestActionDisabled}
                   onClick={() => {
@@ -332,13 +332,13 @@ function SelectedCompareBar({
   return (
     <div className="sticky top-2 z-10 rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/95 px-3 py-2 shadow-elev-1 backdrop-blur">
       <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:items-center">
-        <ComparedFilePill marker="1" label="이전 기준" file={fromFile} tone="warning" onOpenFile={onOpenFile} />
+        <ComparedFilePill marker="1" label="비교 전" file={fromFile} tone="warning" onOpenFile={onOpenFile} />
         <Icon
           name="arrow_forward"
           size={18}
           className="hidden text-[var(--md-sys-color-on-surface-variant)] lg:block"
         />
-        <ComparedFilePill marker="2" label="변경 후" file={toFile} tone="success" onOpenFile={onOpenFile} />
+        <ComparedFilePill marker="2" label="비교 후" file={toFile} tone="success" onOpenFile={onOpenFile} />
       </div>
     </div>
   )

@@ -225,7 +225,7 @@ def _indexed_excel_payloads(file_infos: List[Dict[str, Any]]) -> tuple[List[Dict
         metadata["warnings"].append(
             _compare_warning(
                 "source_may_be_newer",
-                "원본 파일이 마지막 색인 이후 수정된 것으로 보입니다. 현재 Excel 비교는 마지막 색인 기준입니다.",
+                "원본 파일이 마지막 문서 새로고침 이후 수정된 것으로 보입니다. 현재 Excel 비교는 마지막 확인 시점 기준입니다.",
                 file_ids=newer_file_ids,
                 details={"source": "excel_indexed_payload"},
             )
@@ -252,7 +252,7 @@ def _ordered_sheet_names(payloads: List[Dict[str, Any]]) -> List[str]:
 
 def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(file_infos) != 2:
-        raise ValueError("Excel 버전 관리는 두 버전씩 순서대로 비교합니다.")
+        raise ValueError("Excel 변경 이력은 두 파일씩 순서대로 비교합니다.")
 
     payloads, metadata = _excel_payloads(file_infos)
     before_payload, after_payload = payloads
@@ -337,7 +337,7 @@ def compare_excel_versions_by_cells(file_infos: List[Dict[str, Any]]) -> Dict[st
         metadata["warnings"].append(
             _compare_warning(
                 "high_change_ratio",
-                "변경된 셀이 많아 같은 버전의 문서가 아닐 수도 있습니다. 비교 대상이 맞는지 확인해 주세요.",
+                "변경된 셀이 많아 같은 문서의 수정본이 아닐 수도 있습니다. 비교 대상이 맞는지 확인해 주세요.",
                 file_ids=[int(info["id"]) for info in file_infos],
                 details={
                     "changed_cell_count": changed_cell_count,

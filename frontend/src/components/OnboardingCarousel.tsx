@@ -48,11 +48,11 @@ const slides: Slide[] = [
   },
   {
     eyebrow: '변경 확인',
-    title: '버전 차이를 바로 봅니다',
+    title: '변경 이력을 바로 봅니다',
     description: '비슷한 파일을 묶고 바뀐 부분만 먼저 보여줍니다.',
     proof: 'PPT 슬라이드와 Excel 값 변경을 증거 중심으로 확인합니다.',
     accent: '#6d5a86',
-    previewTitle: '프로젝트상태 버전 묶음',
+    previewTitle: '프로젝트상태 수정본 묶음',
     previewSubtitle: '5개 파일 · 최신 v4.0',
     metric: '변경점 중심',
     chips: ['변경점 보기', 'PPT 변경', '최신 지정'],
@@ -65,7 +65,7 @@ const slides: Slide[] = [
   {
     eyebrow: '첫 실행',
     title: '예제로 핵심만 둘러보세요',
-    description: '강조된 곳을 따라가며 검색, 버전 차이, 셀 변경을 확인합니다.',
+    description: '강조된 곳을 따라가며 검색, 변경 이력, 셀 변경을 확인합니다.',
     proof: '튜토리얼 동안만 임시 예제를 만들고, 끝나면 정리합니다.',
     accent: '#146c2e',
     previewTitle: '예제 둘러보기 경로',
@@ -174,7 +174,7 @@ export default function OnboardingCarousel({
               <div className="rounded-xl border border-[#e5edf5] bg-white p-4 shadow-[rgba(50,50,93,0.12)_0px_18px_42px_-24px,rgba(0,0,0,0.08)_0px_10px_24px_-18px]">
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f3f6ff] text-[var(--ow-onboarding-accent)]">
-                    <Icon name="auto_awesome" size={19} />
+                    <Icon name="help" size={19} />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-[#273951]">왜 필요한가요?</p>

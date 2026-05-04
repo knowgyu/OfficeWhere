@@ -22,7 +22,7 @@ export function HistoryTransitions({
   if (transitions.length === 0) {
     return (
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-        비교할 이전 버전이 없습니다. 같은 문서의 다른 버전을 더 등록하면 변경점이 표시됩니다.
+        비교할 이전 파일이 없습니다. 같은 문서의 다른 수정본을 더 등록하면 변경점이 표시됩니다.
       </p>
     )
   }
@@ -95,7 +95,7 @@ function HistoryTransitionCard({
             <div className="min-w-0 rounded-md border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">이전 버전</p>
+                  <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">비교 전</p>
                   <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.fromFile.name}>
                     {transition.fromFile.name}
                   </p>
@@ -113,7 +113,7 @@ function HistoryTransitionCard({
             <div className="min-w-0 rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-3 py-2">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">다음 버전</p>
+                  <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">비교 후</p>
                   <p className="mt-1 truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={transition.toFile.name}>
                     {transition.toFile.name}
                   </p>
@@ -125,7 +125,7 @@ function HistoryTransitionCard({
             </div>
           </div>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            두 버전 사이의 변경 증거만 분리해 표시합니다.
+            두 파일 사이의 변경 증거만 분리해 표시합니다.
           </p>
         </div>
         <Badge tone={statusTone}>
@@ -135,7 +135,7 @@ function HistoryTransitionCard({
 
       {transition.status === 'error' && (
         <p className="rounded-lg border border-[var(--md-sys-color-error)]/60 bg-[var(--md-sys-color-error-container)]/50 px-3 py-2 type-body-sm text-[var(--md-sys-color-error)]">
-          {transition.error ?? '이 버전 사이의 변경점을 계산하지 못했습니다.'}
+          {transition.error ?? '이 파일 사이의 변경점을 계산하지 못했습니다.'}
         </p>
       )}
       {transition.status === 'done' && transition.result && (

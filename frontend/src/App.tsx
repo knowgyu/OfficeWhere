@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } fr
 import FileManager from './components/FileManager'
 import ConsistencyCheck from './components/ConsistencyCheck'
 import FileSearch from './components/FileSearch'
+import DuplicateFiles from './components/DuplicateFiles'
 import OnboardingCarousel from './components/OnboardingCarousel'
 import { api, type UpdateCheckResult } from './api/client'
 import { Button, Dialog, Icon, Spinner } from './ui'
@@ -17,7 +18,7 @@ import {
   getTutorialSection,
 } from './tutorial'
 
-type Tab = 'search' | 'check' | 'files'
+type Tab = 'search' | 'check' | 'duplicates' | 'files'
 
 interface TabDef {
   id: Tab
@@ -39,11 +40,19 @@ const TABS: TabDef[] = [
   },
   {
     id: 'check',
-    label: '버전 관리',
-    short: '버전',
+    label: '변경 이력',
+    short: '이력',
     icon: 'history',
     iconFilled: 'history',
-    hint: '같은 문서의 여러 버전에서 무엇이 바뀌었는지 확인합니다',
+    hint: '비슷한 문서를 묶고 무엇이 달라졌는지 확인합니다',
+  },
+  {
+    id: 'duplicates',
+    label: '같은 내용 문서',
+    short: '중복',
+    icon: 'content_copy',
+    iconFilled: 'content_copy',
+    hint: '파일명은 달라도 내용이 같은 문서를 묶어서 확인합니다',
   },
   {
     id: 'files',
@@ -104,6 +113,7 @@ const TUTORIAL_REVIEW_ADVANCE: Partial<Record<TutorialStep, TutorialStep>> = {
   'version-excel-review': 'excel-table',
   'excel-table-history': 'done',
 }
+const TUTORIAL_CONFIRMATION_ADVANCE_MS = 520
 
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
@@ -137,7 +147,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     icon: 'visibility',
   },
   'version-ppt': {
-    eyebrow: 'PPT 버전',
+    eyebrow: 'PPT 변경 이력',
     title: 'PPT 변경 증거를 엽니다',
     description: '변경점 보기로 바뀐 슬라이드를 확인합니다.',
     icon: 'timeline',
@@ -161,7 +171,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
     icon: 'search',
   },
   'version-excel': {
-    eyebrow: 'Excel 버전',
+    eyebrow: 'Excel 변경 이력',
     title: 'Excel 값 변경을 엽니다',
     description: '변경점 보기로 바뀐 값을 확인합니다.',
     icon: 'difference',
@@ -273,15 +283,6 @@ function clearOfficeWhereLocalState() {
       window.localStorage.removeItem(key)
     }
   })
-}
-
-function isPointInsideRect(point: Point, rect: TourRect, padding = 8) {
-  return (
-    point.x >= rect.left - padding &&
-    point.x <= rect.left + rect.width + padding &&
-    point.y >= rect.top - padding &&
-    point.y <= rect.top + rect.height + padding
-  )
 }
 
 export default function App() {
@@ -445,7 +446,7 @@ export default function App() {
         .then((response) => {
           setLibraryDataRevision((value) => value + 1)
           if (showMessage && response.data.success) {
-            snackbar.info('튜토리얼 예제 파일과 임시 색인을 정리했습니다.')
+            snackbar.info('튜토리얼 예제 파일과 임시 문서 데이터를 정리했습니다.')
           }
           if (showMessage && !response.data.success) {
             snackbar.warn('튜토리얼 예제 일부를 정리하지 못했습니다. 앱 데이터 정리에서 다시 지울 수 있습니다.')
@@ -577,6 +578,7 @@ export default function App() {
       <NavigationRail
         activeTab={activeTab}
         onChange={setActiveTab}
+        tutorialStep={tutorialStep}
         tutorialActive={Boolean(tutorialStep && tutorialStep !== 'done')}
         tutorialTargetTab={tutorialTargetTab}
       />
@@ -599,6 +601,7 @@ export default function App() {
                 tutorialStep={tutorialStep}
                 libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
+                onOpenDuplicates={() => setActiveTab('duplicates')}
               />
             </section>
             <section className={activeTab === 'check' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'check'}>
@@ -607,6 +610,9 @@ export default function App() {
                 libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
               />
+            </section>
+            <section className={activeTab === 'duplicates' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'duplicates'}>
+              <DuplicateFiles libraryDataRevision={libraryDataRevision} />
             </section>
           </div>
         </main>
@@ -875,12 +881,12 @@ function GuidedTourHud({
   }, [activeTab, step, targetTab])
 
   useEffect(() => {
-    if (!step || !nextCheckpoint || !targetRect || targetTab !== activeTab) return undefined
+    if (!step || !nextCheckpoint || targetTab !== activeTab) return undefined
     if (autoAdvancedStepRef.current === step) return undefined
     autoAdvancedStepRef.current = step
-    const timer = window.setTimeout(() => onAdvance(nextCheckpoint), 1050)
+    const timer = window.setTimeout(() => onAdvance(nextCheckpoint), TUTORIAL_CONFIRMATION_ADVANCE_MS)
     return () => window.clearTimeout(timer)
-  }, [activeTab, nextCheckpoint, onAdvance, step, targetRect, targetTab])
+  }, [activeTab, nextCheckpoint, onAdvance, step, targetTab])
 
   if (!step || !content) return null
 
@@ -893,29 +899,46 @@ function GuidedTourHud({
         y: targetRect.top + targetRect.height / 2,
       }
     : null
-  const targetAnchor = targetRect ? getRectBoundaryPoint(targetRect, pointer) : null
-  const pointerOverTarget = targetRect ? isPointInsideRect(pointer, targetRect, 10) : false
+  const preferLeftSide = targetCenter ? targetCenter.x > viewport.width * 0.58 : false
   const bubbleLeft = isDone
     ? Math.max(16, (viewport.width - bubbleWidth) / 2)
-    : clamp(
-        targetCenter && pointer.x < targetCenter.x ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
-        16,
-        Math.max(16, viewport.width - bubbleWidth - 16),
-      )
+    : targetRect
+      ? clamp(
+          preferLeftSide ? targetRect.left - bubbleWidth - 24 : targetRect.left + targetRect.width + 24,
+          16,
+          Math.max(16, viewport.width - bubbleWidth - 16),
+        )
+      : clamp(
+          pointer.x > viewport.width - bubbleWidth - 44 ? pointer.x - bubbleWidth - 26 : pointer.x + 26,
+          16,
+          Math.max(16, viewport.width - bubbleWidth - 16),
+        )
   const bubbleTop = isDone
     ? Math.max(16, (viewport.height - bubbleHeight) / 2)
-    : clamp(
-        pointer.y > viewport.height - bubbleHeight - 44 ? pointer.y - bubbleHeight - 24 : pointer.y + 22,
-        16,
-        Math.max(16, viewport.height - bubbleHeight - 16),
-      )
-  const curve = !isDone && targetAnchor && !pointerOverTarget
+    : targetRect
+      ? clamp(
+          targetRect.top + targetRect.height / 2 - bubbleHeight / 2,
+          16,
+          Math.max(16, viewport.height - bubbleHeight - 16),
+        )
+      : clamp(
+          pointer.y > viewport.height - bubbleHeight - 44 ? pointer.y - bubbleHeight - 24 : pointer.y + 22,
+          16,
+          Math.max(16, viewport.height - bubbleHeight - 16),
+        )
+  const bubbleRect: TourRect = { left: bubbleLeft, top: bubbleTop, width: bubbleWidth, height: bubbleHeight }
+  const targetAnchor = targetRect && targetCenter ? getRectBoundaryPoint(targetRect, {
+    x: bubbleLeft + bubbleWidth / 2,
+    y: bubbleTop + bubbleHeight / 2,
+  }) : null
+  const bubbleAnchor = targetCenter ? getRectBoundaryPoint(bubbleRect, targetCenter) : null
+  const curve = !isDone && targetAnchor && bubbleAnchor
     ? {
-        startX: pointer.x,
-        startY: pointer.y,
-        c1X: pointer.x + (targetAnchor.x - pointer.x) * 0.36,
-        c1Y: pointer.y,
-        c2X: pointer.x + (targetAnchor.x - pointer.x) * 0.74,
+        startX: bubbleAnchor.x,
+        startY: bubbleAnchor.y,
+        c1X: bubbleAnchor.x + (targetAnchor.x - bubbleAnchor.x) * 0.36,
+        c1Y: bubbleAnchor.y,
+        c2X: bubbleAnchor.x + (targetAnchor.x - bubbleAnchor.x) * 0.74,
         c2Y: targetAnchor.y,
         endX: targetAnchor.x,
         endY: targetAnchor.y,
@@ -949,7 +972,7 @@ function GuidedTourHud({
             </p>
             <ul className="tour-hud-summary">
               <li><Icon name="search" size={16} /><span>파일명·본문 통합 검색</span></li>
-              <li><Icon name="timeline" size={16} /><span>PPT·Excel 버전 변경점 추적</span></li>
+              <li><Icon name="timeline" size={16} /><span>PPT·Excel 변경 이력 추적</span></li>
               <li><Icon name="grid_on" size={16} /><span>Excel 셀 단위 차이와 이력</span></li>
             </ul>
             <div className="tour-hud-done-actions">
@@ -1014,9 +1037,9 @@ function GuidedTourHud({
                     <span>그만보기</span>
                   </span>
                   {nextCheckpoint && (
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 py-1 type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                    <span className="tour-auto-advance-pill inline-flex items-center gap-1.5 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 py-1 type-label-md text-[var(--md-sys-color-on-surface-variant)]">
                       <Icon name="progress_activity" size={16} />
-                      확인되면 다음 안내로 넘어갑니다
+                      <span>확인 완료 · 곧 다음 안내로 넘어갑니다</span>
                     </span>
                   )}
                 </div>
@@ -1032,11 +1055,13 @@ function GuidedTourHud({
 function NavigationRail({
   activeTab,
   onChange,
+  tutorialStep = null,
   tutorialActive = false,
   tutorialTargetTab = null,
 }: {
   activeTab: Tab
   onChange: (tab: Tab) => void
+  tutorialStep?: TutorialStep | null
   tutorialActive?: boolean
   tutorialTargetTab?: Tab | null
 }) {
@@ -1056,6 +1081,7 @@ function NavigationRail({
               className={`state-host relative flex flex-col items-center gap-1.5 py-2.5 rounded-lg group transition-colors ${
                 active ? 'text-[var(--md-sys-color-primary)]' : 'text-[var(--md-sys-color-on-surface-variant)]'
               } ${highlight ? 'attention-pulse tour-target' : ''}`}
+              data-tour-target={highlight && tutorialStep ? tutorialStep : undefined}
               aria-current={active ? 'page' : undefined}
             >
               <span className="state-layer" />

@@ -765,7 +765,7 @@ export default function FileManager({
       <Card variant="elevated" className="console-panel">
         <CardSection
           title="대상 폴더"
-          description="자주 쓰는 문서 폴더를 등록하면 검색과 버전 관리에 사용합니다. 앱은 원본 문서를 읽기만 하며, 파일을 수정하거나 이동하지 않습니다."
+          description="자주 쓰는 문서 폴더를 등록하면 검색과 변경 이력 확인에 사용합니다. 앱은 원본 문서를 읽기만 하며, 파일을 수정하거나 이동하지 않습니다."
           trailing={
             <div className="flex items-center justify-end gap-2 flex-wrap">
               <Button
@@ -1033,7 +1033,7 @@ export default function FileManager({
             title="처음 둘러보기"
             description="튜토리얼 동안만 임시 예제 문서를 만들어 핵심 흐름을 다시 확인합니다."
             trailing={
-              <Button variant="tonal" size="sm" leadingIcon="auto_awesome" onClick={onReplayOnboarding}>
+              <Button variant="tonal" size="sm" leadingIcon="play_circle" onClick={onReplayOnboarding}>
                 다시 보기
               </Button>
             }
