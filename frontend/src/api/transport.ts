@@ -136,3 +136,13 @@ export async function apiPath(path: string): Promise<string> {
   const baseUrl = await getBackendBaseUrl()
   return `${baseUrl}${path}`
 }
+
+/**
+ * Reset the cached backend URL promise. Used by the test harness between
+ * cases so a previous bridge mock does not leak. No-op outside of
+ * `import.meta.env.MODE === 'test'` to avoid accidental misuse in production.
+ */
+export function __resetForTests(): void {
+  if (import.meta.env.MODE !== 'test') return
+  backendBaseUrlPromise = null
+}

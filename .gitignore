@@ -36,6 +36,8 @@ node_modules/
 frontend/dist/
 frontend/dist-electron/
 frontend/.vite/
+frontend/coverage/
+frontend/*.tsbuildinfo
 
 # Logs
 *.log
