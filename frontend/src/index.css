@@ -634,18 +634,23 @@ body,
 }
 
 .tour-spotlight-scrim {
-  fill: rgba(8, 11, 22, 0.46);
+  fill: rgba(8, 11, 22, 0.22);
 }
 
 :root[data-theme='dark'] .tour-spotlight-scrim {
-  fill: rgba(0, 0, 0, 0.58);
+  fill: rgba(0, 0, 0, 0.34);
 }
 
 .tour-spotlight-ring {
   fill: transparent;
-  stroke: color-mix(in srgb, var(--md-sys-color-primary) 78%, white 22%);
+  stroke: color-mix(in srgb, var(--md-sys-color-primary) 72%, white 28%);
   stroke-width: 2;
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--md-sys-color-primary) 24%, transparent));
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--md-sys-color-primary) 20%, transparent));
+}
+
+.tour-spotlight-ring.is-dimmed {
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent));
 }
 
 @keyframes attention-ring {
@@ -812,13 +817,100 @@ body,
   }
 }
 
-/* ── 버블 pointer-events 수정 (버튼 클릭 수신용) ─────────────── */
 .tour-hud-bubble {
+  position: fixed;
+  z-index: 95;
+  border-radius: 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 86%, var(--md-sys-color-primary) 14%);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 98%, var(--md-sys-color-primary) 2%),
+      var(--md-sys-color-surface-container-lowest)
+    );
+  color: var(--md-sys-color-on-surface);
+  box-shadow:
+    0 22px 54px rgba(15, 23, 42, 0.18),
+    0 8px 18px rgba(15, 23, 42, 0.08),
+    0 1px 0 rgba(255, 255, 255, 0.86) inset;
+  padding: 0.95rem 1rem;
+  backdrop-filter: blur(10px);
   pointer-events: none;
+}
+
+:root[data-theme='dark'] .tour-hud-bubble {
+  border-color: color-mix(in srgb, var(--md-sys-color-outline-variant) 80%, var(--md-sys-color-primary) 20%);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--md-sys-color-surface-container-high) 86%, var(--md-sys-color-primary) 14%),
+      var(--md-sys-color-surface-container)
+    );
+  box-shadow:
+    0 26px 64px rgba(0, 0, 0, 0.58),
+    0 8px 22px rgba(0, 0, 0, 0.34),
+    0 1px 0 rgba(255, 255, 255, 0.07) inset;
 }
 
 .tour-hud-bubble-interactive {
   pointer-events: auto;
+}
+
+.tour-hud-icon {
+  display: inline-flex;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.85rem;
+  color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 78%, transparent);
+  box-shadow: 0 1px 0 var(--ow-inset-highlight) inset;
+}
+
+.tour-hud-keyword {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 24%, var(--md-sys-color-outline-variant));
+  background: color-mix(in srgb, var(--md-sys-color-primary-container) 46%, var(--md-sys-color-surface-container-lowest));
+  padding: 0.28rem 0.62rem;
+  color: var(--md-sys-color-on-primary-container);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.tour-hud-keyword kbd {
+  border-radius: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--md-sys-color-primary) 28%, transparent);
+  background: var(--ow-kbd-background);
+  padding: 0.08rem 0.42rem;
+  color: var(--md-sys-color-on-surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.tour-hud-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 0.78rem;
+}
+
+.tour-hud-kbd kbd {
+  border-radius: 0.42rem;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--ow-kbd-background);
+  padding: 0.05rem 0.35rem;
+  color: var(--md-sys-color-on-surface);
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 /* ── 완료(done) 화면 ──────────────────────────────────────────── */

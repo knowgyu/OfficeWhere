@@ -77,6 +77,8 @@ const GROUP_SORT_OPTIONS: { value: GroupSort; label: string }[] = [
   { value: 'name', label: '이름순' },
 ]
 
+const TUTORIAL_GROUP_ENTRY_STEPS = new Set<TutorialStep>(['version-ppt', 'version-excel'])
+
 const versionGroupAnchorId = (groupId: string) =>
   `version-group-${groupId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
@@ -163,8 +165,10 @@ export default function ConsistencyCheck({
     nextFileType = groupFileType,
     nextSort = groupSort,
     nextShowDuplicates = showDuplicateGroups,
+    options: { cacheOnly?: boolean } = {},
   ) => {
     setGroupsLoading(true)
+    const cacheOnly = options.cacheOnly ?? true
     try {
       const response = await api.library.groups({
         limit: GROUP_PAGE_SIZE,
@@ -174,7 +178,7 @@ export default function ConsistencyCheck({
         fileType: nextFileType === 'all' ? undefined : nextFileType,
         sort: nextSort,
         includeDuplicates: nextShowDuplicates,
-        cacheOnly: true,
+        cacheOnly,
       })
       setGroups(response.data.groups)
       setGroupTotal(response.data.total)
@@ -188,7 +192,7 @@ export default function ConsistencyCheck({
         if (groupRefreshTimerRef.current !== null) window.clearTimeout(groupRefreshTimerRef.current)
         groupRefreshTimerRef.current = window.setTimeout(() => {
           groupRefreshTimerRef.current = null
-          void fetchGroups(nextOffset, nextFilter, nextQuery, nextFileType, nextSort, nextShowDuplicates)
+          void fetchGroups(nextOffset, nextFilter, nextQuery, nextFileType, nextSort, nextShowDuplicates, { cacheOnly })
         }, 1600)
       }
       setGroupOffset(response.data.offset)
@@ -223,6 +227,42 @@ export default function ConsistencyCheck({
     void fetchFiles(0, fileQuery)
     void fetchGroups(0, groupFilter, groupQuery, groupFileType, groupSort, showDuplicateGroups)
   }, [libraryDataRevision])
+
+  const tutorialOpenTargetType =
+    tutorialStep === 'version-ppt'
+      ? 'PowerPoint'
+      : tutorialStep === 'version-excel'
+        ? 'Excel'
+        : null
+  const tutorialOpenTargetGroupId = tutorialOpenTargetType
+    ? (groups.find((group) => normalizeFileType(group.file_type) === tutorialOpenTargetType)?.id ?? null)
+    : null
+
+  useEffect(() => {
+    if (!tutorialStep || !TUTORIAL_GROUP_ENTRY_STEPS.has(tutorialStep)) return undefined
+
+    if (groupSearchDebounceRef.current !== null) {
+      window.clearTimeout(groupSearchDebounceRef.current)
+      groupSearchDebounceRef.current = null
+    }
+    setGroupQueryDraft('')
+    setGroupFilterOpen(false)
+    setActiveGroupDetail(null)
+    setHistoryState(null)
+    void fetchFiles(0, '')
+    void fetchGroups(0, 'all', '', 'all', 'recent', false, { cacheOnly: false })
+
+    return undefined
+  }, [tutorialStep])
+
+  useEffect(() => {
+    if (!tutorialOpenTargetType || tutorialOpenTargetGroupId || groupsLoading) return undefined
+
+    const timer = window.setTimeout(() => {
+      void fetchGroups(0, 'all', '', 'all', 'recent', false, { cacheOnly: false })
+    }, groupIndexState.stale ? 800 : 1400)
+    return () => window.clearTimeout(timer)
+  }, [groupIndexState.stale, groupsLoading, tutorialOpenTargetGroupId, tutorialOpenTargetType])
 
   useEffect(() => {
     if (!pendingScrollGroupId || activeGroupDetail?.id !== pendingScrollGroupId) return
@@ -777,17 +817,23 @@ export default function ConsistencyCheck({
     groupFileType !== 'all' ||
     groupSort !== 'recent' ||
     showDuplicateGroups
-  const tutorialOpenTargetType =
-    tutorialStep === 'version-ppt'
-      ? 'PowerPoint'
-      : tutorialStep === 'version-excel'
-        ? 'Excel'
-        : null
-  const tutorialOpenTargetGroupId = tutorialOpenTargetType
-    ? (groups.find((group) => normalizeFileType(group.file_type) === tutorialOpenTargetType)?.id ?? null)
-    : null
+  const isTutorialGroupPreparing = Boolean(
+    tutorialOpenTargetType &&
+      !tutorialOpenTargetGroupId &&
+      (groupsLoading || groupIndexState.stale || groupTotal === 0),
+  )
 
   if (fileTotal === 0 && groupTotal === 0 && !filesLoading && !groupsLoading) {
+    if (tutorialOpenTargetType) {
+      return (
+        <Card variant="outlined">
+          <div className="flex items-center justify-center gap-3 px-6 py-10 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+            <Spinner size={18} />
+            <span>예제 문서의 변경 이력을 준비하고 있습니다. 잠시 후 자동으로 표시됩니다.</span>
+          </div>
+        </Card>
+      )
+    }
     return (
       <Card variant="outlined">
         <EmptyState
@@ -971,12 +1017,18 @@ export default function ConsistencyCheck({
               <Spinner size={18} /> 그룹 불러오는 중…
             </div>
           ) : groups.length === 0 ? (
-            <EmptyState
-              icon="task_alt"
-              title="자동 감지된 변경 이력 묶음이 없습니다"
-              description="같은 제목이거나 파일명에 날짜·수정본 표시가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
-              compact
-            />
+            isTutorialGroupPreparing ? (
+              <div className="px-6 py-10 flex items-center justify-center gap-2 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+                <Spinner size={18} /> 예제 변경 이력을 준비하는 중입니다…
+              </div>
+            ) : (
+              <EmptyState
+                icon="task_alt"
+                title="자동 감지된 변경 이력 묶음이 없습니다"
+                description="같은 제목이거나 파일명에 날짜·수정본 표시가 붙은 Office 문서를 등록하면 이곳에 표시됩니다."
+                compact
+              />
+            )
           ) : (
             <div className="space-y-3">
               {groups.map((group) => {

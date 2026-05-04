@@ -116,6 +116,7 @@ const TUTORIAL_CONFIRMATION_ADVANCE_BY_STEP: Partial<Record<TutorialStep, number
   'version-excel-review': 1600,
   'excel-table-history': 1800,
 }
+const TUTORIAL_DIM_STEPS = new Set<TutorialStep>(['version-ppt-detail', 'excel-table-history'])
 
 function getTutorialAutoAdvanceDelay(step: TutorialStep) {
   return TUTORIAL_CONFIRMATION_ADVANCE_BY_STEP[step] ?? TUTORIAL_CONFIRMATION_ADVANCE_MS
@@ -124,51 +125,51 @@ function getTutorialAutoAdvanceDelay(step: TutorialStep) {
 const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   'example-folder': {
     eyebrow: '예제 폴더',
-    title: '예제 폴더를 추가해 볼게요',
-    description: '방금 만든 임시 폴더입니다. 대상 추가를 누르면 예제 문서가 등록됩니다.',
+    title: '예제 폴더를 추가합니다',
+    description: '임시로 만든 예제 폴더입니다. 대상 추가를 누르면 예제 문서를 등록합니다.',
     icon: 'drive_folder_upload',
   },
   'document-refresh': {
     eyebrow: '문서 준비',
-    title: '문서를 한 번 새로고침하세요',
-    description: '폴더 안의 문서를 읽어 검색과 변경 이력에 쓸 정보를 준비합니다.',
+    title: '문서 새로고침을 눌러 준비합니다',
+    description: '폴더 안의 문서를 읽어서 검색과 변경 이력에 쓸 정보를 만듭니다.',
     icon: 'sync',
   },
   search: {
     eyebrow: '문서 검색',
     title: '검색창에 일정을 입력하세요',
-    description: '입력이 끝나면 잠시 후 파일명과 본문에서 찾은 결과가 함께 나옵니다.',
+    description: '입력이 끝나면 파일명과 본문에서 찾은 결과가 잠시 후 표시됩니다.',
     icon: 'search',
     keyword: EXAMPLE_SEARCH_QUERY,
   },
   'search-results': {
     eyebrow: '본문 매칭',
     title: '본문에서 찾은 위치를 확인하세요',
-    description: '결과 아래에 검색어가 들어간 문장과 위치가 펼쳐져 있습니다.',
+    description: '검색어가 들어간 문장과 문서 안 위치가 결과 아래에 펼쳐져 있습니다.',
     icon: 'unfold_more',
   },
   'search-review': {
     eyebrow: '검색 결과',
-    title: '이 문장에서 검색어를 찾았습니다',
-    description: '강조된 줄을 확인하면 다음 안내로 넘어갑니다.',
+    title: '본문에서 검색어를 찾았습니다',
+    description: '강조된 문장을 확인하면 다음 안내로 넘어갑니다.',
     icon: 'visibility',
   },
   'version-ppt': {
     eyebrow: 'PPT 변경 이력',
     title: 'PPT 변경점을 열어보세요',
-    description: '변경점 보기를 누르면 슬라이드별로 달라진 부분을 볼 수 있습니다.',
+    description: '변경점 보기를 누르면 슬라이드별로 달라진 부분을 확인할 수 있습니다.',
     icon: 'timeline',
   },
   'version-ppt-review': {
     eyebrow: 'PPT 변경',
-    title: '접힌 내용을 펼쳐보세요',
-    description: '자세히 보기를 누르면 어떤 문장이 바뀌었는지 바로 확인할 수 있습니다.',
+    title: '자세히 보기를 눌러보세요',
+    description: '접힌 내용을 펼치면 어떤 문장이 바뀌었는지 바로 보입니다.',
     icon: 'unfold_more',
   },
   'version-ppt-detail': {
     eyebrow: 'PPT 변경 상세',
     title: 'PPT에서 달라진 부분입니다',
-    description: '슬라이드 변경 내용을 확인하면 다음 안내로 이어집니다.',
+    description: '슬라이드별 변경 내용을 확인하면 다음 안내로 넘어갑니다.',
     icon: 'visibility',
   },
   'version-excel': {
@@ -204,7 +205,7 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   done: {
     eyebrow: '둘러보기 완료',
     title: '기본 흐름을 모두 확인했습니다',
-    description: '예제는 정리되고, 이제 설정에서 내 문서 폴더를 추가해 보세요.',
+    description: '예제는 정리됩니다. 이제 설정에서 내 문서 폴더를 추가해 보세요.',
     icon: 'task_alt',
   },
 }
@@ -229,7 +230,7 @@ function getTutorialCopy(step: TutorialStep | null, activeTab: Tab): TourCopy | 
     return {
       eyebrow: '다음 위치',
       title: `${tab?.short ?? tab?.label ?? '다음'} 탭으로 이동`,
-      description: `왼쪽의 강조된 ${tab?.short ?? '탭'}에서 이어집니다.`,
+      description: `왼쪽에서 강조된 ${tab?.short ?? '탭'} 탭으로 이동하면 이어서 안내합니다.`,
       icon: 'touch_app',
     }
   }
@@ -276,6 +277,7 @@ export default function App() {
   const [updateError, setUpdateError] = useState('')
   const [updateDownloadedPath, setUpdateDownloadedPath] = useState('')
   const { textSize, increaseTextSize, decreaseTextSize, resetTextSize, resetThemeMode } = useDisplaySettings()
+  const { completionKey: rescanCompletionKey } = useLibraryRescan()
   const tutorialCleanupPathRef = useRef('')
   const tutorialCleanupInFlightRef = useRef<Promise<void> | null>(null)
 
@@ -286,6 +288,11 @@ export default function App() {
   useEffect(() => {
     if (exampleLibraryPath) tutorialCleanupPathRef.current = exampleLibraryPath
   }, [exampleLibraryPath])
+
+  useEffect(() => {
+    if (rescanCompletionKey === 0) return
+    setLibraryDataRevision((value) => value + 1)
+  }, [rescanCompletionKey])
 
   useEffect(() => {
     let cancelled = false
@@ -892,15 +899,16 @@ function GuidedTourHud({
     : null
   const stepIndex = getTutorialStepIndex(step)
   const section = getTutorialSection(step)
+  const shouldDim = TUTORIAL_DIM_STEPS.has(step)
 
   return (
     <div className="fixed inset-0 z-[90] pointer-events-none">
-      {!isDone && (
+      {!isDone && spotlight && (
         <svg className="tour-spotlight-canvas" aria-hidden="true">
-          <defs>
-            <mask id="tour-spotlight-mask">
-              <rect x="0" y="0" width={viewport.width} height={viewport.height} fill="white" />
-              {spotlight && (
+          {shouldDim && (
+            <defs>
+              <mask id="tour-spotlight-mask">
+                <rect x="0" y="0" width={viewport.width} height={viewport.height} fill="white" />
                 <rect
                   x={spotlight.left}
                   y={spotlight.top}
@@ -909,27 +917,27 @@ function GuidedTourHud({
                   rx={spotlight.radius}
                   fill="black"
                 />
-              )}
-            </mask>
-          </defs>
-          <rect
-            x="0"
-            y="0"
-            width={viewport.width}
-            height={viewport.height}
-            className="tour-spotlight-scrim"
-            mask="url(#tour-spotlight-mask)"
-          />
-          {spotlight && (
+              </mask>
+            </defs>
+          )}
+          {shouldDim && (
             <rect
-              x={spotlight.left}
-              y={spotlight.top}
-              width={spotlight.width}
-              height={spotlight.height}
-              rx={spotlight.radius}
-              className="tour-spotlight-ring"
+              x="0"
+              y="0"
+              width={viewport.width}
+              height={viewport.height}
+              className="tour-spotlight-scrim"
+              mask="url(#tour-spotlight-mask)"
             />
           )}
+          <rect
+            x={spotlight.left}
+            y={spotlight.top}
+            width={spotlight.width}
+            height={spotlight.height}
+            rx={spotlight.radius}
+            className={`tour-spotlight-ring${shouldDim ? ' is-dimmed' : ''}`}
+          />
         </svg>
       )}
       <div
@@ -944,7 +952,7 @@ function GuidedTourHud({
             <p className="tour-hud-eyebrow">둘러보기 완료</p>
             <p className="type-title-md text-[var(--md-sys-color-on-surface)]">기본 흐름을 모두 확인했습니다</p>
             <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              예제는 정리되고, 이제 설정에서 내 문서 폴더를 추가해 보세요.
+              예제는 정리됩니다. 이제 설정에서 내 문서 폴더를 추가해 보세요.
             </p>
             <ul className="tour-hud-summary">
               <li><Icon name="search" size={16} /><span>파일명과 본문을 함께 검색</span></li>
