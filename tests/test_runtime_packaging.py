@@ -39,6 +39,37 @@ def test_electron_builder_runtime_resources_are_platform_scoped():
     ]
 
 
+def test_frontend_dependency_cache_key_ignores_release_version_only_changes():
+    import importlib.util
+
+    script_path = REPO_ROOT / "scripts" / "ci_frontend_cache_key.py"
+    spec = importlib.util.spec_from_file_location("ci_frontend_cache_key", script_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    lock = json.loads((REPO_ROOT / "frontend" / "package-lock.json").read_text(encoding="utf-8"))
+    changed = json.loads(json.dumps(lock))
+    changed["version"] = "99.99.99"
+    changed["packages"][""]["version"] = "99.99.99"
+
+    assert module.normalize_lock_for_dependency_cache(lock) == module.normalize_lock_for_dependency_cache(changed)
+
+
+def test_release_workflow_caches_downloads_and_reusable_install_outputs():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert workflow.count('cache: "pip"') == 2
+    assert workflow.count("Cache npm downloads") == 2
+    assert workflow.count("Cache frontend node_modules") == 2
+    assert workflow.count("Cache Electron package downloads") == 2
+    assert "Cache macOS backend runtime" in workflow
+    assert workflow.count("scripts/ci_frontend_cache_key.py") == 2
+    assert "npm ci --prefer-offline --no-audit --fund=false" in workflow
+    assert "pip install --upgrade pip" not in workflow
+    assert "electron_config_cache" in workflow
+
+
 def test_mac_runtime_layout_contract_is_documented():
     runtime_readme = (REPO_ROOT / "python-runtime" / "mac-arm64" / "README.md").read_text(encoding="utf-8")
     prepare_script = (REPO_ROOT / "scripts" / "prepare_python_runtime.py").read_text(encoding="utf-8")
