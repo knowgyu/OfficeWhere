@@ -64,6 +64,7 @@ export interface FileListParams {
   limit?: number
   offset?: number
   sort?: string
+  includeMissing?: boolean
 }
 
 export interface DuplicateFileItem extends FileInfo {
@@ -487,6 +488,7 @@ async function getFilePage(params: FileListParams = {}) {
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit))
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset))
   if (params.sort) searchParams.set('sort', params.sort)
+  if (params.includeMissing !== undefined) searchParams.set('include_missing', String(params.includeMissing))
 
   const url = await apiPath('/api/files/page')
   const suffix = searchParams.toString()

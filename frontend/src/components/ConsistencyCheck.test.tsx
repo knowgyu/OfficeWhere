@@ -60,6 +60,9 @@ const idleStatus: LibraryRescanStatus = {
   failed: 0,
   cancelled: 0,
   pruned_unsupported: 0,
+  missing: 0,
+  recovered: 0,
+  purged_missing: 0,
   cancel_requested: false,
 }
 

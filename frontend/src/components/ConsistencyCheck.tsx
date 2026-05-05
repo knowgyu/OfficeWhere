@@ -53,7 +53,7 @@ const MODE_GUIDE: Record<string, string> = {
 }
 
 const isCheckableFile = (file: FileInfo) =>
-  ['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(file.file_type))
+  file.availability_status !== 'missing' && ['Excel', 'Word', 'PowerPoint'].includes(normalizeFileType(file.file_type))
 
 const groupKindLabel = (kind: LibraryGroupKind) =>
   kind === 'exact_name_conflict' ? '같은 제목 후보' : '수정본 묶음'
@@ -146,6 +146,7 @@ export default function ConsistencyCheck({
         offset: nextOffset,
         query: nextQuery,
         fileTypes: ['Excel', 'Word', 'PowerPoint'],
+        includeMissing: false,
       })
       setFiles(response.data.items)
       setFileTotal(response.data.total)

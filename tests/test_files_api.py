@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 
 from backend.api.files import list_files_bounded, remove_all_files, show_registered_file_in_folder
-from backend.database import init_db, register_file
+from backend.database import init_db, mark_registered_files_missing, register_file
 
 
 def _register_rows(count: int = 12):
@@ -54,6 +54,27 @@ def test_files_page_filters_by_query_and_file_type(tmp_path, monkeypatch):
     assert response.total == 1
     assert response.items[0].name == "finance-special.xlsx"
     assert response.counts_by_type == {"Excel": 1}
+
+
+def test_files_page_shows_missing_by_default_and_can_hide_them(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    available = tmp_path / "available.docx"
+    missing = tmp_path / "missing.docx"
+    register_file(path=str(available), name=available.name, file_type="Word", column_count=1)
+    register_file(path=str(missing), name=missing.name, file_type="Word", column_count=1)
+    mark_registered_files_missing([str(missing)])
+
+    default_response = list_files_bounded(limit=10)
+    hidden_response = list_files_bounded(limit=10, include_missing=False)
+
+    assert default_response.total == 2
+    assert {item.availability_status for item in default_response.items} == {"available", "missing"}
+    assert hidden_response.total == 1
+    assert hidden_response.items[0].name == available.name
+    assert hidden_response.counts_by_type == {"Word": 1}
 
 
 def test_remove_all_files_returns_deleted_count(tmp_path, monkeypatch):

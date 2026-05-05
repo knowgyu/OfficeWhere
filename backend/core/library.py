@@ -37,8 +37,11 @@ from ..database import (
     list_library_group_dirty_keys,
     list_library_group_index_file_ids,
     list_library_group_index_files_for_key,
+    mark_registered_file_available,
+    mark_registered_files_missing,
     mark_library_group_keys_dirty,
     prepare_indexed_file,
+    purge_expired_missing_files,
     replace_library_group_index_for_keys,
     replace_library_group_index_full,
     save_indexed_files_batch,
@@ -145,6 +148,9 @@ def _result_counts(results: List[LibraryRescanResult]) -> Dict[str, int]:
         "registered": sum(1 for item in results if item.action == "registered" and item.success),
         "updated": sum(1 for item in results if item.action == "updated" and item.success),
         "skipped": sum(1 for item in results if item.action == "skipped" and item.success),
+        "missing": sum(1 for item in results if item.action == "missing" and item.success),
+        "recovered": sum(1 for item in results if item.action == "recovered" and item.success),
+        "purged_missing": sum(1 for item in results if item.action == "purged_missing" and item.success),
         "cancelled": sum(1 for item in results if item.action == "cancelled"),
         "failed": sum(1 for item in results if not item.success and item.action != "cancelled"),
     }
@@ -159,6 +165,11 @@ def file_info_from_row(row: Dict[str, Any]) -> FileInfo:
         column_count=row["column_count"],
         created_at=row.get("created_at"),
         file_mtime=row.get("file_mtime"),
+        availability_status=row.get("availability_status") or "available",
+        last_seen_at=row.get("last_seen_at"),
+        missing_since=row.get("missing_since"),
+        missing_last_checked_at=row.get("missing_last_checked_at"),
+        missing_reason=row.get("missing_reason"),
     )
 
 
@@ -207,6 +218,55 @@ def _collect_supported_paths(
     # Deliberately call the library.py compatibility alias above so existing
     # tests and callers that monkeypatch this module keep intercepting scans.
     return _collect_supported_paths_with_stats(folder_path, recursive, excluded_folder_names).paths
+
+
+def _normalized_resolved_path(path: str) -> Path:
+    return Path(os.path.normpath(path)).expanduser().resolve(strict=False)
+
+
+def _path_is_under(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _path_covered_by_successful_scan(source_path: str, covered_roots: Sequence[Path]) -> bool:
+    candidate = _normalized_resolved_path(source_path)
+    return any(candidate == root or _path_is_under(candidate, root) for root in covered_roots)
+
+
+def _source_path_absence_is_proven(source_path: str, covered_roots: Sequence[Path]) -> bool:
+    """Return True only when a scan/direct check safely proves a source path is absent.
+
+    A successful watched-root scan alone is not enough because a nested
+    directory can be inaccessible while the root scan still completes. The
+    direct checks below avoid marking files missing when the exact path or its
+    parent cannot be inspected.
+    """
+    if not _path_covered_by_successful_scan(source_path, covered_roots):
+        return False
+
+    candidate = Path(os.path.normpath(source_path)).expanduser()
+    try:
+        candidate.stat()
+        return False
+    except FileNotFoundError:
+        pass
+    except (OSError, PermissionError):
+        return False
+
+    parent = candidate.parent
+    try:
+        parent.stat()
+    except FileNotFoundError:
+        return True
+    except (OSError, PermissionError):
+        return False
+    if not os.access(parent, os.R_OK | os.X_OK):
+        return False
+    return True
 
 
 def _cancelled_result(path: str) -> LibraryRescanResult:
@@ -392,7 +452,9 @@ def _rescan_library_impl(
 
     started_monotonic = time.monotonic()
     found_paths: Dict[str, str] = {}
+    successfully_scanned_roots: List[Path] = []
     scan_errors: List[LibraryRescanResult] = []
+    lifecycle_results: List[LibraryRescanResult] = []
     folders_total = len(settings.watched_folders)
     scan_visited_dir_count = 0
     scan_skipped_dir_count = 0
@@ -458,6 +520,7 @@ def _rescan_library_impl(
                 if _cancel_event.is_set():
                     break
                 found_paths[path] = Path(path).name
+            successfully_scanned_roots.append(_normalized_resolved_path(folder.path))
         except Exception as exc:
             scan_success = False
             scan_error_type = exc.__class__.__name__
@@ -518,6 +581,27 @@ def _rescan_library_impl(
             )
 
     existing_by_path = {os.path.normpath(row["path"]): row for row in get_all_files()}
+    found_normalized_paths = {os.path.normpath(path) for path in found_paths}
+    now_iso = _now_iso()
+    missing_paths = [
+        path
+        for path in existing_by_path
+        if path not in found_normalized_paths
+        and _source_path_absence_is_proven(path, successfully_scanned_roots)
+    ]
+    if missing_paths and not _cancel_event.is_set():
+        missing_rows = mark_registered_files_missing(missing_paths, checked_at=now_iso)
+        for row in missing_rows:
+            lifecycle_results.append(
+                LibraryRescanResult(
+                    path=row["path"],
+                    name=row["name"],
+                    success=True,
+                    action="missing",
+                    file_id=int(row["id"]),
+                    error="파일이 삭제되었거나 위치가 변경된 것으로 표시했습니다.",
+                )
+            )
     log_index_perf(
         "indexing_start",
         operation="library_rescan",
@@ -559,8 +643,25 @@ def _rescan_library_impl(
             stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
             current_mtime = stat_result.st_mtime
             metrics["size_bytes"] = stat_result.st_size
+            was_missing = bool(existing and existing.get("availability_status") == "missing")
             if existing and existing.get("file_mtime") is not None:
                 if abs(float(existing["file_mtime"]) - current_mtime) < 1.0:
+                    if was_missing:
+                        mark_registered_file_available(int(existing["id"]))
+                        metrics.update(
+                            action="recovered",
+                            success=True,
+                            file_id=existing["id"],
+                            total_ms=elapsed_ms(file_started),
+                        )
+                        log_index_perf("file_done", **metrics)
+                        return LibraryRescanResult(
+                            path=path,
+                            name=name,
+                            success=True,
+                            action="recovered",
+                            file_id=existing["id"],
+                        )
                     metrics.update(
                         action="skipped",
                         success=True,
@@ -600,7 +701,7 @@ def _rescan_library_impl(
                 ),
             )
             metrics.update(
-                action="updated" if existing else "registered",
+                action="recovered" if was_missing else ("updated" if existing else "registered"),
                 file_type=info["file_type"],
                 chunk_count=len(chunks),
                 column_count=len(info["columns"]),
@@ -608,7 +709,7 @@ def _rescan_library_impl(
             return _PreparedLibraryWrite(
                 path=path,
                 name=info["name"],
-                action="updated" if existing else "registered",
+                action="recovered" if was_missing else ("updated" if existing else "registered"),
                 payload=payload,
                 metrics=metrics,
                 file_started=file_started,
@@ -635,7 +736,7 @@ def _rescan_library_impl(
 
     sorted_paths = sorted(found_paths)
     total = len(sorted_paths)
-    results: List[LibraryRescanResult] = []
+    results: List[LibraryRescanResult] = list(lifecycle_results)
     write_buffer: List[_PreparedLibraryWrite] = []
     initial_staging: Optional[InitialIndexStagingDatabase] = None
     processed = 0
@@ -1023,6 +1124,20 @@ def _rescan_library_impl(
                     }
                 )
             initial_staging.finalize_to_main()
+
+    if not _cancel_event.is_set():
+        purged_rows = purge_expired_missing_files()
+        for row in purged_rows:
+            results.append(
+                LibraryRescanResult(
+                    path=row["path"],
+                    name=row["name"],
+                    success=True,
+                    action="purged_missing",
+                    file_id=int(row["id"]),
+                    error="7일 이상 누락되어 앱 목록과 검색 데이터에서 정리했습니다.",
+                )
+            )
 
     results.extend(scan_errors)
     set_setting(LAST_RESCAN_KEY, datetime.now().isoformat())
@@ -1526,7 +1641,7 @@ def _build_file_group_details_from_rows(rows: Sequence[Dict[str, Any]]) -> List[
 
 
 def _build_all_file_group_details() -> List[LibraryGroupDetail]:
-    return _build_file_group_details_from_rows(get_all_files())
+    return _build_file_group_details_from_rows(get_all_files(include_missing=False))
 
 
 def clear_group_cache() -> None:
@@ -1535,7 +1650,7 @@ def clear_group_cache() -> None:
 
 def _build_group_index_full_payload() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     file_rows: List[Dict[str, Any]] = []
-    rows = get_all_files()
+    rows = get_all_files(include_missing=False)
     groups = _enrich_exact_name_group_content(_build_file_group_details_from_rows(rows))
     for row in rows:
         file_info = file_info_from_row(row)
@@ -1828,12 +1943,15 @@ def _changed_file_ids_from_rescan_response(response: LibraryRescanResponse) -> L
     return [
         int(result.file_id)
         for result in response.results
-        if result.success and result.file_id is not None and result.action in {"registered", "updated"}
+        if result.success and result.file_id is not None and result.action in {"registered", "updated", "recovered"}
     ]
 
 
 def _schedule_group_refresh_after_rescan(response: LibraryRescanResponse, *, reason: str) -> None:
     if _cancel_event.is_set():
+        return
+    if any(result.success and result.action in {"missing", "purged_missing"} for result in response.results):
+        schedule_group_index_refresh(reason=reason, full=True)
         return
     changed_ids = _changed_file_ids_from_rescan_response(response)
     if changed_ids:

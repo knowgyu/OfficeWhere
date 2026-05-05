@@ -68,6 +68,11 @@ def _file_info_from_row(row: dict) -> FileInfo:
         column_count=row["column_count"],
         created_at=row["created_at"],
         file_mtime=row.get("file_mtime"),
+        availability_status=row.get("availability_status") or "available",
+        last_seen_at=row.get("last_seen_at"),
+        missing_since=row.get("missing_since"),
+        missing_last_checked_at=row.get("missing_last_checked_at"),
+        missing_reason=row.get("missing_reason"),
     )
 
 
@@ -249,6 +254,7 @@ def list_files_bounded(
     limit: int = DEFAULT_FILE_PAGE_LIMIT,
     offset: int = 0,
     sort: str = "created_at_desc",
+    include_missing: bool = True,
 ):
     safe_limit = _normalize_file_page_limit(limit)
     safe_offset = max(0, offset)
@@ -259,11 +265,12 @@ def list_files_bounded(
         limit=safe_limit,
         offset=safe_offset,
         sort=sort,
+        include_missing=include_missing,
     )
     return FileListResponse(
-        total=count_files(q, filters),
+        total=count_files(q, filters, include_missing=include_missing),
         items=[_file_info_from_row(row) for row in rows],
-        counts_by_type=count_files_by_type(q, filters),
+        counts_by_type=count_files_by_type(q, filters, include_missing=include_missing),
         limit=safe_limit,
         offset=safe_offset,
     )

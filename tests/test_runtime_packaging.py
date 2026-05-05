@@ -136,7 +136,6 @@ def test_release_workflow_builds_and_publishes_macos_artifacts():
 def test_release_docs_do_not_describe_macos_packaging_as_future_work():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     build_sh = (REPO_ROOT / "build.sh").read_text(encoding="utf-8")
-    release_note = (REPO_ROOT / "docs" / "releases" / "v0.7.7.md").read_text(encoding="utf-8")
     windows_runtime_readme = (REPO_ROOT / "python-runtime" / "win-x64" / "README.md").read_text(encoding="utf-8")
     release_checklist = (REPO_ROOT / "docs" / "release-test-checklist.md").read_text(encoding="utf-8")
     mapped_drive_backslash = "K:" + "\\"
@@ -149,7 +148,6 @@ def test_release_docs_do_not_describe_macos_packaging_as_future_work():
     assert "macOS / Linux 패키지는 embedded Python 방식으로 추후 지원 예정" not in readme
     assert mapped_drive_backslash not in readme
     assert mapped_drive_slash not in readme
-    assert protected_doc_acronym not in release_note
     assert protected_doc_acronym not in windows_runtime_readme
     assert protected_doc_acronym not in release_checklist
     assert embedded_runtime_phrase not in readme

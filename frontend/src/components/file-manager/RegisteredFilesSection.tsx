@@ -198,6 +198,7 @@ export default function RegisteredFilesSection({
         >
           {files.map((file, index) => {
             const selected = selectedFileIds.has(file.id)
+            const missing = file.availability_status === 'missing'
             return (
               <li
                 key={file.id}
@@ -209,7 +210,9 @@ export default function RegisteredFilesSection({
                   selected
                     ? 'bg-[var(--md-sys-color-primary-container)]/35'
                     : 'hover:bg-[var(--md-sys-color-surface-container-low)]'
-                } ${selectionMode ? 'select-none cursor-crosshair' : ''}`}
+                } ${selectionMode ? 'select-none cursor-crosshair' : ''} ${
+                  missing ? 'bg-[var(--md-sys-color-error-container)]/15' : ''
+                }`}
               >
                 {selectionVisible && (
                   <div className="pt-1">
@@ -225,6 +228,10 @@ export default function RegisteredFilesSection({
                     className="flex-1 min-w-0 text-left group"
                     onClick={() => onToggleRegisteredFileSelection(file)}
                   >
+                    <RegisteredFileSummary file={file} />
+                  </div>
+                ) : missing ? (
+                  <div className="flex-1 min-w-0 text-left group cursor-not-allowed">
                     <RegisteredFileSummary file={file} />
                   </div>
                 ) : (
@@ -285,6 +292,8 @@ export default function RegisteredFilesSection({
 }
 
 function RegisteredFileSummary({ file }: { file: FileInfo }) {
+  const missing = file.availability_status === 'missing'
+  const missingLabel = missingStatusLabel(file.missing_since)
   return (
     <>
       <div className="flex items-center gap-2 flex-wrap">
@@ -292,10 +301,29 @@ function RegisteredFileSummary({ file }: { file: FileInfo }) {
           {file.name}
         </span>
         <FileTypeBadge fileType={file.file_type} />
+        {missing && (
+          <span className="inline-flex items-center rounded-full border border-[var(--md-sys-color-error)]/30 bg-[var(--md-sys-color-error-container)] px-2 py-0.5 type-label-sm text-[var(--md-sys-color-on-error-container)]">
+            원본 없음{missingLabel ? ` · ${missingLabel}` : ''}
+          </span>
+        )}
       </div>
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1 break-all">
         {file.path}
       </p>
+      {missing && (
+        <p className="type-body-sm text-[var(--md-sys-color-error)] mt-1">
+          문서 새로고침에서 원본 경로를 찾지 못했습니다. 다시 발견되면 자동으로 복구되고, 7일 이상 계속 없으면 앱 목록과 검색 데이터에서만 정리됩니다.
+        </p>
+      )}
     </>
   )
+}
+
+function missingStatusLabel(missingSince?: string | null) {
+  if (!missingSince) return ''
+  const since = new Date(missingSince)
+  if (Number.isNaN(since.getTime())) return ''
+  const elapsedDays = Math.max(0, Math.floor((Date.now() - since.getTime()) / 86_400_000))
+  const remainingDays = Math.max(0, 7 - elapsedDays)
+  return remainingDays > 0 ? `자동 정리까지 약 ${remainingDays}일` : '다음 새로고침에서 자동 정리'
 }

@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from backend.core.library import save_library_settings
 from backend.database import get_all_files, init_db, register_file
 from backend.models.schemas import LibraryRescanRequest, LibrarySettings
@@ -908,3 +910,185 @@ def test_library_rescan_logs_single_large_file_flush_reason(tmp_path, monkeypatc
         and fields["single_large_file"] is True
         for event, fields in events
     )
+
+
+def test_rescan_marks_missing_source_under_successful_scan_without_deleting_record(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import get_file_by_id, save_file_chunks
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    source = tmp_path / "gone.docx"
+    source.write_text("temporary source", encoding="utf-8")
+    file_id = register_file(str(source), source.name, "Word", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "누락 확인 키워드"}])
+    source.unlink()
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[]),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert response.missing == 1
+    row = get_file_by_id(file_id)
+    assert row is not None
+    assert row["availability_status"] == "missing"
+    assert row["missing_since"]
+    assert not source.exists()
+
+
+def test_rescan_does_not_mark_missing_when_scan_root_fails(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import get_file_by_id
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    unavailable_root = tmp_path / "offline-share"
+    source = unavailable_root / "kept.docx"
+    file_id = register_file(str(source), source.name, "Word", 0)
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(unavailable_root), "recursive": True}]))
+
+    def scan_failed(_path, _recursive, _excluded_folder_names=None):
+        raise FileNotFoundError("share is offline")
+
+    monkeypatch.setattr(library, "_collect_supported_paths_with_stats", scan_failed)
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 1
+    assert response.missing == 0
+    row = get_file_by_id(file_id)
+    assert row is not None
+    assert row["availability_status"] == "available"
+    assert row["missing_since"] is None
+
+
+def test_missing_absence_proof_requires_successful_root_and_readable_parent(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library
+
+    covered_root = library._normalized_resolved_path(str(tmp_path / "watched"))
+    blocked_parent = tmp_path / "watched" / "blocked"
+    blocked_parent.mkdir(parents=True)
+    blocked_source = blocked_parent / "hidden.docx"
+    outside_source = tmp_path / "outside" / "gone.docx"
+
+    assert library._source_path_absence_is_proven(str(outside_source), [covered_root]) is False
+
+    real_access = library.os.access
+    monkeypatch.setattr(
+        library.os,
+        "access",
+        lambda path, mode: False if Path(path) == blocked_parent else real_access(path, mode),
+    )
+
+    assert library._source_path_absence_is_proven(str(blocked_source), [covered_root]) is False
+
+
+def test_rescan_recovers_missing_source_without_reindex_when_mtime_matches(tmp_path, monkeypatch):
+    import sqlite3
+
+    from backend.core import library
+    from backend.database import get_file_by_id
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr("backend.database.DB_PATH", db_path)
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    source = tmp_path / "returned.docx"
+    source.write_text("same file returned", encoding="utf-8")
+    file_id = register_file(str(source), source.name, "Word", 0)
+    source_mtime = source.stat().st_mtime
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        UPDATE registered_files
+        SET file_mtime=?,
+            availability_status='missing',
+            missing_since=?,
+            missing_last_checked_at=?,
+            missing_reason='test'
+        WHERE id=?
+        """,
+        (source_mtime, (datetime.now() - timedelta(days=1)).isoformat(), datetime.now().isoformat(), file_id),
+    )
+    conn.commit()
+    conn.close()
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(source)]),
+    )
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda _path: (_ for _ in ()).throw(AssertionError("unchanged recovered files should not be reindexed")),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert response.recovered == 1
+    row = get_file_by_id(file_id)
+    assert row is not None
+    assert row["availability_status"] == "available"
+    assert row["missing_since"] is None
+
+
+def test_rescan_purges_missing_records_after_retention_and_cascades_indexes(tmp_path, monkeypatch):
+    import sqlite3
+
+    from backend.core import library
+    from backend.core.indexer import search
+    from backend.database import get_file_by_id, save_file_chunks
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr("backend.database.DB_PATH", db_path)
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    source = tmp_path / "old-missing.docx"
+    file_id = register_file(str(source), source.name, "Word", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "오래된 누락 키워드"}])
+    old_missing_since = (datetime.now() - timedelta(days=8)).isoformat()
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        UPDATE registered_files
+        SET availability_status='missing',
+            missing_since=?,
+            missing_last_checked_at=?,
+            missing_reason='test'
+        WHERE id=?
+        """,
+        (old_missing_since, old_missing_since, file_id),
+    )
+    conn.commit()
+    conn.close()
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[]),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.missing == 0
+    assert response.purged_missing == 1
+    assert get_file_by_id(file_id) is None
+    assert search("오래된 누락 키워드") == []
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM file_chunks WHERE file_id=?", (file_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM document_fingerprints WHERE file_id=?", (file_id,)).fetchone()[0] == 0

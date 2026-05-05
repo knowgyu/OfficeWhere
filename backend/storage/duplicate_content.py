@@ -17,6 +17,7 @@ _CANDIDATE_GROUPS_CTE = """
         WHERE df.normalized_hash <> ''
           AND df.content_chars > 0
           AND df.chunk_count > 0
+          AND rf.availability_status != 'missing'
         GROUP BY df.normalized_hash
         HAVING COUNT(*) >= 2
            AND COUNT(DISTINCT lower(trim(rf.name))) >= 2
@@ -66,6 +67,11 @@ def list_duplicate_content_groups(
             rf.column_count,
             rf.created_at,
             rf.file_mtime,
+            rf.availability_status,
+            rf.last_seen_at,
+            rf.missing_since,
+            rf.missing_last_checked_at,
+            rf.missing_reason,
             df.content_chars,
             df.chunk_count
         FROM paged_groups pg
@@ -127,6 +133,11 @@ def duplicate_content_groups_from_rows(
                 "column_count": int(row["column_count"] or 0),
                 "created_at": row.get("created_at"),
                 "file_mtime": row.get("file_mtime"),
+                "availability_status": row.get("availability_status"),
+                "last_seen_at": row.get("last_seen_at"),
+                "missing_since": row.get("missing_since"),
+                "missing_last_checked_at": row.get("missing_last_checked_at"),
+                "missing_reason": row.get("missing_reason"),
                 "content_chars": int(row.get("content_chars") or 0),
                 "chunk_count": int(row.get("chunk_count") or 0),
             }

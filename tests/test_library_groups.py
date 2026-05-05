@@ -218,7 +218,7 @@ def test_library_groups_sql_paginates_large_derived_index_without_source_scan(tm
         group_rows.append(_indexed_group_row(f"g-{base_name}", base_name, [first_id, second_id]))
     replace_library_group_index_full(file_rows, group_rows)
 
-    def fail_full_scan():
+    def fail_full_scan(*_args, **_kwargs):
         raise AssertionError("cache-only large group request must not scan source file rows")
 
     monkeypatch.setattr(library, "get_all_files", fail_full_scan)
@@ -243,10 +243,10 @@ def test_library_group_cache_reuses_full_group_build_and_invalidates(tmp_path, m
     calls = 0
     real_get_all_files = library.get_all_files
 
-    def counted_get_all_files():
+    def counted_get_all_files(*args, **kwargs):
         nonlocal calls
         calls += 1
-        return real_get_all_files()
+        return real_get_all_files(*args, **kwargs)
 
     monkeypatch.setattr(library, "get_all_files", counted_get_all_files)
 
@@ -272,7 +272,7 @@ def test_library_groups_cache_only_does_not_rebuild_on_request_path(tmp_path, mo
     _register("/tmp/a/보고서_v1.docx", "보고서_v1.docx", "Word")
     _register("/tmp/a/보고서_v2.docx", "보고서_v2.docx", "Word")
 
-    def fail_full_scan():
+    def fail_full_scan(*_args, **_kwargs):
         raise AssertionError("cache-only group request must not scan all files")
 
     monkeypatch.setattr(library, "get_all_files", fail_full_scan)
@@ -395,10 +395,10 @@ def test_set_group_latest_file_responds_from_index_without_full_rebuild(tmp_path
     calls = 0
     real_get_all_files = library.get_all_files
 
-    def counted_get_all_files():
+    def counted_get_all_files(*args, **kwargs):
         nonlocal calls
         calls += 1
-        return real_get_all_files()
+        return real_get_all_files(*args, **kwargs)
 
     monkeypatch.setattr(library, "get_all_files", counted_get_all_files)
 

@@ -375,7 +375,7 @@ def reindex_all() -> Dict[str, int]:
     from concurrent.futures import ThreadPoolExecutor
 
     pruned_legacy = delete_files_by_types(["Text", "Markdown"]) + delete_files_by_extensions([".xls"])
-    files = get_all_files()
+    files = get_all_files(include_missing=False)
 
     def _reindex_one(file_info: Dict[str, Any]) -> str:
         path = file_info["path"]
@@ -403,7 +403,7 @@ def reindex_all() -> Dict[str, int]:
 
 
 def _do_reindex_incremental():
-    files = get_all_files()
+    files = get_all_files(include_missing=False)
     for file_info in files:
         path = file_info["path"]
         if not os.path.exists(path):

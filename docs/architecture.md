@@ -1,0 +1,51 @@
+# OfficeWhere 아키텍처 요약
+
+OfficeWhere는 로컬/공유 폴더에 흩어진 Office 문서를 찾아 색인하고, 검색과 버전 비교를 제공하는 데스크톱 앱입니다. 원본 문서는 항상 읽기 전용으로 다룹니다.
+
+## 구성
+
+| 영역 | 위치 | 역할 |
+| --- | --- | --- |
+| Desktop shell | `frontend/electron/` | Electron main/preload. Python backend 실행, 포트 전달, 제한된 `window.officeWhere` bridge 제공 |
+| Renderer | `frontend/src/` | React + TypeScript + Vite UI. 검색, 문서 관리, 중복/버전 비교 화면 |
+| API backend | `backend/main.py`, `backend/api/` | FastAPI router, CORS, 설정/API 계약 |
+| App data | `backend/database.py` | SQLite schema, 등록 파일, 검색 청크, 서명, 비교/그룹 캐시, 설정 |
+| Parsing/indexing | `backend/core/` | Office parser, rescan, search, comparison, Excel/PPT/Word diff |
+| Packaging | `officewhere_backend.spec`, `scripts/prepare_python_runtime.py`, `frontend/package.json` | backend 실행 파일/runtime과 Electron bundle 생성 |
+
+## 주요 데이터 흐름
+
+1. 사용자가 대상 폴더를 추가합니다.
+2. 문서 새로고침이 watched folder를 스캔해 지원 확장자를 찾습니다.
+3. backend가 Office 문서를 읽어 app-owned SQLite DB에 메타데이터, 검색 청크, 내용 서명, 비교 보조 캐시를 저장합니다.
+4. renderer는 HTTP API로 검색/목록/비교 결과만 받아 표시합니다.
+5. 원본 Office 파일은 이동, 삭제, 덮어쓰기, 저장을 하지 않습니다.
+
+## 등록 파일 상태
+
+등록된 파일은 원본 경로가 사라질 수 있으므로 DB에 가용성 상태를 둡니다.
+
+- `available`: 최근 스캔 또는 직접 등록에서 원본 경로가 확인된 상태
+- `missing`: 성공적으로 확인한 watched root 아래에서 원본 경로가 더 이상 보이지 않는 상태
+- `missing_since`: 처음 누락으로 확인된 시각
+- `missing_last_checked_at`: 마지막으로 누락을 확인한 시각
+
+문서 새로고침은 스캔이 실패했거나 접근 권한이 불명확한 root/subdir에 대해서는 누락으로 단정하지 않습니다. 원본이 다시 보이면 `available`로 복구합니다. 7일 이상 계속 누락된 항목은 앱 DB와 검색/비교 캐시에서만 정리하며, 원본 파일 삭제 동작은 없습니다.
+
+## UI/API 계약 변경 시 같이 볼 파일
+
+| 바뀐 계약 | 함께 확인 |
+| --- | --- |
+| API request/response | `backend/models/schemas.py`, `frontend/src/api/*.ts`, 관련 tests |
+| 파일 목록/검색 | `backend/api/files.py`, `backend/core/indexer.py`, `backend/database.py`, `FileSearch`, `FileManager` |
+| 문서 새로고침 | `backend/core/library.py`, `backend/core/library_scanner.py`, `frontend/src/contexts/LibraryRescanContext.tsx` |
+| 버전/중복 그룹 | `backend/core/library.py`, `backend/storage/library_groups.py`, `ConsistencyCheck`, `DuplicateFiles` |
+| 비교 결과 | `backend/core/checker.py`, `excel_compare.py`, `word_compare.py`, `ppt_compare.py`, frontend consistency components |
+| Electron bridge/packaging | `frontend/electron/main.ts`, `frontend/electron/preload.ts`, `frontend/package.json`, release workflow |
+
+## 운영 원칙
+
+- 새 의존성보다 기존 seam과 테스트를 우선합니다.
+- 앱 데이터 초기화/정리는 DB, 캐시, 로그, 설정 등 app-owned 위치만 대상으로 합니다.
+- 패키징된 Electron backend 포트는 OS가 배정한 loopback 포트를 사용합니다. 고정 포트로 바꾸지 않습니다.
+- 사용자-facing 한국어 문구는 내부 용어보다 동작 중심으로 씁니다.

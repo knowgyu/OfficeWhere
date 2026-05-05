@@ -21,7 +21,7 @@ export interface LibraryRescanResult {
   path: string
   name: string
   success: boolean
-  action: 'registered' | 'updated' | 'skipped' | 'failed' | 'cancelled'
+  action: 'registered' | 'updated' | 'skipped' | 'missing' | 'recovered' | 'purged_missing' | 'failed' | 'cancelled'
   file_id?: number
   error?: string
   diagnostic_id?: string
@@ -39,6 +39,9 @@ export interface LibraryRescanResponse {
   results: LibraryRescanResult[]
   cancelled: number
   pruned_unsupported: number
+  missing: number
+  recovered: number
+  purged_missing: number
 }
 
 export type LibraryRescanMode = 'normal' | 'fast'
@@ -64,6 +67,9 @@ export interface LibraryRescanStatus {
   failed: number
   cancelled: number
   pruned_unsupported: number
+  missing: number
+  recovered: number
+  purged_missing: number
   cancel_requested: boolean
   current_file?: string | null
   summary?: LibraryRescanResponse | null

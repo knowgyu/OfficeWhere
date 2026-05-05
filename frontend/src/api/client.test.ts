@@ -24,7 +24,7 @@ describe('api.files', () => {
     expect(res.data).toEqual(sample)
   })
 
-  it('files.page passes query/file_types/limit/offset/sort as query string', async () => {
+  it('files.page passes query/file_types/limit/offset/sort/include_missing as query string', async () => {
     let captured: URLSearchParams | undefined
     server.use(
       http.get('*/api/files/page', ({ request }) => {
@@ -39,6 +39,7 @@ describe('api.files', () => {
       limit: 10,
       offset: 20,
       sort: 'created_at_desc',
+      includeMissing: false,
     })
 
     expect(captured?.get('q')).toBe('회의')
@@ -46,6 +47,7 @@ describe('api.files', () => {
     expect(captured?.get('limit')).toBe('10')
     expect(captured?.get('offset')).toBe('20')
     expect(captured?.get('sort')).toBe('created_at_desc')
+    expect(captured?.get('include_missing')).toBe('false')
   })
 
   it('files.register POSTs /api/files with the body', async () => {

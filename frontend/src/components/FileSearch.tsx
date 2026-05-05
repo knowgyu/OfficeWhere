@@ -530,6 +530,7 @@ export default function FileSearch({
         limit: INITIAL_DOCUMENT_LIMIT,
         offset: 0,
         sort: 'file_mtime_desc',
+        includeMissing: false,
       }),
     ])
       .then(([settingsResponse, filesResponse]) => {

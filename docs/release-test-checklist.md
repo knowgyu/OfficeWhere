@@ -1,79 +1,50 @@
-# OfficeWhere Release Test Checklist
+# OfficeWhere 릴리스 체크리스트
 
-Use this checklist before publishing a release tag.
+릴리스 태그를 올리기 전 확인할 항목입니다. 릴리스 설명은 저장소 markdown이 아니라 GitHub Release 본문에 작성합니다.
 
-## Automated verification
-- [ ] `./venv/bin/python -m pytest -q` passes.
-- [ ] `./venv/bin/python -m compileall backend backend_server.py -q` passes.
-- [ ] `./venv/bin/python scripts/run_demo_checks.py` passes.
-- [ ] `cd frontend && npm run build` passes.
-- [ ] `cd frontend && npm run build:electron` passes.
-- [ ] `cd frontend && npx tsc -p tsconfig.e2e.json` passes.
-- [ ] `cd frontend && npm run test:run` passes.
-- [ ] `git diff --check` passes.
-- [ ] GitHub `Frontend tests` workflow passes on the verified commit.
+## 자동 검증
 
-Note: full Playwright Electron execution may need OS libraries (`libasound`, GTK/GBM, Xvfb on Linux). Do not treat a missing local system library as a product regression; pin the runner dependencies before making full E2E a hard release gate.
+- [ ] `./venv/bin/python -m pytest -q`
+- [ ] `./venv/bin/python -m compileall backend backend_server.py -q`
+- [ ] `./venv/bin/python scripts/run_demo_checks.py`
+- [ ] `cd frontend && npm run build`
+- [ ] `cd frontend && npm run build:electron`
+- [ ] `cd frontend && npm run test:run`
+- [ ] `cd frontend && npx tsc -p tsconfig.e2e.json`
+- [ ] `git diff --check`
+- [ ] GitHub `Frontend tests` workflow 통과
 
-## Document registration and search
-- [ ] Register a folder containing Excel, Word, and PowerPoint files.
-- [ ] Search by filename + body.
-- [ ] Search by filename only.
-- [ ] Search by body only.
-- [ ] Filter search results to Excel.
+## 문서 등록/검색
 
-## File/library scale UX
-- [ ] File Manager shows a bounded page, not the full registered file list.
-- [ ] File Manager search narrows the file page.
-- [ ] File Manager search/paging still helps users find registered Excel files without exposing unfinished merge screens.
+- [ ] Excel, Word, PowerPoint가 섞인 폴더를 등록한다.
+- [ ] 파일명 검색, 본문 검색, 파일명+본문 검색이 모두 동작한다.
+- [ ] 파일 형식 필터가 검색 결과를 좁힌다.
+- [ ] 문서 새로고침 중 진행률과 완료 요약이 자연스럽게 보인다.
+- [ ] 원본이 사라진 등록 파일은 “원본 없음” 상태로 보이고, 검색/중복/버전 비교 후보에서는 빠진다.
+- [ ] 원본을 다시 같은 위치에 두고 새로고침하면 사용 가능 상태로 복구된다.
 
-## Version management
-- [ ] Same Office filename in two folders appears as a “same filename” group.
-- [ ] `v1.0`, `v1.1`, `260426`, or `2026-04-26` filename variants appear as a version-family group.
-- [ ] Text and Markdown files are not offered as supported registration/search formats.
-- [ ] Opening a group loads a timeline/detail view and calculates only that group’s adjacent version changes on demand.
-- [ ] While version changes are calculated, progress is visible as completed/total comparisons.
-- [ ] Word changes show page labels and side-by-side “기존 내용” / “변경 후 내용” panels.
-- [ ] Excel search and value changes show worksheet coordinates such as `예산현황 시트 | 5행 E열`.
-- [ ] Settings / Library → 화면 표시 changes app-wide text size across search, settings, version management, and Excel previews.
-- [ ] Version Management keeps the selected group visible after opening another group.
-- [ ] Excel added/removed cell content appears under 추가/삭제된 내용, and missing rows/columns show actual content previews rather than only row/column labels.
-- [ ] Excel version groups show a prominent `표로 보기` button that opens a large modal grid.
-- [ ] Excel `값 변경` and `추가/삭제된 내용` sections are collapsed by default and expand on click.
-- [ ] Excel version history uses cell/used-range comparison and does not rely on saved table/parser settings.
-- [ ] Version Management auto-detected groups remain one column on a wide screen.
-- [ ] Version group cards do not show `최신 후보` / `이전 후보` labels.
-- [ ] Main navigation does not expose unfinished Excel merge/preview surfaces.
-- [ ] The Excel grid highlights added/removed/changed cells in green/red/yellow and cell click shows detailed history.
-- [ ] Large Excel grids show partial-range guidance and keep horizontal scrolling, including Shift + mouse wheel.
-- [ ] PowerPoint changes show slide numbers and titles for added/removed/changed slides.
-- [ ] If a group exceeds the latest-file detail limit, the UI explains only the displayed/latest files were analyzed.
-- [ ] Content-evidence wording avoids internal terms such as “fingerprint”.
-- [ ] Version Management view-size controls enlarge text without breaking the main card layout.
+## 버전/중복/비교
 
-## Data safety
-- [ ] App-data safe reset copy says original documents are not deleted.
-- [ ] App-data reset exits the app after cleanup and does not relaunch into a hidden process.
-- [ ] First X-button close asks whether to run in background, quit, or cancel; “remember this choice” persists to Settings.
-- [ ] Tray menu can reopen OfficeWhere and can quit the background process.
-- [ ] Full reset remains behind a stronger warning/advanced path.
-- [ ] Original watched folders and Office documents remain untouched after app-data cleanup.
-- [ ] A mapped/network drive folder can be added when the current OS user can access it.
-- [ ] On a Windows PC with corporate document protection enabled, protected `.xlsx` / `.docx` / `.pptx` files index in the packaged app.
-- [ ] Search, indexing, and version management read source documents only; they do not delete, move, rename, or save originals.
-- [ ] The OS “open file” action is understood as handing the document to Office; manual user edits in Office are outside app-controlled read-only scanning.
+- [ ] 같은 파일명이 여러 폴더에 있을 때 “같은 파일명” 그룹이 나온다.
+- [ ] `v1.0`, `v1.1`, 날짜/수정본 표기가 있는 파일명이 버전 후보로 묶인다.
+- [ ] Word 비교는 페이지 라벨과 기존/변경 후 내용을 표시한다.
+- [ ] Excel 비교는 시트/셀 좌표와 표 보기 모달을 표시한다.
+- [ ] PowerPoint 비교는 슬라이드 번호/제목 기준 변경을 표시한다.
+- [ ] 중복 문서 화면은 같은 본문이지만 다른 파일명인 후보만 보여준다.
 
-## Release
-- [ ] Version is bumped in `frontend/package.json` and `frontend/package-lock.json`.
-- [ ] Release notes in `docs/releases/vX.Y.Z.md` summarize user-visible changes and known verification limits.
-- [ ] Git tag `vX.Y.Z` points at the verified commit.
-- [ ] Push the verified branch/tag. Tag push builds Actions artifacts and publishes a GitHub Release.
-- [ ] If manually rebuilding, run `workflow_dispatch` with `release_tag` set to the verified tag.
-- [ ] Confirm the GitHub Release contains Windows x64 zip, macOS arm64 dmg/zip, and matching SHA256 files.
-- [ ] Confirm the macOS dmg/zip app bundle contains `Contents/Resources/python-runtime/bin/python3` and `Contents/Resources/backend-source/backend_server.py`.
-- [ ] From the previous packaged Windows version, confirm the update dialog shows `zip 다운로드`, downloads/verifies the zip into the Downloads folder, opens the file location, and leaves the current app/data untouched.
-- [ ] Confirm a missing/bad `.sha256.txt` aborts before extraction/replacement and the current app remains usable.
-- [ ] Confirm a download or SHA256 verification failure leaves the current app usable and shows a clear modal error.
-- [ ] Confirm a disposable rollback simulation leaves the old `OfficeWhere.exe` runnable and records the restore/failure in the update log.
-- [ ] Confirm a permission-protected install folder does not affect update download because the updater writes only to the Downloads folder.
-- [ ] Confirm the Windows zip contains `resources/python-runtime/python.exe` and `resources/backend-source/backend_server.py`.
+## 데이터 안전
+
+- [ ] 검색, 색인, 비교가 원본 문서를 삭제/이동/이름변경/저장하지 않는다.
+- [ ] 앱 데이터 초기화 문구가 원본 문서를 삭제하지 않는다고 명확히 설명한다.
+- [ ] 앱 데이터 초기화는 앱 DB, 캐시, 로그, 설정 위치만 대상으로 한다.
+- [ ] 네트워크/공유 폴더가 일시적으로 끊긴 경우 등록 파일을 즉시 삭제하지 않는다.
+- [ ] 보호 정책이 적용된 Office 문서는 필요한 경우 `protected-document-testbed.md` 절차로 수동 확인한다.
+
+## 데스크톱/업데이트
+
+- [ ] 첫 창 닫기에서 백그라운드 실행/종료/취소 선택이 동작한다.
+- [ ] 트레이 메뉴로 다시 열기와 종료가 가능하다.
+- [ ] Windows zip에는 `resources/python-runtime/python.exe`와 `resources/backend-source/backend_server.py`가 있다.
+- [ ] macOS dmg/zip app bundle에는 `Contents/Resources/python-runtime/bin/python3`와 backend source가 있다.
+- [ ] GitHub Release에는 Windows x64 zip, macOS arm64 dmg/zip, 각 SHA256 파일이 있다.
+- [ ] Windows 업데이트 다운로드는 SHA256 검증 실패 시 기존 앱을 건드리지 않고 명확한 오류를 보여준다.

@@ -26,6 +26,9 @@ function statusToSummary(status: LibraryRescanStatus): LibraryRescanResponse {
     failed: status.failed,
     cancelled: status.cancelled,
     pruned_unsupported: status.pruned_unsupported,
+    missing: status.missing,
+    recovered: status.recovered,
+    purged_missing: status.purged_missing,
     results: [],
   }
 }

@@ -37,7 +37,7 @@
 - macOS Apple Silicon: `officewhere-vX.Y.Z-mac-arm64.dmg` 또는 `.zip` 실행
 - Linux 패키지는 아직 제공하지 않습니다.
 
-> macOS에서 “앱이 손상되어 열 수 없습니다”가 뜨면 아직 서명/공증되지 않은 앱이라서 그렇습니다. 자세한 우회 방법은 [릴리스 체크리스트](docs/release-test-checklist.md)와 릴리스 노트를 참고하세요.
+> macOS에서 “앱이 손상되어 열 수 없습니다”가 뜨면 아직 서명/공증되지 않은 앱이라서 그렇습니다. 자세한 우회 방법은 [릴리스 체크리스트](docs/release-test-checklist.md)와 GitHub Release 설명을 참고하세요.
 
 ## 직접 실행 / 빌드
 

@@ -65,7 +65,10 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
           : '진행률 계산 중'
     const current = status.current_file ? ` · 현재 ${status.current_file}` : ''
     const cleanupText = status.pruned_unsupported > 0 ? `정리 ${status.pruned_unsupported}개` : ''
-    return [foundText, modeText, progressText, cleanupText].filter(Boolean).join(' · ') + current
+    const missingText = status.missing > 0 ? `누락 표시 ${status.missing}개` : ''
+    const recoveredText = status.recovered > 0 ? `복구 ${status.recovered}개` : ''
+    const purgedText = status.purged_missing > 0 ? `자동 정리 ${status.purged_missing}개` : ''
+    return [foundText, modeText, progressText, cleanupText, missingText, recoveredText, purgedText].filter(Boolean).join(' · ') + current
   }
 
   const source = summary ?? status?.summary
@@ -74,7 +77,10 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
   const unchanged = source.skipped > 0 ? ` · 변경 없음 ${source.skipped}` : ''
   const cancelled = source.cancelled > 0 ? ` · 정지 ${source.cancelled}` : ''
   const cleanup = source.pruned_unsupported > 0 ? ` · 이전 미지원 항목 정리 ${source.pruned_unsupported}` : ''
-  return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${cancelled}${cleanup} · 실패 ${source.failed}`
+  const missing = source.missing > 0 ? ` · 누락 표시 ${source.missing}` : ''
+  const recovered = source.recovered > 0 ? ` · 다시 확인됨 ${source.recovered}` : ''
+  const purged = source.purged_missing > 0 ? ` · 7일 경과 자동 정리 ${source.purged_missing}` : ''
+  return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${missing}${recovered}${purged}${cancelled}${cleanup} · 실패 ${source.failed}`
 }
 
 const REGISTERED_FILE_PAGE_SIZE = 50

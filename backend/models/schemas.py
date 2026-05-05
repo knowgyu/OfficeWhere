@@ -19,6 +19,11 @@ class FileInfo(BaseModel):
     column_count: int
     created_at: Optional[str] = None
     file_mtime: Optional[float] = None
+    availability_status: str = "available"
+    last_seen_at: Optional[str] = None
+    missing_since: Optional[str] = None
+    missing_last_checked_at: Optional[str] = None
+    missing_reason: Optional[str] = None
 
 
 class FileListResponse(BaseModel):
@@ -404,6 +409,9 @@ class LibraryRescanResponse(BaseModel):
     results: List[LibraryRescanResult]
     cancelled: int = 0
     pruned_unsupported: int = 0
+    missing: int = 0
+    recovered: int = 0
+    purged_missing: int = 0
 
 
 class LibraryRescanRequest(BaseModel):
@@ -431,6 +439,9 @@ class LibraryRescanStatus(BaseModel):
     failed: int = 0
     cancelled: int = 0
     pruned_unsupported: int = 0
+    missing: int = 0
+    recovered: int = 0
+    purged_missing: int = 0
     cancel_requested: bool = False
     current_file: Optional[str] = None
     summary: Optional[LibraryRescanResponse] = None

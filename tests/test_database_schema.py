@@ -132,3 +132,29 @@ def test_init_db_creates_library_group_index_tables(tmp_path, monkeypatch):
         "excel_sheet_index",
         "excel_cell_index",
     }.issubset(tables)
+
+
+def test_init_db_creates_missing_file_lifecycle_columns_and_indexes(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr("backend.database.DB_PATH", db_path)
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+
+    init_db()
+
+    conn = sqlite3.connect(db_path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(registered_files)").fetchall()}
+    indexes = {
+        row[1]
+        for row in conn.execute("PRAGMA index_list(registered_files)").fetchall()
+    }
+    conn.close()
+
+    assert {
+        "availability_status",
+        "last_seen_at",
+        "missing_since",
+        "missing_last_checked_at",
+        "missing_reason",
+    }.issubset(columns)
+    assert "idx_registered_files_availability_status" in indexes
+    assert "idx_registered_files_missing_since" in indexes

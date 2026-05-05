@@ -49,6 +49,7 @@ LIBRARY_GROUP_INDEX_ERROR_KEY = "library_group_index_error"
 COMPARISON_CACHE_MAX_BYTES = 100 * 1024 * 1024
 COMPARISON_CACHE_MAX_AGE_DAYS = 90
 COMPARISON_CACHE_MIN_KEEP_ROWS = 300
+MISSING_FILE_RETENTION_DAYS = 7
 _DB_WRITE_LOCK = threading.RLock()
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
 
@@ -284,6 +285,18 @@ def _ensure_registered_files_columns(cursor: sqlite3.Cursor):
 
     if "file_mtime" not in existing_columns:
         cursor.execute("ALTER TABLE registered_files ADD COLUMN file_mtime REAL")
+    if "availability_status" not in existing_columns:
+        cursor.execute(
+            "ALTER TABLE registered_files ADD COLUMN availability_status TEXT NOT NULL DEFAULT 'available'"
+        )
+    if "last_seen_at" not in existing_columns:
+        cursor.execute("ALTER TABLE registered_files ADD COLUMN last_seen_at TEXT")
+    if "missing_since" not in existing_columns:
+        cursor.execute("ALTER TABLE registered_files ADD COLUMN missing_since TEXT")
+    if "missing_last_checked_at" not in existing_columns:
+        cursor.execute("ALTER TABLE registered_files ADD COLUMN missing_last_checked_at TEXT")
+    if "missing_reason" not in existing_columns:
+        cursor.execute("ALTER TABLE registered_files ADD COLUMN missing_reason TEXT")
 
 
 def _ensure_file_chunks_columns(cursor: sqlite3.Cursor):
@@ -662,9 +675,10 @@ def _save_prepared_indexed_file(
             """
             INSERT INTO registered_files (
                 path, name, file_type, column_count,
-                created_at, file_mtime
+                created_at, file_mtime, availability_status,
+                last_seen_at, missing_since, missing_last_checked_at, missing_reason
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 'available', ?, NULL, NULL, NULL)
             """,
             (
                 payload.path,
@@ -673,6 +687,7 @@ def _save_prepared_indexed_file(
                 payload.column_count,
                 now,
                 payload.file_mtime,
+                now,
             ),
         )
         file_id = cursor.lastrowid
@@ -685,7 +700,12 @@ def _save_prepared_indexed_file(
             """
             UPDATE registered_files
             SET name=?, file_type=?, column_count=?,
-                created_at=?, file_mtime=?
+                created_at=?, file_mtime=?,
+                availability_status='available',
+                last_seen_at=?,
+                missing_since=NULL,
+                missing_last_checked_at=NULL,
+                missing_reason=NULL
             WHERE path=?
             """,
             (
@@ -694,6 +714,7 @@ def _save_prepared_indexed_file(
                 payload.column_count,
                 now,
                 payload.file_mtime,
+                now,
                 payload.path,
             ),
         )
@@ -854,7 +875,12 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
             file_type TEXT NOT NULL,
             column_count INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
-            file_mtime REAL
+            file_mtime REAL,
+            availability_status TEXT NOT NULL DEFAULT 'available',
+            last_seen_at TEXT,
+            missing_since TEXT,
+            missing_last_checked_at TEXT,
+            missing_reason TEXT
         )
         """
     )
@@ -875,6 +901,18 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
         """
         CREATE INDEX IF NOT EXISTS idx_registered_files_file_mtime
         ON registered_files(file_mtime DESC)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_registered_files_availability_status
+        ON registered_files(availability_status)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_registered_files_missing_since
+        ON registered_files(missing_since)
         """
     )
 
@@ -1644,11 +1682,13 @@ def register_file(
             cursor.execute(
                 """
                 INSERT INTO registered_files (
-                    path, name, file_type, column_count, created_at
+                    path, name, file_type, column_count, created_at,
+                    availability_status, last_seen_at, missing_since,
+                    missing_last_checked_at, missing_reason
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, 'available', ?, NULL, NULL, NULL)
                 """,
-                (path, name, file_type, column_count, now),
+                (path, name, file_type, column_count, now, now),
             )
             conn.commit()
             _mark_group_index_repair_needed_for_legacy_write("register_file")
@@ -1657,10 +1697,15 @@ def register_file(
             cursor.execute(
                 """
                 UPDATE registered_files
-                SET name=?, file_type=?, column_count=?, created_at=?
+                SET name=?, file_type=?, column_count=?, created_at=?,
+                    availability_status='available',
+                    last_seen_at=?,
+                    missing_since=NULL,
+                    missing_last_checked_at=NULL,
+                    missing_reason=NULL
                 WHERE path=?
                 """,
-                (name, file_type, column_count, now, path),
+                (name, file_type, column_count, now, now, path),
             )
             conn.commit()
             cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
@@ -1764,10 +1809,11 @@ def save_indexed_files_batch(payloads: Sequence[PreparedIndexedFile]) -> List[in
         )
 
 
-def get_all_files() -> List[Dict[str, Any]]:
+def get_all_files(*, include_missing: bool = True) -> List[Dict[str, Any]]:
     with _read_connection(row_factory=sqlite3.Row) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM registered_files ORDER BY created_at DESC")
+        where_clause = "" if include_missing else "WHERE availability_status != 'missing'"
+        cursor.execute(f"SELECT * FROM registered_files {where_clause} ORDER BY created_at DESC")
         rows = cursor.fetchall()
     return [dict(row) for row in rows]
 
@@ -1779,7 +1825,9 @@ def get_registered_files_signature() -> str:
         cursor.execute(
             """
             SELECT id, path, name, file_type, column_count,
-                   created_at, file_mtime
+                   created_at, file_mtime, availability_status,
+                   last_seen_at, missing_since, missing_last_checked_at,
+                   missing_reason
             FROM registered_files
             ORDER BY id
             """
@@ -1796,9 +1844,12 @@ def get_registered_files_signature() -> str:
 def _build_file_list_filters(
     query: str = "",
     file_types: Optional[Sequence[str]] = None,
+    include_missing: bool = True,
 ) -> Tuple[str, List[Any]]:
     clauses: List[str] = []
     params: List[Any] = []
+    if not include_missing:
+        clauses.append("availability_status != 'missing'")
     normalized_query = query.strip()
     if normalized_query:
         like_query = f"%{normalized_query}%"
@@ -1833,10 +1884,11 @@ def list_files_page(
     limit: int = 50,
     offset: int = 0,
     sort: str = "created_at_desc",
+    include_missing: bool = True,
 ) -> List[Dict[str, Any]]:
     with _read_connection(row_factory=sqlite3.Row) as conn:
         cursor = conn.cursor()
-        where_clause, params = _build_file_list_filters(query, file_types)
+        where_clause, params = _build_file_list_filters(query, file_types, include_missing=include_missing)
         cursor.execute(
             f"""
             SELECT *
@@ -1870,10 +1922,11 @@ def list_duplicate_content_groups(
 def count_files(
     query: str = "",
     file_types: Optional[Sequence[str]] = None,
+    include_missing: bool = True,
 ) -> int:
     with _read_connection() as conn:
         cursor = conn.cursor()
-        where_clause, params = _build_file_list_filters(query, file_types)
+        where_clause, params = _build_file_list_filters(query, file_types, include_missing=include_missing)
         cursor.execute(f"SELECT COUNT(*) FROM registered_files{where_clause}", params)
         total = int(cursor.fetchone()[0])
     return total
@@ -1882,10 +1935,11 @@ def count_files(
 def count_files_by_type(
     query: str = "",
     file_types: Optional[Sequence[str]] = None,
+    include_missing: bool = True,
 ) -> Dict[str, int]:
     with _read_connection() as conn:
         cursor = conn.cursor()
-        where_clause, params = _build_file_list_filters(query, file_types)
+        where_clause, params = _build_file_list_filters(query, file_types, include_missing=include_missing)
         cursor.execute(
             f"""
             SELECT file_type, COUNT(*) AS count
@@ -1905,6 +1959,105 @@ def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
         cursor.execute("SELECT * FROM registered_files WHERE id=?", (file_id,))
         row = cursor.fetchone()
     return dict(row) if row else None
+
+
+def mark_registered_file_available(file_id: int, *, seen_at: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Clear a missing marker after the source path is seen again."""
+    checked_at = seen_at or datetime.now().isoformat()
+    with _write_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM registered_files WHERE id=?", (int(file_id),))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cursor.execute(
+            """
+            UPDATE registered_files
+            SET availability_status='available',
+                last_seen_at=?,
+                missing_since=NULL,
+                missing_last_checked_at=NULL,
+                missing_reason=NULL
+            WHERE id=?
+            """,
+            (checked_at, int(file_id)),
+        )
+        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="missing_file_recovered")
+        conn.commit()
+    return dict(row)
+
+
+def mark_registered_files_missing(
+    paths: Sequence[str],
+    *,
+    checked_at: Optional[str] = None,
+    reason: str = "not_found_during_rescan",
+) -> List[Dict[str, Any]]:
+    """Mark registered paths as missing without deleting any app-owned records."""
+    normalized = sorted({os.path.normpath(str(path)) for path in paths if str(path or "").strip()})
+    if not normalized:
+        return []
+
+    timestamp = checked_at or datetime.now().isoformat()
+    affected_rows: List[Dict[str, Any]] = []
+    with _write_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        for batch in _batched_values(normalized):
+            placeholders = ",".join("?" for _ in batch)
+            cursor.execute(f"SELECT * FROM registered_files WHERE path IN ({placeholders})", batch)
+            rows = [dict(row) for row in cursor.fetchall()]
+            for row in rows:
+                missing_since = row.get("missing_since") or timestamp
+                cursor.execute(
+                    """
+                    UPDATE registered_files
+                    SET availability_status='missing',
+                        missing_since=?,
+                        missing_last_checked_at=?,
+                        missing_reason=?
+                    WHERE id=?
+                    """,
+                    (missing_since, timestamp, reason, int(row["id"])),
+                )
+                if row.get("availability_status") != "missing":
+                    affected_rows.append(row)
+        if affected_rows:
+            _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="missing_file_marked")
+        conn.commit()
+    return affected_rows
+
+
+def purge_expired_missing_files(
+    *,
+    now: Optional[datetime] = None,
+    grace_days: int = MISSING_FILE_RETENTION_DAYS,
+) -> List[Dict[str, Any]]:
+    """Remove app-owned records for files that have stayed missing past the grace period."""
+    threshold = (now or datetime.now()) - timedelta(days=max(0, int(grace_days)))
+    with _write_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM registered_files
+            WHERE availability_status='missing'
+              AND missing_since IS NOT NULL
+              AND missing_since <= ?
+            """,
+            (threshold.isoformat(),),
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        if rows:
+            _delete_registered_file_ids_with_cursor(
+                cursor,
+                [int(row["id"]) for row in rows],
+                repair_reason="purge_expired_missing_files",
+            )
+        conn.commit()
+    return rows
 
 
 def get_excel_sheet_index(file_ids: Sequence[int]) -> Dict[int, List[Dict[str, Any]]]:
@@ -2034,7 +2187,7 @@ def search_file_names(
     if not normalized_query:
         return []
 
-    clauses = ["name LIKE ?"]
+    clauses = ["name LIKE ?", "availability_status != 'missing'"]
     params: List[Any] = [f"%{normalized_query}%"]
     filters = [file_type for file_type in (file_types or []) if file_type]
     if filters:
@@ -2263,7 +2416,20 @@ def save_file_chunks(
 def update_file_mtime(file_id: int, mtime: float):
     with _write_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("UPDATE registered_files SET file_mtime = ? WHERE id = ?", (mtime, file_id))
+        now = datetime.now().isoformat()
+        cursor.execute(
+            """
+            UPDATE registered_files
+            SET file_mtime = ?,
+                availability_status='available',
+                last_seen_at=?,
+                missing_since=NULL,
+                missing_last_checked_at=NULL,
+                missing_reason=NULL
+            WHERE id = ?
+            """,
+            (mtime, now, file_id),
+        )
         cursor.execute("UPDATE document_fingerprints SET source_mtime = ? WHERE file_id = ?", (mtime, file_id))
         _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="update_file_mtime")
         conn.commit()
@@ -2561,7 +2727,7 @@ def search_chunks(
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     filters = [file_type for file_type in (file_types or []) if file_type]
-    filter_clause = ""
+    filter_clause = " AND rf.availability_status != 'missing'"
     params: List[Any] = [fts_query]
     if filters:
         placeholders = ",".join("?" for _ in filters)
