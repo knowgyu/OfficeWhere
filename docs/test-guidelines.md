@@ -3,7 +3,7 @@
 > 코드를 추가/변경할 때 어떤 테스트를 어디에 넣고 어떤 패턴을 따르는지 정리한 문서입니다.
 > 사람이 읽기 좋게 단계별 시나리오를 두고, AI 가 빠르게 참조하도록 §7 에 색인을 따로 두었습니다.
 >
-> 관련 문서: [`prd-frontend-testing.md`](prd-frontend-testing.md), [`test-architecture-guide.md`](test-architecture-guide.md), [`ci-workflows-todo.md`](ci-workflows-todo.md)
+> 관련 문서: [`README.md`](README.md), [`prd-frontend-testing.md`](prd-frontend-testing.md), [`test-architecture-guide.md`](test-architecture-guide.md), [`ci-workflows-todo.md`](ci-workflows-todo.md)
 
 ---
 
@@ -511,7 +511,10 @@ cd frontend && npm run test:run -- src/components/FileSearch.test.tsx
 # 프론트엔드 Vitest (커버리지)
 cd frontend && npm run test:coverage
 
-# 프론트엔드 Playwright E2E (전체)
+# Playwright E2E spec 타입체크 (기본 CI 게이트)
+cd frontend && npx tsc -p tsconfig.e2e.json
+
+# 프론트엔드 Playwright E2E (전체; Electron system deps 필요)
 cd frontend && npm run test:e2e
 
 # 프론트엔드 Playwright E2E (build 생략, 빠른 반복)
@@ -528,8 +531,11 @@ cd frontend && npm run test:e2e:ui
 
 - [ ] `./venv/bin/python -m pytest` 통과
 - [ ] `cd frontend && npm run build` 통과 (test 파일이 production 에 새지 않는지)
+- [ ] `cd frontend && npm run build:electron` 통과
+- [ ] `cd frontend && npx tsc -p tsconfig.e2e.json` 통과
 - [ ] `cd frontend && npm run test:run` 통과
-- [ ] `cd frontend && npm run test:e2e` 통과 (또는 영향 받은 spec 만)
+- [ ] `cd frontend && npm run test:e2e -- --list` 통과
+- [ ] 영향 받은 full E2E spec은 system deps가 갖춰진 환경에서 실행
 - [ ] 새 컴포넌트/함수에 대응하는 테스트 추가됨
 - [ ] 카피 변경했다면 grep 으로 사용처 찾아 테스트 갱신함
 - [ ] 새 backend endpoint 라면 MSW 핸들러 추가됨
@@ -704,7 +710,8 @@ test('IPC channel does the right thing', async ({ mainWindow }) => {
 - [ ] IPC 채널 추가 → fixtures.ts bridge default 와 spec 추가됨
 - [ ] `npm run build` 통과 (테스트 파일이 production 빌드에 안 새는지)
 - [ ] `npm run test:run` 통과
-- [ ] `npm run test:e2e` 통과 (영향 받는 spec 만이라도)
+- [ ] `npx tsc -p tsconfig.e2e.json` 통과
+- [ ] 영향 받는 `npm run test:e2e -- <spec>` 은 system deps가 있는 환경에서 통과
 
 ## 테스트 품질 체크
 - [ ] 테스트가 외부 동작을 검증 (내부 상태/private 함수 검증 안 함)
@@ -719,6 +726,6 @@ test('IPC channel does the right thing', async ({ mainWindow }) => {
 
 - 시스템 전체 구조: [`test-architecture-guide.md`](test-architecture-guide.md)
 - 도입 이유 / 결정 기록: [`prd-frontend-testing.md`](prd-frontend-testing.md)
-- CI 미구현 청사진: [`ci-workflows-todo.md`](ci-workflows-todo.md)
+- Full Electron E2E CI 후속 청사진: [`ci-workflows-todo.md`](ci-workflows-todo.md)
 - 백엔드 테스트 패턴 (prior art): `tests/test_files_api.py`, `tests/test_search.py`
 - 프론트엔드 테스트 prior art: `frontend/src/api/library.test.ts`, `frontend/src/components/FileSearch.test.tsx`, `frontend/tests/e2e/golden-path.spec.ts`

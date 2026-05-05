@@ -24,11 +24,13 @@ OfficeWhere는 회사 폴더, 연구 자료, 수업 과제, 프로젝트 산출�
 
 ## 지원 파일
 
-| 형식            | 검색                   | 변경 이력            | 비고 |
-| --------------- | ---------------------- | -------------------- | ---- |
-| `.xlsx` | 파일명 + 셀 내용       | 셀 값 추가/삭제/변경 | 표·셀 위치 중심으로 결과를 확인할 수 있습니다. |
-| `.docx`         | 파일명 + 문단 + 표     | 문단·표 변경         | 문단·표 단위 변경 확인을 지원합니다. |
-| `.pptx`         | 파일명 + 슬라이드 + 표 | 슬라이드·항목 변경   | 슬라이드 번호와 항목 중심으로 변경을 확인할 수 있습니다. |
+OfficeWhere의 현재 제품 화면은 Office OOXML 문서만 등록합니다. 과거 실험용 Text/Markdown 색인은 현재 라이브러리 새로고침 시 app-owned DB에서 정리되며, 원본 파일은 삭제하지 않습니다.
+
+| 형식 | 검색 | 변경 이력 | 비고 |
+| --- | --- | --- | --- |
+| `.xlsx` | 파일명 + 셀 내용 | 셀 값 추가/삭제/변경 | 표·셀 위치 중심으로 결과를 확인할 수 있습니다. |
+| `.docx` | 파일명 + 문단 + 표 | 문단·표 변경 | 문단·표 단위 변경 확인을 지원합니다. |
+| `.pptx` | 파일명 + 슬라이드 + 표 | 슬라이드·항목 변경 | 슬라이드 번호와 항목 중심으로 변경을 확인할 수 있습니다. |
 
 여러 Excel 파일을 하나로 합치는 별도 기능은 현재 기본 제품 화면에 제공하지 않습니다. OfficeWhere의 현재 초점은 등록한 원본 문서를 안전하게 읽어 검색하고, 파일 사이 변경 근거를 확인하는 데 있습니다.
 
@@ -63,6 +65,12 @@ xattr -cr /경로/OfficeWhere.app
 ```
 
 macOS 정책상 직접 빌드한 앱(`./build.sh`)은 quarantine이 붙지 않으므로 이 단계가 필요하지 않습니다.
+
+## 개발/문서 참고
+
+- 문서 목차와 현재 상태는 [`docs/README.md`](docs/README.md)에 모아 둡니다.
+- 테스트 작성/수정 기준은 [`docs/test-guidelines.md`](docs/test-guidelines.md)를 우선 참고합니다.
+- 릴리스 전 검증은 [`docs/release-test-checklist.md`](docs/release-test-checklist.md)를 기준으로 합니다.
 
 ## 웹 브라우저에서 빠르게 테스트하기
 
@@ -114,6 +122,22 @@ http://127.0.0.1:15173
 - 종료: 실행 중인 터미널에서 `Ctrl+C`
 - backend도 함께 종료됩니다.
 - WSL에서도 실행은 가능하지만, Windows 네트워크 드라이브 경로 테스트는 Windows에서 `dev-web.bat`으로 실행하는 편이 안전합니다.
+
+## 개발 검증 명령
+
+일반 변경 후에는 영향 범위에 맞춰 아래 명령을 실행합니다.
+
+```bash
+./venv/bin/python -m pytest -q
+./venv/bin/python -m compileall backend backend_server.py -q
+cd frontend && npm run build
+cd frontend && npm run build:electron
+cd frontend && npx tsc -p tsconfig.e2e.json
+cd frontend && npm run test:run
+git diff --check
+```
+
+Electron E2E는 Linux에서 `libasound`, GTK, Xvfb 같은 시스템 라이브러리가 필요할 수 있습니다. 로컬 환경에서 앱 실행 전 단계가 시스템 라이브러리로 막히면 [`docs/ci-workflows-todo.md`](docs/ci-workflows-todo.md)의 E2E runner 준비 항목을 확인합니다.
 
 ## 직접 빌드하기
 

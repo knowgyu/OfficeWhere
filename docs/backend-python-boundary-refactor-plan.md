@@ -2,11 +2,12 @@
 
 작성일: 2026-04-29
 
-상태: **0.6 구조 정리 반영 중**. 2026-04-29 작업에서 검색/버전 관리 중심으로
-미완성 등록 표 메타데이터 의존성을 제거하는 구조 변경을 적용했다.
+상태: **facade-first 구조 정리 진행 중**. 0.6~0.7 작업에서 검색/버전 관리 hot path, comparison artifact storage, library group storage, duplicate-content 조회 seam, rescan/config/file-location seam을 일부 분리했다. `backend/database.py`는 아직 public compatibility facade로 유지한다.
 
 검색/버전관리 hot path의 후속 성능 결정은
 `docs/search-version-performance-roadmap.md`에 모아 둔다.
+
+> 2026-05-05 메모: 이 문서는 장기 방향 기록이다. 현재 코드에서는 `backend/storage/comparison_artifacts.py`, `backend/storage/library_groups.py`, `backend/storage/duplicate_content.py` 같은 저장소 seam이 이미 생겼지만, transaction/schema/FTS 호환성 때문에 `backend/database.py` facade를 한 번에 제거하지 않는다.
 
 ## 목적
 

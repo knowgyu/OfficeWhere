@@ -24,6 +24,7 @@ This document is the source of truth for the 2026-04-30 external architecture re
 - Responsibility refactor wave 1 landed backend `library_*` support seams and frontend consistency result presenters.
 - Responsibility refactor wave 2 landed the frontend API facade split: `transport.ts`, `shared.ts`, `library.ts`, with `client.ts` kept as compatibility facade.
 - Node 24 CI maintenance is complete.
+- Frontend regression baseline landed: Vitest/RTL/MSW tests, Playwright Electron specs, E2E data-dir guard, and `frontend-tests.yml` build/typecheck/Vitest gate.
 - App-data reset now schedules app restart after successful cleanup.
 - Architecture review P0-P3 wave landed as a facade-first strangler pass:
   - Electron arbitrary window-open URLs are limited to `http:` / `https:`.
@@ -69,7 +70,7 @@ This document is the source of truth for the 2026-04-30 external architecture re
 | Item | Why defer |
 | --- | --- |
 | List virtualization dependency | Existing list/group pages are bounded. Add a new virtual-list dependency only after DOM/render profiling shows it is the bottleneck. |
-| Frontend test framework | Valuable before deeper UI refactors, but Vitest/RTL introduces new dev dependencies and maintenance surface. Plan separately. |
+| Full Electron E2E hard gate | Baseline tests exist, but Linux/macOS Electron launch requires runner system dependencies and cost validation. Keep `frontend-tests.yml` as the hard gate until the E2E workflow is proven. |
 | DB engine replacement / async FastAPI rewrite | Current bottlenecks are data shape and hot-path breadth, not proof that SQLite/FastAPI sync routes are the main issue. |
 | Mandatory external file-index dependency | OfficeWhere must remain fully functional with its own scanner/cache path. |
 | Full migration backup by default | Useful for destructive app-owned DB migrations, but it has disk/privacy complexity. Prefer bounded one-generation backup only for risky migrations. |
@@ -125,7 +126,7 @@ Deferred scope:
 1. Extract `FileManager` data-management/app-reset section first if reset/settings work continues.
 2. Extract `FileManager` library settings or file-list presenter when those areas are next touched.
 3. Extract remaining `ConsistencyCheck` group/history controller seams only when version-management UI changes require it.
-4. Decide whether to introduce frontend tests before the next large UI refactor.
+4. Maintain the existing frontend test baseline and add focused tests when the next large UI refactor touches a covered flow.
 
 Success criteria:
 - Existing Korean copy, CSS classes, tutorial markers, snackbar behavior, and import facade compatibility are preserved.
@@ -138,7 +139,7 @@ Completed scope:
 - `FileManager` registered-file list/search/selection/pagination presenter was extracted to `components/file-manager/RegisteredFilesSection.tsx` without moving API calls or state ownership.
 
 Deferred scope:
-- FileManager library settings hook/presenter and frontend test framework remain separate decisions.
+- FileManager library settings hook/presenter remains a separate decision. Full Electron E2E CI remains infrastructure follow-up.
 - No list virtualization dependency was added because current list/group pages are bounded and no profiling evidence justified it.
 
 ### P4 — Optional product/performance follow-ups

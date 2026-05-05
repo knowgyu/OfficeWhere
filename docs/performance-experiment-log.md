@@ -151,7 +151,7 @@ Ask for these files from a user when diagnosing large-library slowness:
 - `parsing-performance.log`
 - OfficeWhere app/backend log if errors occurred
 - Approximate worker count used during the run
-- Whether files were local, mapped/network drive, cloud-synced, or under corporate DRM/EDR
+- Whether files were local, mapped/network drive, cloud-synced, or under corporate document-protection/EDR
 - Whether the log was opened while indexing was still running
 
 Avoid asking for source documents unless absolutely necessary. Logs must be enough for first-pass diagnosis.

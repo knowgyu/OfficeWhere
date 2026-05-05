@@ -59,7 +59,7 @@ Current implementation keeps scheduling intentionally simple. Future scheduling 
 - Prioritize Excel files early and sort Excel candidates by size descending.
 - Reserve roughly half of worker slots for Excel while allowing idle slots to drain Word/PPT work.
 - Do not implement complex per-file cost prediction yet. File size is a weak signal for PPT, but it is a useful first signal for slow Excel files.
-- Python threads are already used. Process-based parsing could bypass more GIL contention, but it is a larger design because payload transfer, cancellation, memory, packaged Python behavior, and DRM/EDR interactions all become more complex.
+- Python threads are already used. Process-based parsing could bypass more GIL contention, but it is a larger design because payload transfer, cancellation, memory, packaged Python behavior, and DLP/EDR/security-tool interactions all become more complex.
 
 ## Performance log interpretation
 

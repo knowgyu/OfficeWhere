@@ -39,7 +39,7 @@
 │                      ─ hangul_search(초성+ngram)                       │
 │                      ─ checker.py / parser.py / normalizer.py          │
 │                                                                        │
-│  database.py(2700줄, SQLite WAL + FTS5)                                │
+│  database.py(약 2.7K줄, SQLite WAL + FTS5)                              │
 │   ─ 11개 테이블 + FTS 가상 테이블 + 마이그레이션 헬퍼                  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -49,7 +49,7 @@
 1. **백엔드는 단일 프로세스**: 사용자 PC에서 `127.0.0.1:18765`(기본)로 떠 있는 FastAPI. 외부 노출 X, CORS는 localhost만.
 2. **DB는 단일 SQLite 파일**: `~/Library/Application Support/OfficeWhere/backend-data/data.db` (macOS 기준). WAL 모드, FTS5 한국어 토크나이저.
 3. **원본 파일은 절대 수정하지 않음**: 읽기 전용. 청크/지문/비교 아티팩트만 DB에 저장.
-4. **프론트엔드 테스트 인프라가 전무**: vitest/jest 모두 미설정. 백엔드는 169개 pytest가 이미 존재.
+4. **프론트엔드 테스트 인프라가 있음**: Vitest/RTL/MSW 단위 테스트와 Playwright Electron E2E spec이 있으며, 기본 CI는 build + E2E typecheck + Vitest를 실행한다.
 5. **Electron 모드 ↔ 웹 dev 모드 모두 지원**: `dev-web.sh`는 backend + Vite 만, packaged Electron은 번들 Python으로 backend 실행.
 
 ---
@@ -400,32 +400,33 @@ TABS = [
 
 ---
 
-## 3. 기존 테스트 (백엔드, 169개)
+## 3. 기존 테스트
 
-[`pytest.ini`](../pytest.ini): `pythonpath=.`, `testpaths=tests`, `norecursedirs=python-runtime frontend venv dist build`. **conftest.py 없음** — 각 테스트가 독립적으로 fixture 구성.
+[`pytest.ini`](../pytest.ini): `pythonpath=.`, `testpaths=tests`, `norecursedirs=python-runtime frontend venv dist build`. **conftest.py 없음** — 각 테스트가 독립적으로 fixture 구성. 2026-05-05 현재 전체 pytest 실행 기준은 177 passed 이다.
 
-### 3.1 테스트 파일 매핑
+### 3.1 백엔드 pytest 파일 매핑
 
 | 파일 | 줄 | 테스트 | 대상 |
 |---|---|---|---|
-| [`test_checker.py`](../tests/test_checker.py) | 938 | 23 | `checker`, `excel_diff_grid`, 비교 전반 |
-| [`test_search.py`](../tests/test_search.py) | 638 | 33 | `indexer`, `search`, FTS, 한글 |
-| [`test_library_groups.py`](../tests/test_library_groups.py) | 461 | 15 | 버전 그룹, 문서 정체성 파싱 |
-| [`test_library_rescan.py`](../tests/test_library_rescan.py) | 910 | 31 | rescan 플로우, 스케줄러, 설정 |
-| [`test_database_schema.py`](../tests/test_database_schema.py) | 134 | 4 | `init_db`, 마이그레이션, 레거시 정리 |
-| [`test_document_fingerprints.py`](../tests/test_document_fingerprints.py) | 186 | 9 | 지문/중복 |
-| [`test_excel_streaming.py`](../tests/test_excel_streaming.py) | 132 | 7 | Excel 분석, 독립 import 검증 |
-| [`test_files_api.py`](../tests/test_files_api.py) | 134 | 7 | files API (list/remove/show) |
-| [`test_ppt_compare.py`](../tests/test_ppt_compare.py) | 112 | 3 | PPT 슬라이드 DP 정렬 |
-| [`test_compare_artifacts.py`](../tests/test_compare_artifacts.py) | 173 | 5 | 비교 아티팩트 zlib 저장소 |
-| [`test_file_access.py`](../tests/test_file_access.py) | 64 | 4 | `inspect_file_path` |
-| [`test_ppt_analysis.py`](../tests/test_ppt_analysis.py) | 60 | 4 | PPT 위치 좌표 |
-| [`test_hangul_search.py`](../tests/test_hangul_search.py) | 34 | 5 | 초성/trigram/정규화 (순수 함수) |
-| [`test_env_config.py`](../tests/test_env_config.py) | 90 | 8 | OW_* 환경변수 |
-| [`test_duplicate_files.py`](../tests/test_duplicate_files.py) | 34 | 1 | 중복 그룹 조회 |
-| [`test_runtime_packaging.py`](../tests/test_runtime_packaging.py) | 154 | 8 | 번들 Python, 릴리스 |
-| [`test_tutorial_examples.py`](../tests/test_tutorial_examples.py) | 82 | 2 | 튜토리얼 라이브러리 |
-| [`test_index_perf.py`](../tests/test_index_perf.py) | 18 | 1 | 성능 로그 파싱 |
+| [`test_checker.py`](../tests/test_checker.py) | 939 | 23 | `checker`, `excel_diff_grid`, 비교 전반 |
+| [`test_search.py`](../tests/test_search.py) | 639 | 33 | `indexer`, `search`, FTS, 한글 |
+| [`test_library_groups.py`](../tests/test_library_groups.py) | 462 | 15 | 버전 그룹, 문서 정체성 파싱 |
+| [`test_library_rescan.py`](../tests/test_library_rescan.py) | 911 | 31 | rescan 플로우, 스케줄러, 설정 |
+| [`test_database_schema.py`](../tests/test_database_schema.py) | 135 | 4 | `init_db`, 마이그레이션, 레거시 정리 |
+| [`test_document_fingerprints.py`](../tests/test_document_fingerprints.py) | 187 | 9 | 지문/중복 |
+| [`test_excel_streaming.py`](../tests/test_excel_streaming.py) | 133 | 7 | Excel 분석, 독립 import 검증 |
+| [`test_files_api.py`](../tests/test_files_api.py) | 135 | 7 | files API (list/remove/show) |
+| [`test_ppt_compare.py`](../tests/test_ppt_compare.py) | 113 | 3 | PPT 슬라이드 DP 정렬 |
+| [`test_compare_artifacts.py`](../tests/test_compare_artifacts.py) | 174 | 5 | 비교 아티팩트 zlib 저장소 |
+| [`test_file_access.py`](../tests/test_file_access.py) | 65 | 4 | `inspect_file_path` |
+| [`test_ppt_analysis.py`](../tests/test_ppt_analysis.py) | 61 | 4 | PPT 위치 좌표 |
+| [`test_hangul_search.py`](../tests/test_hangul_search.py) | 35 | 5 | 초성/trigram/정규화 (순수 함수) |
+| [`test_env_config.py`](../tests/test_env_config.py) | 91 | 8 | OW_* 환경변수 |
+| [`test_e2e_guard.py`](../tests/test_e2e_guard.py) | 72 | 5 | E2E data-dir 안전장치 |
+| [`test_duplicate_files.py`](../tests/test_duplicate_files.py) | 35 | 1 | 중복 그룹 조회 |
+| [`test_runtime_packaging.py`](../tests/test_runtime_packaging.py) | 155 | 8 | 번들 Python, 릴리스 |
+| [`test_tutorial_examples.py`](../tests/test_tutorial_examples.py) | 83 | 2 | 튜토리얼 라이브러리 |
+| [`test_index_perf.py`](../tests/test_index_perf.py) | 19 | 1 | 성능 로그 파싱 |
 
 ### 3.2 표준 테스트 패턴
 
@@ -472,11 +473,11 @@ assert response.id > 0
 |---|---|---|
 | `/api/search/reindex`, `/settings` | ❌ | 라우터 함수 미테스트 |
 | `/api/library/rescan/status`, `/cancel`, `/groups/{id}/latest-file` | ❌/⚠️ | 내부만 테스트, 라우터 미테스트 |
-| FastAPI HTTP 통합 (TestClient) | ❌ | 모든 API가 함수 직접 호출만 |
-| 프론트엔드 전체 | ❌ | 인프라 자체 없음 |
+| FastAPI HTTP 통합 (TestClient) | ❌ | 대부분 API가 함수 직접 호출 중심 |
+| 프론트엔드 단위 | ✅/⚠️ | Vitest/RTL/MSW baseline 있음. React `act(...)` warning 정리는 남음 |
+| Playwright Electron E2E | ✅/⚠️ | spec/fixture 있음. CI는 현재 typecheck까지, full Linux launch는 system deps 고정 후 승격 |
 | 캐시 프루닝 | ⚠️ | 단순 TTL만 |
-| Electron IPC | ❌ | 테스트 환경 없음 |
-| DRM 문서 | 📄 | 수동 testbed (`docs/drm-python-testbed.md`) |
+| 보호 문서 | 📄 | 수동 testbed (`docs/drm-python-testbed.md`) |
 
 ---
 
@@ -533,85 +534,41 @@ def test_search_endpoint_validates_query(client):
 - **mtime 기반 캐시 무효화**: 파일 touch → 비교 결과 재계산 트리거
 - **한글 초성 매칭**: `"회의"` 검색 → `"ㅎㅇ"` 입력으로도 동일 파일 매칭
 
-### 4.2 프론트엔드 — 인프라 도입
+### 4.2 프론트엔드 — 현재 테스트 baseline
 
-권장 스택:
+현재 프론트엔드는 Vitest/RTL/MSW 단위 테스트와 Playwright Electron E2E spec을 함께 둔다. 새 테스트를 추가할 때는 [`docs/test-guidelines.md`](test-guidelines.md)를 우선 참고한다.
 
-```json
-"devDependencies": {
-  "vitest": "^1.0.0",
-  "@testing-library/react": "^14.0.0",
-  "@testing-library/user-event": "^14.0.0",
-  "@testing-library/jest-dom": "^6.1.0",
-  "jsdom": "^22.0.0",
-  "msw": "^2.0.0"
-}
-```
+현재 구성:
 
-`vitest.config.ts`:
+- `frontend/vitest.config.ts` — jsdom, global setup, MSW server.
+- `frontend/src/test/setup.ts` — test DOM/localStorage/matchMedia 초기화. `window.officeWhere`는 자동 주입하지 않고 필요한 테스트가 `installBridge()`를 호출한다.
+- `frontend/src/test/utils.tsx` — `DisplaySettings`, `LibraryRescan`, `Snackbar` provider wrapper.
+- `frontend/src/test/msw/handlers.ts` — backend endpoint 기본 mock 응답.
+- `frontend/src/api/*.test.ts`, `frontend/src/contexts/*.test.tsx`, `frontend/src/components/*.test.tsx`, `frontend/src/ui/*.test.tsx` — co-located unit/component tests.
 
-```ts
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
+우선순위:
 
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: ['./src/test/setup.ts'],
-  },
-})
-```
+1. **API 계층** — `transport.ts`, `client.ts`, `library.ts`.
+2. **Context** — `DisplaySettingsContext`, `LibraryRescanContext`.
+3. **UI 키트** — `Button`, `Dialog`, `TextField`, Snackbar 계열.
+4. **메인 컴포넌트** — `FileSearch`, `FileManager`, `ConsistencyCheck`, `DuplicateFiles`, `OnboardingCarousel`.
+5. **통합** — Playwright로 boot/golden path/검색 필터/변경 이력/같은 내용 문서/IPC.
 
-`src/test/setup.ts` 핵심 mock:
+컴포넌트 테스트 시 주의사항:
 
-```ts
-import '@testing-library/jest-dom'
+- **타이머**: debounce/폴링 → `vi.useFakeTimers()` + `vi.advanceTimersByTime()` 또는 user-event의 timer 연동.
+- **비동기 렌더**: `await waitFor(() => ...)` 또는 `findBy*`. 현재 일부 테스트는 통과하지만 `act(...)` warning이 남아 있어, 해당 컴포넌트 수정 시 함께 정리한다.
+- **아이콘/동일 텍스트**: role/name 우선, 정말 구분이 안 되는 곳만 `data-testid`.
+- **Tour target**: `[data-tour-target="..."]`는 튜토리얼용 계약이므로 테스트 셀렉터와 책임을 섞지 않는다.
 
-// localStorage
-Object.defineProperty(window, 'localStorage', {
-  value: { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn(), clear: vi.fn() }
-})
+### 4.3 Playwright Electron E2E
 
-// matchMedia
-window.matchMedia = vi.fn().mockImplementation(q => ({
-  matches: false, media: q, addListener: vi.fn(), removeListener: vi.fn(),
-  addEventListener: vi.fn(), removeEventListener: vi.fn(),
-}))
+Playwright E2E는 `frontend/tests/e2e/fixtures.ts`가 실제 Electron 앱을 띄우고, Electron main process가 dev venv Python backend를 시작하는 구조다. 핵심 안전장치는 다음과 같다.
 
-// Electron preload bridge
-Object.defineProperty(window, 'officeWhere', {
-  value: {
-    getBackendBaseUrl: vi.fn(() => Promise.resolve('http://127.0.0.1:18765')),
-    pickFile:   vi.fn(() => Promise.resolve({ cancelled: true, path: '' })),
-    pickFolder: vi.fn(() => Promise.resolve({ cancelled: true, folder_path: '' })),
-    // ... 나머지 채널은 필요 시 추가
-  }, configurable: true,
-})
-```
-
-#### 우선순위
-
-1. **API 계층** — `transport.ts`(URL 결정), `client.ts`(주요 함수), `library.ts`. axios mock or MSW.
-2. **Context** — `DisplaySettingsContext`(localStorage 영속화, 테마), `LibraryRescanContext`(700ms 폴링, Snackbar 호출).
-3. **UI 키트** — `Button`, `Dialog`, `Snackbar`, `TextField` (props × 상호작용).
-4. **메인 컴포넌트** — `FileSearch`(debounce 600ms, 필터, 페이징), `FileManager`(rescan 트리거, 폴더 추가), `ConsistencyCheck`(그룹 필터, 비교 결과 렌더).
-5. **통합** — App 탭 전환, 투어 가이드, 온보딩.
-
-#### 컴포넌트 테스트 시 주의사항
-
-- **타이머**: debounce/폴링 → `vi.useFakeTimers()` + `vi.advanceTimersByTime()`
-- **비동기 렌더**: `await waitFor(() => ...)` 또는 `findBy*`
-- **Material Icons**: 아이콘은 `<span class="material-symbols-rounded">name</span>` 형태 — 테스트는 텍스트보다 `data-testid` 권장
-- **Tour target**: `[data-tour-target="..."]` 셀렉터 살아있는지 회귀 테스트로 검증
-
-### 4.3 E2E (선택적)
-
-Playwright + 실제 backend(`dev-web.sh` 띄워둔 상태) 구성 가능. 단,
-- DB 격리 위해 `OW_DATA_DIR`을 임시 폴더로 지정한 backend 인스턴스 별도 기동
-- 테스트 폴더로 `examples/officewhere_test_library` 활용
-- 테스트당 `delete_all_files()` 호출로 정리
+- `OW_E2E=1`, `OW_E2E_ALLOW=1`, 임시 `OW_DATA_DIR`를 주입해 사용자 실제 app-data 경로 접근을 backend guard에서 거절한다.
+- `examples/officewhere_test_library`를 테스트별 임시 폴더로 복사한 뒤 등록한다. 체크아웃된 원본 예제 폴더는 직접 등록하지 않는다.
+- `tests/e2e/*.spec.ts`는 boot, golden path, 검색 필터, 변경 이력, 같은 내용 문서, rescan cancel, app-data/update IPC를 나눠 검증한다.
+- CI 기본 게이트는 아직 full Electron launch 대신 `npx tsc -p tsconfig.e2e.json`로 E2E spec 타입 안정성을 확인한다. Linux full E2E는 `libasound`, GTK/GBM, Xvfb 같은 runner 시스템 의존성을 고정한 뒤 별도 workflow로 승격한다.
 
 ---
 
@@ -632,14 +589,13 @@ Playwright + 실제 backend(`dev-web.sh` 띄워둔 상태) 구성 가능. 단,
 
 ## 6. 다음 단계 제안
 
-테스트를 새로 작성한다면 이 순서로 시작하길 권장:
+테스트/문서 정리는 이제 "인프라 도입"이 아니라 baseline 유지와 빈틈 보강 단계다.
 
-1. **백엔드 HTTP 통합 테스트 도입** — `TestClient` fixture를 conftest.py에 두고 `/api/health`, `/api/search`, `/api/check`부터.
-2. **프론트엔드 vitest 설정** — `src/test/setup.ts` + 첫 테스트로 `transport.ts` (가장 단순, 의존성 적음).
-3. **Context 테스트** — `DisplaySettingsContext`는 localStorage/matchMedia만 mock 하면 끝. 빠르게 ROI.
-4. **api/client 테스트** — MSW로 모든 엔드포인트 mock → 컴포넌트 테스트의 기반.
-5. **컴포넌트 테스트** — `FileSearch`(debounce), `LibraryRescanContext`(폴링)부터. 그 후 `ConsistencyCheck`.
-6. **회귀 시나리오** — 마이그레이션, 재인덱싱 동시성, 한글 초성, mtime 캐시 무효화.
+1. **React `act(...)` warning 정리** — 현재 Vitest는 통과하지만 로그가 noisy하다. affected component를 건드릴 때 테스트 await/timer 경계를 함께 정리한다.
+2. **백엔드 HTTP 통합 테스트 도입** — `TestClient` fixture를 별도 계획으로 두고 `/api/health`, `/api/search`, `/api/check`부터 시작한다.
+3. **Full Electron E2E CI 승격** — Linux runner의 `libasound`, GTK/GBM, Xvfb 의존성을 고정한 뒤 `docs/ci-workflows-todo.md` 기반으로 별도 workflow를 추가한다.
+4. **E2E coverage 보강** — 사용자가 실제로 많이 쓰는 검색 → 변경 이력 → 같은 내용 문서 흐름에서 regressions가 반복되는 부분만 spec을 늘린다.
+5. **문서 링크/상태 유지** — 새 workflow나 test command가 생기면 `README.md`, `docs/README.md`, `docs/test-guidelines.md`, `docs/release-test-checklist.md`를 같이 갱신한다.
 
 ---
 
@@ -648,7 +604,7 @@ Playwright + 실제 backend(`dev-web.sh` 띄워둔 상태) 구성 가능. 단,
 | 문서 | 요약 |
 |---|---|
 | [`docs/release-test-checklist.md`](release-test-checklist.md) | 릴리스 전 자동 + 수동 검증 항목 |
-| [`docs/drm-python-testbed.md`](drm-python-testbed.md) | DRM 문서 호환성 수동 검증 절차 |
+| [`docs/drm-python-testbed.md`](drm-python-testbed.md) | 보호 문서 호환성 수동 검증 절차 |
 | [`docs/architecture-review-roadmap.md`](architecture-review-roadmap.md) | 아키텍처 리뷰 로드맵 |
 | [`docs/backend-python-boundary-refactor-plan.md`](backend-python-boundary-refactor-plan.md) | 백엔드 경계 리팩터링 계획 |
 | [`docs/indexing-performance-fast-mode.md`](indexing-performance-fast-mode.md) | fast 모드 성능 노트 |
@@ -673,4 +629,5 @@ Playwright + 실제 backend(`dev-web.sh` 띄워둔 상태) 구성 가능. 단,
 | `storage/duplicate_content.py` | `test_duplicate_files.py` | 같은 해시 다른 mtime |
 | `storage/library_groups.py` | (간접) | upsert 충돌, dirty key 처리 |
 | `database.py` | `test_database_schema.py` | 각 마이그레이션 함수 단위 |
-| Frontend 전체 | (없음) | vitest 도입부터 |
+| Frontend API/Context/UI | `frontend/src/api/*.test.ts`, `frontend/src/contexts/*.test.tsx`, `frontend/src/components/*.test.tsx`, `frontend/src/ui/*.test.tsx` | React `act(...)` warning 정리, 큰 화면 흐름별 focused tests |
+| Electron E2E | `frontend/tests/e2e/*.spec.ts` | Linux full E2E CI 승격, macOS packaged smoke |

@@ -28,7 +28,7 @@ OfficeWhere should behave as a **last-index snapshot** tool:
 - Opening source files should happen mainly during explicit indexing/rescan/refresh, not during every normal UI navigation.
 - If a file changes after the last index and the user has not refreshed, showing the last-indexed result is not a program error.
 - A light warning is useful when the app can cheaply see that a source file appears newer than its indexed timestamp: “이 문서는 마지막 색인 이후 수정된 것 같습니다. 최신 내용으로 보려면 새로고침하세요.” The warning should not force a re-read or block the comparison.
-- Avoid live fingerprint verification on compare/detail paths. Re-reading or hashing source files just to prove freshness defeats the main goal, especially on corporate PCs with antivirus, DLP, EDR, or DRM hooks.
+- Avoid live fingerprint verification on compare/detail paths. Re-reading or hashing source files just to prove freshness defeats the main goal, especially on corporate PCs with antivirus, DLP, EDR, or document-protection/security hooks.
 
 Derived tables and artifacts are **rebuildable caches**, not source of truth. If they become incompatible, corrupt, or version-mismatched, the safe recovery is to rebuild them from indexed files during refresh/repair. The source documents remain untouched.
 

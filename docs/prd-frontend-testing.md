@@ -1,14 +1,25 @@
 # PRD: 프론트엔드 테스트 자동화 (Vitest 단위 + Playwright Electron E2E)
 
 > 발행일: 2026-05-05
-> 상태: needs-triage
+> 상태: baseline-implemented; full Electron E2E CI remains follow-up
 > 관련 문서: [`docs/test-architecture-guide.md`](test-architecture-guide.md), [`docs/release-test-checklist.md`](release-test-checklist.md)
 
 ---
 
+## 2026-05-05 Status Update
+
+이 PRD는 원래 "프론트엔드 테스트 baseline이 없던 상태"를 해결하기 위해 작성된 계획이다. 현재 main에는 다음 baseline이 이미 들어와 있다.
+
+- Vitest/RTL/MSW harness와 co-located unit/component tests.
+- Playwright Electron fixtures와 boot/golden-path/search/version/duplicates/IPC E2E specs.
+- Backend E2E data-directory guard.
+- `.github/workflows/frontend-tests.yml` 기본 CI: renderer build, Electron main build, `tsconfig.e2e.json` 타입체크, Vitest.
+
+아직 남은 것은 full Electron E2E를 PR hard gate로 올리는 일이다. Linux runner에서 Electron launch에 필요한 `libasound`, GTK/GBM, Xvfb 같은 system dependency를 고정한 뒤 [`ci-workflows-todo.md`](ci-workflows-todo.md)의 후속 workflow를 추가한다.
+
 ## Problem Statement
 
-OfficeWhere는 데스크톱이 메인인 제품이지만, 프론트엔드/Electron 영역은 **자동 회귀 안전망이 전혀 없는 상태**다. 백엔드는 169개 pytest로 보호받지만, React 컴포넌트(56KB짜리 `FileManager.tsx`, 58KB짜리 `ConsistencyCheck.tsx` 같은 대형 파일 포함)와 Electron IPC 14채널, 그리고 backend spawn → health check 부팅 흐름은 사용자가 직접 앱을 켜고 클릭해봐야만 회귀가 발견된다.
+OfficeWhere는 데스크톱이 메인인 제품이므로 프론트엔드/Electron 영역도 자동 회귀 안전망이 필요하다. 이 문서 작성 당시에는 이 영역의 자동화가 없었지만, 현재는 Vitest baseline과 Playwright E2E spec/typecheck가 들어와 있다. 남은 위험은 실제 Electron launch를 CI hard gate로 돌릴 runner system dependency가 아직 고정되지 않았다는 점이다.
 
 [`docs/release-test-checklist.md`](release-test-checklist.md)의 수동 검증 항목 다수가 이 영역이며, 카피 변경(예: v0.7.11 calmer release)·rescan 폴링 타이밍·backend 부팅 실패·IPC 핸들러 동기화 깨짐 같은 회귀가 릴리스 직전에야 발견되는 비용이 누적되고 있다. 데스크톱-first 제품에서 가장 비싼 종류의 회귀(앱이 안 켜짐, golden path가 막힘)가 검증 공백에 노출되어 있다.
 
@@ -51,7 +62,7 @@ OfficeWhere는 데스크톱이 메인인 제품이지만, 프론트엔드/Electr
 23. As a developer adding a new backend endpoint, I want a clear pattern for adding the corresponding MSW handler so that frontend tests can immediately use it.
 24. As a maintainer concerned about CI cost, I want all PR-time CI to run on free Linux runners only, so that running tests on every push doesn't accumulate billing.
 25. As a maintainer, I want a `concurrency: cancel-in-progress` policy so that pushing a new commit cancels the previous run on the same branch, saving CI minutes.
-26. As a contributor running the suite locally for the first time, I want documented setup steps (Python venv, npm install, Playwright browsers install) so that I can run tests within minutes of cloning.
+26. As a contributor running the suite locally for the first time, I want documented setup steps (Python venv, npm install, Electron system dependency 준비) so that I can run tests within minutes of cloning.
 27. As a developer, I want test fixtures to copy `examples/officewhere_test_library/` into a temp directory rather than registering it directly, so that running a test never causes the user's checkout copy to be modified by accident.
 28. As a developer, I want every E2E test to assert at the start that `OW_DATA_DIR` is a temp path, so that a misconfigured launch fails loudly instead of silently writing to user data.
 29. As a developer, I want the E2E backend to be the dev venv (not the bundled `python-runtime/`) for PR runs, so that tests don't require a full package build to execute.
@@ -105,24 +116,24 @@ OfficeWhere는 데스크톱이 메인인 제품이지만, 프론트엔드/Electr
 
 - **API layer tests** (`src/api/*.test.ts`) use **MSW** with full handler coverage for ~30 backend endpoints. Default handlers return success; tests override per scenario via `server.use(...)`.
 - **Component tests** mock the `api` object directly via `vi.mock('../api/client', ...)`. Components don't see HTTP — they see typed responses.
-- **Context tests** mock `api` directly and additionally mock `localStorage`, `matchMedia`, and `window.officeWhere` via global setup.
+- **Context tests** mock `api` directly and additionally use localStorage/matchMedia helpers. `window.officeWhere` is installed explicitly with `installBridge()` only in tests that need the Electron bridge.
 
 ### File organization
 
 - Vitest tests are **co-located**: `Component.test.tsx` next to `Component.tsx`.
-- Playwright tests live under `frontend/tests/e2e/` with subfolders for `fixtures/` and `support/`.
+- Playwright tests live under `frontend/tests/e2e/`, with shared helpers in `fixtures.ts`, `global-setup.ts`, and `window.d.ts`.
 - Shared Vitest setup lives at `frontend/src/test/` (setup.ts, msw/handlers.ts, msw/server.ts, utils.tsx).
 - `*.test.tsx` and `tests/e2e/**` are excluded from the production tsconfig build.
 
 ### CI workflows
 
-Three new workflows, all in `.github/workflows/`:
+Target workflow shape:
 
-1. **frontend-fast.yml** — Vitest on `ubuntu-latest`. Triggers: PR + push to main. Hard PR gate.
-2. **frontend-e2e.yml** — Playwright Electron via Xvfb on `ubuntu-latest`. Triggers: PR + push to main. Hard PR gate. Retry=1. Uploads traces/videos on failure.
-3. **frontend-e2e-mac.yml** — Packaged `.app` smoke (Tier 1 only) on `macos-14`. Trigger: `workflow_dispatch` only. Not a gate; informational.
+1. **Implemented: `frontend-tests.yml`** — renderer build, Electron main build, Playwright E2E TypeScript check, Vitest on `ubuntu-latest`. Triggers: PR/push paths for frontend workflow changes.
+2. **Follow-up: `frontend-e2e.yml`** — Playwright Electron via Xvfb on `ubuntu-latest`. Add only after system deps and runtime cost are verified.
+3. **Follow-up: `frontend-e2e-mac.yml`** — packaged `.app` smoke (Tier 1 only) on `macos-14`. Trigger: `workflow_dispatch` only. Not a gate; informational.
 
-Existing `release.yml` is untouched. All workflows use `concurrency: cancel-in-progress` and aggressive caching (npm, Python venv, Electron, Playwright browsers).
+Existing `release.yml` remains the desktop artifact publisher. Workflows should use `concurrency: cancel-in-progress` and dependency caches where practical.
 
 Coverage is reported as artifact only — no threshold gate initially. Adding a ratchet is a future decision once a baseline stabilizes.
 
@@ -158,7 +169,7 @@ These five modules are deep in the sense that scenario test files only depend on
 | 5 | Playwright Tier 2 E2E (consistency, duplicates, search filters, rescan cancel) | 3–5 days |
 | 6 | Playwright IPC E2E (app data, update check) + CI workflows + docs | 2–3 days |
 
-Total estimate: 2–3 weeks of focused work. Phases 1–3 are unblocked once Phase 0 lands; Phases 4–6 require Phase 0.
+Current status: Phase 0 through the baseline test/spec work has landed. Treat full Electron E2E CI and macOS packaged smoke as follow-up infrastructure work, not as missing unit-test baseline.
 
 ### Test data
 
@@ -232,18 +243,18 @@ Total estimate: 2–3 weeks of focused work. Phases 1–3 are unblocked once Pha
 ### Risks and mitigations
 
 - **Xvfb limitations**: Native dialogs and tray interactions don't drive reliably under Xvfb. Mitigation: IPC handlers gain deterministic `OW_E2E` branches for `dialog:pick-*`. Tray-related E2E is out of scope.
-- **Backend boot flakiness**: The 30-second health-check loop in [`electron/main.ts`](frontend/electron/main.ts) can flake on slow runners. Mitigation: retry=1 in CI; longer timeout in fixture (60s) for first-launch cold-cache scenarios.
+- **Backend boot flakiness**: The 30-second health-check loop in [`electron/main.ts`](../frontend/electron/main.ts) can flake on slow runners. Mitigation: retry=1 in CI; longer timeout in fixture (60s) for first-launch cold-cache scenarios.
 - **examples folder drift**: If a contributor regenerates `examples/officewhere_test_library/` with different content, all related E2E asserts may break. Mitigation: tests assert structural facts ("a result containing 회의 appears") rather than exact match counts; CI step verifies generator output is byte-stable on Ubuntu/macOS or — as fallback — regenerates from `scripts/generate_demo_cases.py` before each run.
 - **Single-instance bypass during local development**: A developer running `OW_E2E=1` could accidentally start a second OfficeWhere alongside their real one. Mitigation: backend guard refuses unless `OW_DATA_DIR` is a tmp path, so a real second instance still cannot write to user data.
 
 ### Documentation
 
-[`docs/test-architecture-guide.md`](test-architecture-guide.md) (already published) is the design reference. After Phase 6, update [`docs/release-test-checklist.md`](release-test-checklist.md) to remove items now covered by automated suites and add a "before tagging release: run macOS E2E workflow" step.
+[`docs/test-architecture-guide.md`](test-architecture-guide.md) (already published) is the design reference. Keep [`docs/release-test-checklist.md`](release-test-checklist.md) updated as CI coverage changes. Do not mark full Electron E2E as automated until the workflow exists and has passed on the target runner.
 
 ### Success criteria
 
-- Phase 6 complete: PR opened against main triggers Vitest + Linux E2E automatically; both pass.
-- Tier 1 E2E (`boot`, `golden-path`) passes on macOS workflow_dispatch run before each release tag.
-- Vitest covers ≥ 60% of `src/` lines after Phase 3 (reported, not gated).
-- Zero regressions to existing release pipeline (release.yml unchanged).
-- A new contributor can run `npm test && npm run test:e2e` locally within 10 minutes of cloning, given Python venv and Node already installed.
+- Baseline complete: PR/push path runs renderer build, Electron build, E2E TypeScript check, and Vitest.
+- Follow-up complete: Linux full E2E workflow passes with pinned system deps and uploads traces on failure.
+- Release follow-up complete: Tier 1 E2E (`boot`, `golden-path`) passes on macOS workflow_dispatch before release tags.
+- Zero regressions to existing release pipeline.
+- A new contributor can run `npm test`, `npx tsc -p tsconfig.e2e.json`, and targeted E2E specs once local Electron system deps are present.

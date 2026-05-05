@@ -3,12 +3,17 @@
 Use this checklist before publishing a release tag.
 
 ## Automated verification
-- [ ] `./venv/bin/python -m pytest` passes.
-- [ ] `cd frontend && npm run build` passes.
-- [ ] `cd frontend && npm run build:electron` passes.
-- [ ] `git diff --check` passes.
+- [ ] `./venv/bin/python -m pytest -q` passes.
 - [ ] `./venv/bin/python -m compileall backend backend_server.py -q` passes.
 - [ ] `./venv/bin/python scripts/run_demo_checks.py` passes.
+- [ ] `cd frontend && npm run build` passes.
+- [ ] `cd frontend && npm run build:electron` passes.
+- [ ] `cd frontend && npx tsc -p tsconfig.e2e.json` passes.
+- [ ] `cd frontend && npm run test:run` passes.
+- [ ] `git diff --check` passes.
+- [ ] GitHub `Frontend tests` workflow passes on the verified commit.
+
+Note: full Playwright Electron execution may need OS libraries (`libasound`, GTK/GBM, Xvfb on Linux). Do not treat a missing local system library as a product regression; pin the runner dependencies before making full E2E a hard release gate.
 
 ## Document registration and search
 - [ ] Register a folder containing Excel, Word, and PowerPoint files.
@@ -60,11 +65,12 @@ Use this checklist before publishing a release tag.
 
 ## Release
 - [ ] Version is bumped in `frontend/package.json` and `frontend/package-lock.json`.
-- [ ] Release notes summarize user-visible changes.
+- [ ] Release notes in `docs/releases/vX.Y.Z.md` summarize user-visible changes and known verification limits.
 - [ ] Git tag `vX.Y.Z` points at the verified commit.
 - [ ] Push the verified branch/tag. Tag push builds Actions artifacts and publishes a GitHub Release.
 - [ ] If manually rebuilding, run `workflow_dispatch` with `release_tag` set to the verified tag.
 - [ ] Confirm the GitHub Release contains Windows x64 zip, macOS arm64 dmg/zip, and matching SHA256 files.
+- [ ] Confirm the macOS dmg/zip app bundle contains `Contents/Resources/python-runtime/bin/python3` and `Contents/Resources/backend-source/backend_server.py`.
 - [ ] From the previous packaged Windows version, confirm the update dialog shows `zip 다운로드`, downloads/verifies the zip into the Downloads folder, opens the file location, and leaves the current app/data untouched.
 - [ ] Confirm a missing/bad `.sha256.txt` aborts before extraction/replacement and the current app remains usable.
 - [ ] Confirm a download or SHA256 verification failure leaves the current app usable and shows a clear modal error.

@@ -6,12 +6,7 @@ Electron은 OfficeWhere의 기본 데스크톱 shell이다. Python/FastAPI/SQLit
 
 - Electron main process가 backend server를 실행하고 종료 시 정리한다.
 - backend는 `127.0.0.1`의 사용 가능한 포트에 바인딩한다.
-- preload bridge는 OfficeWhere용 제한된 함수만 `window.officeWhere`에 노출한다.
-  - `getBackendBaseUrl`
-  - `pickFile`
-  - `pickFolder`
-  - `getAppVersion`
-  - `getLogPath`
+- preload bridge는 OfficeWhere용 제한된 함수만 `window.officeWhere`에 노출한다. 현재 주요 범위는 backend URL, 파일/폴더 선택, 앱 버전/로그/앱 데이터 경로, 앱 데이터 정리, 창 닫기/시작 프로그램 설정, 예제 라이브러리 경로, 업데이트 확인/다운로드, 릴리스 페이지 열기, 폴더에서 보기이다.
 - renderer는 Office 파일을 직접 파싱하지 않는다.
 - API key나 외부 provider 설정이 생기면 backend 설정 계층에서 관리한다.
 
@@ -54,6 +49,15 @@ build.bat
 
 Packaged Windows app은 `resources/python-runtime/python.exe`로 `resources/backend-source/backend_server.py`를 실행한다. 사용자는 Python이나 pip를 별도로 설치하지 않는다.
 
+## macOS 빌드
+
+```bash
+cd frontend
+npm run package:mac
+```
+
+`package:mac`은 `scripts/prepare_python_runtime.py mac-arm64`를 먼저 실행해 `python-runtime/mac-arm64/bin/python3` 런타임을 준비한 뒤 Electron Builder로 dmg/zip을 만든다. 생성된 macOS runtime 바이너리는 git에 커밋하지 않고 `.gitignore`로 제외한다. Release workflow는 macOS runner에서 이 runtime을 캐시하고 패키징한다.
+
 ## Backend 환경 변수
 
 OfficeWhere backend는 `OW_*` 환경 변수만 읽는다.
@@ -65,6 +69,10 @@ OfficeWhere backend는 `OW_*` 환경 변수만 읽는다.
 | `OW_DATA_DIR` | SQLite data directory |
 | `OW_LOG_LEVEL` | uvicorn log level |
 | `OW_MAX_WORKERS` | Office parsing worker cap |
+| `OW_RESCAN_BATCH_FLUSH_FILE_LIMIT` | rescan staging flush file-count threshold diagnostic override |
+| `OW_RESCAN_BATCH_FLUSH_CHUNK_LIMIT` | rescan staging flush chunk-count threshold diagnostic override |
+| `OW_RESCAN_BATCH_FLUSH_INTERVAL_SECONDS` | rescan staging flush interval diagnostic override |
+| `OW_RESCAN_INITIAL_STAGING_FILE_THRESHOLD` | initial staging DB threshold diagnostic override |
 
 Electron 개발 실행에서 Python interpreter를 직접 지정할 때도 `OW_*` 이름을 우선한다.
 

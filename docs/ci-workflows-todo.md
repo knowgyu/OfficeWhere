@@ -1,23 +1,23 @@
 # E2E CI 워크플로우 청사진 (Phase 6 후속 부분)
 
-> 기본 프론트엔드 Build + Vitest 게이트는 `.github/workflows/frontend-tests.yml`에 구현되어 있습니다. 이 문서는 Electron E2E와 macOS 수동 검증처럼 후속으로 분리할 CI를 정리한 가이드입니다.
+> 기본 프론트엔드 Build + E2E typecheck + Vitest 게이트는 `.github/workflows/frontend-tests.yml`에 구현되어 있습니다. 이 문서는 Electron E2E와 macOS 수동 검증처럼 후속으로 분리할 CI를 정리한 가이드입니다.
 > 다른 OS / runner 환경에서 직접 PR 만들 때 이 문서를 그대로 보고 작성하면 됩니다.
 >
 > 관련 문서: [`docs/prd-frontend-testing.md`](prd-frontend-testing.md), [`docs/test-architecture-guide.md`](test-architecture-guide.md), [`docs/test-guidelines.md`](test-guidelines.md)
 
-## 왜 미구현인가
+## 왜 후속으로 분리했나
 
 이 워크플로우는 macOS 로컬에서 검증할 수 없는 부분이 큽니다:
 - Linux Xvfb 환경에서 Electron + 한글 파일명 + 시스템 패키지 의존성이 어떻게 풀리는지 직접 돌려봐야 함
 - GitHub Actions 의 free public repo 한도 내에서 실제 실행 시간 측정 필요
 - macOS runner 의 quarantine / Gatekeeper 가 packaged `.app` 에 어떻게 작용하는지 manual dispatch 1회 검증 필요
 
-따라서 빠른 프론트엔드 Build + Vitest 게이트는 먼저 자동화하고, Electron E2E / macOS 수동 검증은 별도 PR 로 다른 환경에서 검증하면서 진행합니다.
+따라서 빠른 프론트엔드 Build + E2E typecheck + Vitest 게이트는 먼저 자동화하고, Electron E2E / macOS 수동 검증은 별도 PR 로 다른 환경에서 검증하면서 진행합니다.
 
 ## 구현 시 체크리스트
 
 - [ ] OfficeWhere repo 가 GitHub public 인지 확인 (Linux + Windows 무료, macOS 만 분당 과금)
-- [x] `.github/workflows/frontend-tests.yml` 추가 (Build + Vitest 게이트)
+- [x] `.github/workflows/frontend-tests.yml` 추가 (Build + E2E typecheck + Vitest 게이트)
 - [ ] `.github/workflows/frontend-e2e.yml` 추가 (E2E Linux + Xvfb 게이트)
 - [ ] `.github/workflows/frontend-e2e-mac.yml` 추가 (workflow_dispatch only)
 - [ ] PR 한 번 열어서 빠른 게이트와 E2E 게이트가 모두 자동 실행되고 통과하는지 확인
@@ -27,11 +27,11 @@
 
 ---
 
-## Implemented baseline: `frontend-tests.yml` (Build + Vitest)
+## Implemented baseline: `frontend-tests.yml` (Build + E2E typecheck + Vitest)
 
 **트리거**: PR + push to main. **OS**: Ubuntu. **시간 예상**: 2~4분.
 
-현재 기본 게이트는 `.github/workflows/frontend-tests.yml`에 구현되어 있습니다.
+현재 기본 게이트는 `.github/workflows/frontend-tests.yml`에 구현되어 있습니다. 2026-05-05 기준 `Frontend tests` workflow는 renderer build, Electron main build, `tsconfig.e2e.json` 타입체크, Vitest를 통과했습니다.
 
 검증 범위:
 - `npm ci --prefer-offline --no-audit --fund=false`
@@ -40,7 +40,7 @@
 - `npx tsc -p tsconfig.e2e.json`
 - `npm run test:run`
 
-후속 문서의 나머지 항목은 Electron E2E와 macOS 수동 검증처럼 runner/시스템 의존성이 큰 부분만 다룹니다.
+후속 문서의 나머지 항목은 실제 Electron E2E 실행과 macOS 수동 검증처럼 runner/시스템 의존성이 큰 부분만 다룹니다.
 
 ---
 
@@ -244,11 +244,11 @@ jobs:
 
 | 워크플로우 | 트리거 | OS | 시간 / 실행 | 비용 / 실행 |
 |---|---|---|---|---|
-| frontend-fast | PR + push | ubuntu-latest | 2~3분 | $0 (public repo) |
+| frontend-tests | PR + push | ubuntu-latest | 2~4분 | $0 (public repo) |
 | frontend-e2e | PR + push | ubuntu-latest | 8~15분 | $0 |
 | frontend-e2e-mac | dispatch | macos-14 | 20~30분 | ~$2/실행 |
 
-월간 PR ~20개 × Vitest+E2E 1회씩 = 4~6시간 무료 사용. macOS 는 release 마다 1회씩 → 연간 release 12개면 ~$24.
+월간 PR ~20개 × frontend-tests + Linux E2E 1회씩 = 4~6시간 무료 사용. macOS 는 release 마다 1회씩 → 연간 release 12개면 ~$24.
 
 `concurrency: cancel-in-progress: true` 가 같은 브랜치에 빠르게 push 시 이전 잡 취소해 분 절약.
 
@@ -256,7 +256,7 @@ jobs:
 
 ## release.yml 과의 관계
 
-기존 [`.github/workflows/release.yml`](../.github/workflows/release.yml) 은 그대로 둡니다. 거기는 빌드 + 패키지만 담당하고 (tag push 시), 이 문서의 워크플로우 3개는 테스트만 담당합니다. 두 워크플로우가 같은 trigger 에 안 겹치는지 확인:
+기존 [`.github/workflows/release.yml`](../.github/workflows/release.yml) 은 그대로 둡니다. 거기는 빌드 + 패키지만 담당하고 (tag push 시), 이 문서의 frontend-tests 및 후속 E2E 워크플로우는 테스트만 담당합니다. 두 워크플로우가 같은 trigger 에 안 겹치는지 확인:
 - release.yml: `on: push: tags: ['v*']`, `workflow_dispatch`
 - frontend-e2e.yml: `on: push: branches: [main], pull_request`
 - frontend-e2e-mac.yml: `on: workflow_dispatch`
@@ -269,7 +269,7 @@ jobs:
 
 CI PR 을 만들 때 다음 순서로 작은 PR 4개:
 
-1. **frontend-fast.yml 추가** — 이 PR 자체에서 자기 워크플로우가 통과하는지 확인.
+1. **frontend-tests.yml 유지/갱신** — 이 PR 자체에서 자기 워크플로우가 통과하는지 확인.
 2. **frontend-e2e.yml 추가** — 같은 패턴.
 3. **의도적 회귀 PR** — `frontend/src/api/transport.ts` 의 `getBackendBaseUrl` 을 일부러 깨고 양쪽 게이트가 빨강으로 막는지 확인. 머지 안 하고 close.
 4. **frontend-e2e-mac.yml 추가** — workflow_dispatch 1회 실행으로 통과 확인.
@@ -281,7 +281,7 @@ CI PR 을 만들 때 다음 순서로 작은 PR 4개:
 ## 결정 트리 (구현 시작 시점에 다시 보기)
 
 - public repo? Linux/Windows 모두 무료, 이 문서 그대로 사용 가능.
-- private repo? 분당 청구. 우선 frontend-fast 만, frontend-e2e 는 push to main 만으로 제한 검토.
+- private repo? 분당 청구. 우선 frontend-tests 만, frontend-e2e 는 push to main 만으로 제한 검토.
 - Windows 회귀 자주? frontend-e2e-windows.yml 추가 (Linux 워크플로우 복제 + xvfb 제거).
 - Vitest 가 잠시 느려짐? `--shard` 로 분할 검토.
 - Playwright trace 너무 큼? `retain-on-failure` (이미 적용) + retention-days 단축.
