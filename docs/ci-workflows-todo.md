@@ -37,6 +37,7 @@
 - `npm ci --prefer-offline --no-audit --fund=false`
 - `npm run build`
 - `npm run build:electron`
+- `npx tsc -p tsconfig.e2e.json`
 - `npm run test:run`
 
 후속 문서의 나머지 항목은 Electron E2E와 macOS 수동 검증처럼 runner/시스템 의존성이 큰 부분만 다룹니다.

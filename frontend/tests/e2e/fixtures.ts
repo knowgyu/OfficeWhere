@@ -125,28 +125,28 @@ export const test = base.extend<OfficeWhereFixtures>({
     // http:// in dev mode), never data:.
     const isRenderer = (url: string) => !url.startsWith('data:') && !url.startsWith('about:')
 
-    let window =
+    let page =
       electronApp.windows().find((w) => isRenderer(w.url())) ?? null
-    if (!window) {
-      window = await electronApp.waitForEvent('window', {
+    if (!page) {
+      page = await electronApp.waitForEvent('window', {
         predicate: (w) => isRenderer(w.url()),
         timeout: 90_000,
       })
     }
-    await window.waitForLoadState('domcontentloaded')
+    await page.waitForLoadState('domcontentloaded')
 
     // Skip the first-run OnboardingCarousel and the tutorial library setup
     // by persisting the same localStorage flag App.tsx writes when the user
     // clicks "내 폴더 추가하러 가기". Clicking the carousel's close button
     // would also work, but it forces the active tab to 'files' (settings) —
     // not the natural search tab — which makes boot specs harder to write.
-    await window.evaluate(() => {
+    await page.evaluate(() => {
       window.localStorage.setItem('officewhere:onboarding-complete:v1', 'true')
     })
-    await window.reload()
-    await window.waitForLoadState('domcontentloaded')
+    await page.reload()
+    await page.waitForLoadState('domcontentloaded')
 
-    await use(window)
+    await use(page)
   },
 })
 
@@ -157,19 +157,19 @@ export { expect } from '@playwright/test'
  * completes. Used by Tier 2 specs that need an indexed library before
  * exercising search / consistency / duplicates flows.
  */
-export async function registerAndRescan(window: Page, libraryPath: string) {
+export async function registerAndRescan(page: Page, libraryPath: string) {
   // Open the settings tab.
-  await window
+  await page
     .getByRole('navigation', { name: '메인 내비게이션' })
     .getByRole('button', { name: '설정' })
     .click()
 
-  await window.getByPlaceholder('검색/검사 대상 폴더 경로').fill(libraryPath)
-  await window.getByRole('button', { name: '대상 추가' }).click()
+  await page.getByPlaceholder('검색/검사 대상 폴더 경로').fill(libraryPath)
+  await page.getByRole('button', { name: '대상 추가' }).click()
 
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
-    const status = await window.evaluate(async () => {
+    const status = await page.evaluate(async () => {
       const url = await window.officeWhere?.getBackendBaseUrl?.()
       if (!url) return null
       const response = await fetch(`${url}/api/library/rescan/status`)
