@@ -204,7 +204,7 @@ jobs:
         if: steps.frontend-node-modules-cache.outputs.cache-hit != 'true'
         working-directory: frontend
         shell: pwsh
-        run: npm ci --prefer-offline --no-audit --fund=false
+        run: npm ci --no-audit --fund=false
 
       - name: Build frontend
         working-directory: frontend
@@ -324,7 +324,7 @@ jobs:
       - name: Install frontend dependencies
         if: steps.frontend-node-modules-cache.outputs.cache-hit != 'true'
         working-directory: frontend
-        run: npm ci --prefer-offline --no-audit --fund=false
+        run: npm ci --no-audit --fund=false
 
       - name: Build frontend
         working-directory: frontend
