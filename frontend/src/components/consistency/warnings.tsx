@@ -34,7 +34,7 @@ export function CompareMetadataWarnings({ metadata }: { metadata: CompareMetadat
         <div>
           <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">비교 결과 참고 사항</p>
           <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            실제 변경점과 별도로, 비교 방식이나 문서 확인 상태에 대한 안내입니다.
+            실제 변경 내용과 별도로, 비교 방식이나 문서 확인 상태에 대한 안내입니다.
           </p>
         </div>
       </header>

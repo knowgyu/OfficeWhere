@@ -278,7 +278,7 @@ describe('ConsistencyCheck', () => {
   })
 
   describe('group click', () => {
-    it('clicking 변경점 보기 fetches the group detail', async () => {
+    it('clicking 변경 내용 보기 fetches the group detail', async () => {
       mocked.groups.mockResolvedValue(
         groupsResponse([summary({ id: 'grp-week', base_name: '주간보고' })]),
       )
@@ -297,7 +297,7 @@ describe('ConsistencyCheck', () => {
       renderWithProviders(<ConsistencyCheck />)
       await waitFor(() => expect(screen.getAllByText('주간보고').length).toBeGreaterThan(0))
 
-      await userEvent.click(screen.getByRole('button', { name: '변경점 보기' }))
+      await userEvent.click(screen.getByRole('button', { name: '변경 내용 보기' }))
 
       await waitFor(() => expect(mocked.groupDetail).toHaveBeenCalledWith('grp-week'))
     })

@@ -300,7 +300,7 @@ export default function ConsistencyCheck({
   const validateFilesForCheck = (candidateFiles: FileInfo[]): string | null => {
     if (candidateFiles.length < 2) return '최소 2개 파일을 선택해 주세요.'
     if (candidateFiles.some((file) => !isCheckableFile(file))) {
-      return '변경점 확인은 Word, PowerPoint, Excel 파일만 지원합니다.'
+      return '변경 내용 확인은 Word, PowerPoint, Excel 파일만 지원합니다.'
     }
     const modes = new Set(candidateFiles.map((file) => getCompareMode(undefined, file.file_type)))
     if (modes.size > 1) return '파일 타입이 섞이면 검사할 수 없습니다.'
@@ -331,7 +331,7 @@ export default function ConsistencyCheck({
     } catch (error) {
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        '변경점 확인에 실패했습니다.'
+        '변경 내용 확인에 실패했습니다.'
       snackbar.error(detail)
     } finally {
       setLoading(false)
@@ -340,7 +340,7 @@ export default function ConsistencyCheck({
 
   const toggleFile = (file: FileInfo) => {
     if (!isCheckableFile(file)) {
-      snackbar.warn('이 파일 형식은 검색 등록은 가능하지만 변경점 확인은 지원하지 않습니다.')
+      snackbar.warn('이 파일 형식은 검색 등록은 가능하지만 변경 내용 확인은 지원하지 않습니다.')
       return
     }
     const next = new Set(selectedIds)
@@ -355,7 +355,7 @@ export default function ConsistencyCheck({
     }
 
     if (selectedMode && fileMode !== selectedMode) {
-      snackbar.warn('변경점 확인은 같은 파일 타입만 함께 선택할 수 있습니다.')
+      snackbar.warn('변경 내용 확인은 같은 파일 타입만 함께 선택할 수 있습니다.')
       return
     }
     if ((fileMode === 'word' || fileMode === 'ppt') && next.size >= 2) {
@@ -504,7 +504,7 @@ export default function ConsistencyCheck({
         if (!isCurrentRun()) return
         const detailMessage =
           (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-          '이 파일 사이의 변경점을 계산하지 못했습니다.'
+          '이 파일 사이의 바뀐 내용을 계산하지 못했습니다.'
         setHistoryState((current) =>
           current?.groupId === detail.id && isCurrentRun()
             ? {
@@ -640,7 +640,7 @@ export default function ConsistencyCheck({
 
   const openExcelGrid = async (detail: LibraryGroupDetail, currentHistoryState: HistoryDiffState | null) => {
     if (normalizeFileType(detail.file_type) !== 'Excel') {
-      snackbar.warn('표로 보기는 Excel 묶음에서만 사용할 수 있습니다.')
+      snackbar.warn('시트로 보기는 Excel 묶음에서만 사용할 수 있습니다.')
       return false
     }
 
@@ -666,7 +666,7 @@ export default function ConsistencyCheck({
     } catch (error) {
       const detailMessage =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
-        'Excel 표를 불러오지 못했습니다.'
+        'Excel 시트를 불러오지 못했습니다.'
       setExcelGridModal({
         detail,
         loading: false,
@@ -839,7 +839,7 @@ export default function ConsistencyCheck({
         <EmptyState
           icon="fact_check"
           title="먼저 파일을 등록해 주세요"
-          description="변경 이력은 등록된 Office 파일 사이의 수정본과 변경점을 확인합니다."
+          description="변경 이력은 등록된 Office 파일 사이에서 바뀐 내용을 확인합니다."
         />
       </Card>
     )
@@ -970,7 +970,7 @@ export default function ConsistencyCheck({
                         같은 내용 문서도 표시
                       </Button>
                       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                        변경점이 없는 동일 내용 문서는 기본적으로 숨깁니다.
+                        차이가 없는 동일 내용 문서는 기본적으로 숨깁니다.
                       </p>
                     </div>
                   </div>
@@ -1229,7 +1229,7 @@ export default function ConsistencyCheck({
                           </div>
                           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] mt-1">
                             {unsupported
-                              ? '검색에는 사용할 수 있음 · 변경점 확인 제외'
+                              ? '검색에는 사용할 수 있음 · 변경 내용 확인 제외'
                               : fileMode === 'excel'
                                 ? '셀 위치 기준 · 여러 파일 비교'
                                 : `${fileMode === 'word' ? '문서 변경' : '슬라이드 변경'} · 2개 비교`}
@@ -1422,7 +1422,7 @@ function GroupCard({
             className={highlightOpen && !activeDetail ? 'attention-pulse tour-target' : ''}
             data-tour-target={highlightOpen && !activeDetail ? openTourTarget : undefined}
           >
-            {activeDetail ? '접기' : '변경점 보기'}
+            {activeDetail ? '접기' : '변경 내용 보기'}
           </Button>
         </div>
       </div>

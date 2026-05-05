@@ -39,7 +39,7 @@ export function WordCheckResult({
         </header>
         {diffs.length === 0 ? (
           <p className="px-6 py-8 type-body-sm text-[var(--md-sys-color-on-surface-variant)] text-center">
-            문서 변경점이 없습니다.
+            문서에서 달라진 내용이 없습니다.
           </p>
         ) : (
           <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">

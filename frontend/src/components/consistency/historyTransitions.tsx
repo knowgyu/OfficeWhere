@@ -22,7 +22,7 @@ export function HistoryTransitions({
   if (transitions.length === 0) {
     return (
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-        비교할 이전 파일이 없습니다. 같은 문서의 다른 수정본을 더 등록하면 변경점이 표시됩니다.
+        비교할 이전 파일이 없습니다. 같은 문서의 다른 수정본을 더 등록하면 바뀐 내용이 표시됩니다.
       </p>
     )
   }
@@ -125,7 +125,7 @@ function HistoryTransitionCard({
             </div>
           </div>
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            두 파일 사이의 변경 증거만 분리해 표시합니다.
+            두 파일 사이에서 바뀐 내용만 분리해 보여줍니다.
           </p>
         </div>
         <Badge tone={statusTone}>
@@ -135,7 +135,7 @@ function HistoryTransitionCard({
 
       {transition.status === 'error' && (
         <p className="rounded-lg border border-[var(--md-sys-color-error)]/60 bg-[var(--md-sys-color-error-container)]/50 px-3 py-2 type-body-sm text-[var(--md-sys-color-error)]">
-          {transition.error ?? '이 파일 사이의 변경점을 계산하지 못했습니다.'}
+          {transition.error ?? '이 파일 사이의 바뀐 내용을 계산하지 못했습니다.'}
         </p>
       )}
       {transition.status === 'done' && transition.result && (

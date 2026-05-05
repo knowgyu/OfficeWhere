@@ -268,7 +268,7 @@ export function ExcelCheckResult({
   if (compact && result.issues.length === 0) {
     return (
       <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-        Excel 변경점이 없습니다.
+        Excel에서 달라진 셀이 없습니다.
       </p>
     )
   }
@@ -295,7 +295,7 @@ export function ExcelCheckResult({
 
       {result.issues.length === 0 ? (
         <Card variant="outlined" className="px-6 py-8 text-center">
-          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">Excel 변경점이 없습니다.</p>
+          <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">Excel에서 달라진 셀이 없습니다.</p>
           <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
             비교한 파일 사이에서 표시할 값 변경이나 추가/삭제를 찾지 못했습니다.
           </p>
@@ -329,7 +329,7 @@ function ExcelChangeDigest({
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <Icon name="troubleshoot" size={20} className="text-[var(--md-sys-color-primary)]" />
-              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 빠른 보기</p>
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">바뀐 셀 빠르게 보기</p>
             </div>
             <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               변경·추가·삭제된 셀만 한 표에 모아 보여줍니다. 행을 누르면 아래에서 파일별 값을 확인할 수 있습니다.
@@ -446,9 +446,9 @@ function ExcelDigestDetailPanel({ row }: { row: ExcelDigestRow | null }) {
   if (!row) {
     return (
       <aside className="border-t border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-4 xl:border-l xl:border-t-0">
-        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">변경 상세</p>
+        <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">셀 상세</p>
         <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-          변경 행을 선택하면 파일별 값과 위치를 확인할 수 있습니다.
+          바뀐 셀을 선택하면 파일별 값과 위치를 확인할 수 있습니다.
         </p>
       </aside>
     )
@@ -589,7 +589,7 @@ export function ExcelDiffGridModal({
       className="fixed inset-0 z-[140] flex items-center justify-center overflow-hidden overscroll-contain bg-[var(--ow-dialog-backdrop)] backdrop-blur-md p-4 sm:p-5 lg:p-6"
       role="dialog"
       aria-modal="true"
-      aria-label="Excel 표로 보기"
+      aria-label="Excel 시트 보기"
       onClick={onClose}
       onWheel={(event) => {
         event.stopPropagation()
@@ -612,7 +612,7 @@ export function ExcelDiffGridModal({
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 표로 보기</p>
+                  <p className="type-title-md text-[var(--md-sys-color-on-surface)]">Excel 시트 보기</p>
                   <Badge tone="neutral">선택 파일 비교</Badge>
                 </div>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)] truncate mt-1">
@@ -634,7 +634,7 @@ export function ExcelDiffGridModal({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-3">
           {modal.loading ? (
             <div className="flex items-center justify-center gap-2 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
-              <Spinner size={20} /> Excel 표 범위를 계산하는 중…
+              <Spinner size={20} /> Excel 시트 범위를 계산하는 중…
             </div>
           ) : modal.error ? (
             <div className="rounded-lg border border-[var(--md-sys-color-error)] bg-[var(--md-sys-color-error-container)] p-4 text-[var(--md-sys-color-on-error-container)]">

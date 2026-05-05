@@ -148,26 +148,26 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'version-ppt': {
     eyebrow: 'PPT 변경 이력',
-    title: 'PPT 변경점을 열어봅니다',
-    description: '변경점 보기를 누르면 슬라이드별로 달라진 부분을 확인할 수 있습니다.',
+    title: 'PPT에서 바뀐 내용을 확인합니다',
+    description: '변경 내용 보기를 누르면 슬라이드별로 달라진 부분을 확인할 수 있습니다.',
     icon: 'timeline',
   },
   'version-ppt-review': {
     eyebrow: 'PPT 변경',
-    title: '변경 내용을 펼쳐봅니다',
+    title: '바뀐 문장을 펼쳐봅니다',
     description: '자세히 보기를 누르면 어떤 문장이 바뀌었는지 바로 보입니다.',
     icon: 'unfold_more',
   },
   'version-ppt-detail': {
     eyebrow: 'PPT 변경 상세',
     title: '슬라이드에서 달라진 부분입니다',
-    description: '변경 내용을 확인하고 나면 Excel 예제로 이어집니다.',
+    description: 'PPT에서 바뀐 내용을 확인하면 Excel 예제로 이어집니다.',
     icon: 'visibility',
   },
   'version-excel': {
     eyebrow: 'Excel 변경 이력',
-    title: 'Excel 변경점도 확인합니다',
-    description: '변경점 보기를 누르면 바뀐 셀과 값을 먼저 보여줍니다.',
+    title: 'Excel에서 바뀐 셀을 확인합니다',
+    description: '변경 내용 보기를 누르면 바뀐 셀과 값을 먼저 보여줍니다.',
     icon: 'difference',
   },
   'version-excel-review': {
@@ -178,8 +178,8 @@ const TUTORIAL_COPY: Record<TutorialStep, TourCopy> = {
   },
   'excel-table': {
     eyebrow: '셀 단위 보기',
-    title: '표로 자세히 보세요',
-    description: '표로 보기를 누르면 시트 위에서 바뀐 셀을 바로 볼 수 있습니다.',
+    title: '시트에서 위치를 확인합니다',
+    description: '시트로 보기를 누르면 바뀐 셀의 위치를 실제 표처럼 확인할 수 있습니다.',
     icon: 'table_chart',
   },
   'excel-table-cell': {
@@ -277,6 +277,7 @@ export default function App() {
   const [tutorialStep, setTutorialStep] = useState<TutorialStep | null>(null)
   const [exampleLibraryPath, setExampleLibraryPath] = useState('')
   const [libraryDataRevision, setLibraryDataRevision] = useState(0)
+  const [libraryFocusRequest, setLibraryFocusRequest] = useState(0)
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
   const [updateDownloading, setUpdateDownloading] = useState(false)
@@ -575,6 +576,7 @@ export default function App() {
                 tutorialStep={tutorialStep}
                 exampleLibraryPath={exampleLibraryPath}
                 libraryDataRevision={libraryDataRevision}
+                focusFolderInputRequest={libraryFocusRequest}
                 onTutorialStep={handleTutorialStep}
                 onReplayOnboarding={handleReplayOnboarding}
               />
@@ -584,7 +586,10 @@ export default function App() {
                 tutorialStep={tutorialStep}
                 libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}
-                onOpenDuplicates={() => setActiveTab('duplicates')}
+                onOpenLibrarySettings={() => {
+                  setActiveTab('files')
+                  setLibraryFocusRequest((value) => value + 1)
+                }}
               />
             </section>
             <section className={activeTab === 'check' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'check'}>
@@ -985,7 +990,7 @@ function GuidedTourHud({
             </p>
             <ul className="tour-hud-summary">
               <li><Icon name="search" size={16} /><span>파일명과 본문을 함께 검색</span></li>
-              <li><Icon name="timeline" size={16} /><span>PPT·Excel 변경점 확인</span></li>
+              <li><Icon name="timeline" size={16} /><span>PPT·Excel 변경 내용 확인</span></li>
               <li><Icon name="grid_on" size={16} /><span>Excel 셀 값 변화 확인</span></li>
             </ul>
             <div className="tour-hud-done-actions">

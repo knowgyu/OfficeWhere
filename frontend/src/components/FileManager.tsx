@@ -184,12 +184,14 @@ export default function FileManager({
   tutorialStep,
   exampleLibraryPath = '',
   libraryDataRevision = 0,
+  focusFolderInputRequest = 0,
   onTutorialStep,
   onReplayOnboarding,
 }: {
   tutorialStep?: TutorialStep | null
   exampleLibraryPath?: string
   libraryDataRevision?: number
+  focusFolderInputRequest?: number
   onTutorialStep?: (step: TutorialStep | null) => void
   onReplayOnboarding?: () => void
 }) {
@@ -213,6 +215,7 @@ export default function FileManager({
   const [selectedFileIds, setSelectedFileIds] = useState<Set<number>>(new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [focusedFileId, setFocusedFileId] = useState<number | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
   const dragSelectionRef = useRef<{ active: boolean; anchorIndex: number; selecting: boolean } | null>(null)
   const [tourRefreshStartKey, setTourRefreshStartKey] = useState<number | null>(null)
   const [librarySettings, setLibrarySettings] = useState<LibrarySettings>({
@@ -345,6 +348,15 @@ export default function FileManager({
     void fetchFiles(0, fileQuery)
     void fetchLibrarySettings()
   }, [libraryDataRevision])
+
+  useEffect(() => {
+    if (focusFolderInputRequest === 0) return undefined
+    const timer = window.setTimeout(() => {
+      folderInputRef.current?.focus()
+      folderInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [focusFolderInputRequest])
 
   useEffect(() => {
     if (tutorialStep !== 'example-folder' || !exampleLibraryPath) return
@@ -796,22 +808,6 @@ export default function FileManager({
 
   return (
     <div className="space-y-6">
-      <GeneralSettingsSection
-        textSize={textSize}
-        themeMode={themeMode}
-        resolvedTheme={resolvedTheme}
-        closeBehavior={closeBehavior}
-        closeBehaviorLabels={CLOSE_BEHAVIOR_LABELS}
-        closeBehaviorAvailable={closeBehaviorAvailable}
-        closeBehaviorLoading={closeBehaviorLoading}
-        startupSettings={startupSettings}
-        startupSettingsAvailable={startupSettingsAvailable}
-        startupSettingsLoading={startupSettingsLoading}
-        onTextSizeChange={setTextSize}
-        onThemeModeChange={setThemeMode}
-        onCloseBehaviorChange={(behavior) => void handleUpdateCloseBehavior(behavior)}
-        onStartupSettingsChange={(enabled) => void handleUpdateStartupSettings(enabled)}
-      />
       <Card variant="elevated" className="console-panel">
         <CardSection
           title="대상 폴더"
@@ -851,6 +847,7 @@ export default function FileManager({
           >
             <div className="flex-1 min-w-0">
               <TextField
+                ref={folderInputRef}
                 leadingIcon="folder"
                 placeholder="검색/검사 대상 폴더 경로"
                 value={folderPathDraft}
@@ -1074,6 +1071,23 @@ export default function FileManager({
         onToggleRegisteredFileSelection={toggleRegisteredFileSelection}
         onPreview={(file) => void handlePreview(file)}
         onPage={goToFilePage}
+      />
+
+      <GeneralSettingsSection
+        textSize={textSize}
+        themeMode={themeMode}
+        resolvedTheme={resolvedTheme}
+        closeBehavior={closeBehavior}
+        closeBehaviorLabels={CLOSE_BEHAVIOR_LABELS}
+        closeBehaviorAvailable={closeBehaviorAvailable}
+        closeBehaviorLoading={closeBehaviorLoading}
+        startupSettings={startupSettings}
+        startupSettingsAvailable={startupSettingsAvailable}
+        startupSettingsLoading={startupSettingsLoading}
+        onTextSizeChange={setTextSize}
+        onThemeModeChange={setThemeMode}
+        onCloseBehaviorChange={(behavior) => void handleUpdateCloseBehavior(behavior)}
+        onStartupSettingsChange={(enabled) => void handleUpdateStartupSettings(enabled)}
       />
 
       {onReplayOnboarding && (

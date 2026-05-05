@@ -105,6 +105,19 @@ describe('FileSearch', () => {
       expect(mockedSearchQuery).not.toHaveBeenCalled()
       vi.useRealTimers()
     })
+
+    it('offers a direct route to library settings from the ready empty state', async () => {
+      const onOpenLibrarySettings = vi.fn()
+
+      renderWithProviders(
+        <FileSearch onOpenLibrarySettings={onOpenLibrarySettings} />,
+        { withLibraryRescan: false },
+      )
+
+      await userEvent.click(screen.getByRole('button', { name: '대상 폴더 추가' }))
+
+      expect(onOpenLibrarySettings).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('search button (immediate, bypass debounce)', () => {
@@ -197,10 +210,51 @@ describe('FileSearch', () => {
       })
     })
 
-    it('shows an empty state title when results are empty after search', async () => {
-      mockedSearchQuery.mockResolvedValue({ data: emptyResponse('없는단어') })
+    it('does not add a duplicate-page CTA inside search results', async () => {
+      mockedSearchQuery.mockResolvedValue({
+        data: {
+          query: '회의',
+          total: 2,
+          results: [
+            searchHit({
+              file_id: 1,
+              name: '회의록_최종.docx',
+              path: '/lib/회의록_최종.docx',
+              normalized_hash: 'same-body',
+              content_chars: 120,
+              chunk_count: 2,
+            }),
+            searchHit({
+              file_id: 2,
+              name: '회의록_복사본.docx',
+              path: '/lib/회의록_복사본.docx',
+              normalized_hash: 'same-body',
+              content_chars: 120,
+              chunk_count: 2,
+            }),
+          ],
+          file_count: 2,
+          file_limit: 20,
+          has_more: false,
+        },
+      })
 
       renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
+      await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      await waitFor(() => expect(screen.getByText('회의록_최종.docx')).toBeInTheDocument())
+      expect(screen.queryByRole('button', { name: '같은 내용 문서 보기' })).not.toBeInTheDocument()
+    })
+
+    it('shows an empty state title when results are empty after search', async () => {
+      mockedSearchQuery.mockResolvedValue({ data: emptyResponse('없는단어') })
+      const onOpenLibrarySettings = vi.fn()
+
+      renderWithProviders(
+        <FileSearch onOpenLibrarySettings={onOpenLibrarySettings} />,
+        { withLibraryRescan: false },
+      )
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '없는단어')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
@@ -208,6 +262,9 @@ describe('FileSearch', () => {
       await waitFor(() => {
         expect(screen.getByText(/"없는단어"에 대한 결과가 없습니다/)).toBeInTheDocument()
       })
+
+      await userEvent.click(screen.getByRole('button', { name: '검색 대상 확인' }))
+      expect(onOpenLibrarySettings).toHaveBeenCalledTimes(1)
     })
   })
 

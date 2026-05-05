@@ -82,12 +82,6 @@ type GroupedSearchResult = {
   contentHash: string | null
 }
 
-type DuplicateContentSuggestion = {
-  hash: string
-  names: string[]
-  fileCount: number
-}
-
 const MODIFIED_DATE_FILTERS: Array<{ label: string; value: ModifiedDateFilter }> = [
   { label: '전체', value: 'all' },
   { label: '최근 7일', value: '7d' },
@@ -210,12 +204,12 @@ export default function FileSearch({
   tutorialStep,
   libraryDataRevision = 0,
   onTutorialStep,
-  onOpenDuplicates,
+  onOpenLibrarySettings,
 }: {
   tutorialStep?: TutorialStep | null
   libraryDataRevision?: number
   onTutorialStep?: (step: TutorialStep | null) => void
-  onOpenDuplicates?: () => void
+  onOpenLibrarySettings?: () => void
 }) {
   const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
@@ -534,26 +528,9 @@ export default function FileSearch({
       visibleGroups.push(group)
     }
 
-    const duplicateContentSuggestions = new Map<string, Set<string>>()
-    for (const group of visibleGroups) {
-      if (!group.contentHash) continue
-      const names = duplicateContentSuggestions.get(group.contentHash) ?? new Set<string>()
-      names.add(group.fileName)
-      duplicateContentSuggestions.set(group.contentHash, names)
-    }
-
-    const suggestions: DuplicateContentSuggestion[] = Array.from(duplicateContentSuggestions.entries())
-      .map(([hash, names]) => ({
-        hash,
-        names: Array.from(names),
-        fileCount: visibleGroups.filter((group) => group.contentHash === hash).length,
-      }))
-      .filter((suggestion) => suggestion.names.length > 1)
-
     return {
       visibleGroups,
       hiddenExactDuplicateCount,
-      duplicateContentSuggestions: suggestions,
     }
   }, [results])
 
@@ -840,6 +817,13 @@ export default function FileSearch({
           icon="search_off"
           title={`"${query}"에 대한 결과가 없습니다.`}
           description={SEARCH_SCOPE_EMPTY[searchScope]}
+          action={
+            onOpenLibrarySettings ? (
+              <Button variant="tonal" leadingIcon="settings" onClick={onOpenLibrarySettings}>
+                검색 대상 확인
+              </Button>
+            ) : undefined
+          }
         />
       )}
 
@@ -848,6 +832,13 @@ export default function FileSearch({
           icon="manage_search"
           title={SEARCH_SCOPE_READY[searchScope].title}
           description={SEARCH_SCOPE_READY[searchScope].description}
+          action={
+            onOpenLibrarySettings ? (
+              <Button variant="filled" leadingIcon="drive_folder_upload" onClick={onOpenLibrarySettings}>
+                대상 폴더 추가
+              </Button>
+            ) : undefined
+          }
         />
       )}
 
@@ -899,29 +890,6 @@ export default function FileSearch({
               )}
             </div>
           </div>
-          {groupedSearch.duplicateContentSuggestions.length > 0 && (
-            <Card variant="outlined" className="p-4 border-[var(--md-sys-color-tertiary)]/35 bg-[var(--md-sys-color-tertiary-container)]/22">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--md-sys-color-tertiary-container)] text-[var(--md-sys-color-on-tertiary-container)]">
-                  <Icon name="rule_folder" size={18} />
-                </span>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">
-                    파일명만 다른 같은 내용 문서가 보입니다
-                  </p>
-                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                    본문이 같은 파일은 별도 화면에서 한 묶음으로 확인해 보세요. 예: {groupedSearch.duplicateContentSuggestions[0].names.slice(0, 3).join(', ')}
-                    {groupedSearch.duplicateContentSuggestions[0].names.length > 3 ? ' 외' : ''}
-                  </p>
-                </div>
-                {onOpenDuplicates && (
-                  <Button variant="tonal" size="sm" leadingIcon="content_copy" onClick={onOpenDuplicates}>
-                    같은 내용 문서 보기
-                  </Button>
-                )}
-              </div>
-            </Card>
-          )}
           <div className="space-y-3">
             {groupedSearch.visibleGroups.map((group) => {
               const { fileName, items } = group

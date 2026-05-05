@@ -69,7 +69,7 @@ test.describe('변경 이력 (Tier 2)', () => {
     await expect(mainWindow.getByText('프로젝트상태').first()).toBeAttached()
   })
 
-  test('clicking 변경점 보기 expands the timeline for a group', async ({
+  test('clicking 변경 내용 보기 expands the timeline for a group', async ({
     mainWindow,
     testLibrary,
   }) => {
@@ -84,9 +84,9 @@ test.describe('변경 이력 (Tier 2)', () => {
       timeout: 30_000,
     })
 
-    // Click the first 변경점 보기 button (associated with the topmost group
+    // Click the first 변경 내용 보기 button (associated with the topmost group
     // in the list — sort=recent default places 주간보고 v4 newest at top).
-    await mainWindow.getByRole('button', { name: '변경점 보기' }).first().click()
+    await mainWindow.getByRole('button', { name: '변경 내용 보기' }).first().click()
 
     // After expansion, the same button toggles to "접기".
     await expect(mainWindow.getByRole('button', { name: '접기' }).first()).toBeAttached({

@@ -98,7 +98,7 @@ export function GroupTimeline({
       : historyState.loading
         ? '선택한 두 파일 계산 중…'
         : '선택한 두 파일 계산 완료'
-    : '변경점 계산 준비 중'
+    : '변경 내용 계산 준비 중'
   const shouldMarkReviewContainer =
     highlightReview && reviewTourTarget !== 'version-ppt-review' && reviewTourTarget !== 'version-ppt-detail'
 
@@ -107,9 +107,9 @@ export function GroupTimeline({
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <p className="type-label-sm uppercase tracking-[0.08em] text-[var(--md-sys-color-on-surface-variant)]">
-            변경 증거
+            비교 결과
           </p>
-          <p className="mt-1 type-title-sm text-[var(--md-sys-color-on-surface)]">변경점 상세</p>
+          <p className="mt-1 type-title-sm text-[var(--md-sys-color-on-surface)]">변경 내용 상세</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <Chip label={`${detail.files.length}/${detail.file_count}개 표시`} tone="neutral" as="span" />
@@ -135,7 +135,7 @@ export function GroupTimeline({
               disabled={Boolean(historyState?.loading)}
               onClick={onOpenExcelGrid}
             >
-              표로 보기
+              시트로 보기
             </Button>
           )}
         </div>
@@ -156,7 +156,7 @@ export function GroupTimeline({
             {shouldMarkReviewContainer && (
               <span className="tour-evidence-note tour-version-note mt-2">
                 <Icon name="check_circle" size={14} />
-                변경 증거를 찾았습니다
+                바뀐 내용을 찾았습니다
               </span>
             )}
           </div>
@@ -166,7 +166,7 @@ export function GroupTimeline({
         </div>
         {historyState?.truncated && (
           <p className="rounded-lg border border-dashed border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            최신 {detail.files.length}개만 표시되어 이 범위 안의 변경점만 계산했습니다.
+            최신 {detail.files.length}개만 표시되어 이 범위 안의 변경 내용만 계산했습니다.
           </p>
         )}
         <SelectedCompareBar

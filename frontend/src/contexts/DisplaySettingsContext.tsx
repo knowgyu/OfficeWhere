@@ -33,7 +33,7 @@ export const APP_THEME_MODE_LABELS: Record<AppThemeMode, string> = {
 export const APP_THEME_MODE_DESCRIPTIONS: Record<AppThemeMode, string> = {
   system: '운영체제 설정을 따라갑니다.',
   light: '문서 앱처럼 밝고 차분하게 표시합니다.',
-  dark: '어두운 환경에서 표와 변경점을 또렷하게 봅니다.',
+  dark: '어두운 환경에서 표와 변경 내용을 또렷하게 봅니다.',
 }
 
 export const APP_THEME_MODE_ORDER: AppThemeMode[] = ['system', 'light', 'dark']

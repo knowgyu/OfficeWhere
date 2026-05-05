@@ -124,7 +124,7 @@ export default function DuplicateFiles({ libraryDataRevision = 0 }: { libraryDat
       <Card variant="elevated">
         <CardSection
           title="같은 내용 문서"
-          description="파일명은 다르지만 검색용으로 읽은 본문이 같은 문서를 묶어서 보여줍니다. 원본 문서는 여기서 삭제·이동하지 않습니다."
+          description="파일명은 달라도 본문이 같은 문서를 한곳에 모아 확인합니다. 원본 문서는 여기서 삭제하거나 이동하지 않습니다."
           trailing={
             <Button
               variant="outlined"
@@ -149,7 +149,7 @@ export default function DuplicateFiles({ libraryDataRevision = 0 }: { libraryDat
             <div className="surface-summary rounded-lg p-4">
               <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">동작 방식</p>
               <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface)]">
-                앱에서는 확인만 하고, 필요하면 폴더에서 직접 정리하세요.
+                앱에서는 후보만 보여주고, 정리는 폴더에서 직접 진행합니다.
               </p>
             </div>
           </div>
@@ -159,7 +159,7 @@ export default function DuplicateFiles({ libraryDataRevision = 0 }: { libraryDat
       <Card variant="outlined">
         <CardSection
           title="내용이 같은 파일 묶음"
-          description="같은 내용이 여러 이름으로 저장된 후보를 묶음 단위로 압축해 보여줍니다."
+          description="같은 파일이 여러 이름으로 저장된 후보를 묶음 단위로 보여줍니다."
           trailing={
             total > 0 ? (
               <Chip label={`${visibleStart}-${visibleEnd} / ${total}`} tone="neutral" icon="view_list" as="span" />
