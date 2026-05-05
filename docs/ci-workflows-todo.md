@@ -1,6 +1,6 @@
-# CI 워크플로우 청사진 (Phase 6 미구현 부분)
+# E2E CI 워크플로우 청사진 (Phase 6 후속 부분)
 
-> Plan 의 Phase 6 중 CI 부분만 분리한 구현 가이드.
+> 기본 프론트엔드 Build + Vitest 게이트는 `.github/workflows/frontend-tests.yml`에 구현되어 있습니다. 이 문서는 Electron E2E와 macOS 수동 검증처럼 후속으로 분리할 CI를 정리한 가이드입니다.
 > 다른 OS / runner 환경에서 직접 PR 만들 때 이 문서를 그대로 보고 작성하면 됩니다.
 >
 > 관련 문서: [`docs/prd-frontend-testing.md`](prd-frontend-testing.md), [`docs/test-architecture-guide.md`](test-architecture-guide.md), [`docs/test-guidelines.md`](test-guidelines.md)
@@ -12,73 +12,34 @@
 - GitHub Actions 의 free public repo 한도 내에서 실제 실행 시간 측정 필요
 - macOS runner 의 quarantine / Gatekeeper 가 packaged `.app` 에 어떻게 작용하는지 manual dispatch 1회 검증 필요
 
-따라서 Phase 0~5 (테스트 코드 자체) 는 머지하되, CI 통합은 별도 PR 로 다른 환경에서 검증하면서 진행합니다.
+따라서 빠른 프론트엔드 Build + Vitest 게이트는 먼저 자동화하고, Electron E2E / macOS 수동 검증은 별도 PR 로 다른 환경에서 검증하면서 진행합니다.
 
 ## 구현 시 체크리스트
 
 - [ ] OfficeWhere repo 가 GitHub public 인지 확인 (Linux + Windows 무료, macOS 만 분당 과금)
-- [ ] `.github/workflows/frontend-fast.yml` 추가 (Vitest 게이트)
+- [x] `.github/workflows/frontend-tests.yml` 추가 (Build + Vitest 게이트)
 - [ ] `.github/workflows/frontend-e2e.yml` 추가 (E2E Linux + Xvfb 게이트)
 - [ ] `.github/workflows/frontend-e2e-mac.yml` 추가 (workflow_dispatch only)
-- [ ] PR 한 번 열어서 두 게이트 모두 자동 실행되고 통과하는지 확인
+- [ ] PR 한 번 열어서 빠른 게이트와 E2E 게이트가 모두 자동 실행되고 통과하는지 확인
 - [ ] 의도적으로 깨지는 변경 (예: [`FileSearch.tsx`](../frontend/src/components/FileSearch.tsx) 의 debounce 600 → 0) 으로 PR 만들어 게이트가 빨강으로 차단하는지 확인
 - [ ] release 직전 macOS workflow 수동 trigger 1회 실행 → Tier 1 통과
 - [ ] [`docs/release-test-checklist.md`](release-test-checklist.md) 갱신 (자동화된 항목 표시)
 
 ---
 
-## Workflow 1: `frontend-fast.yml` (Vitest)
+## Implemented baseline: `frontend-tests.yml` (Build + Vitest)
 
-**트리거**: PR + push to main. **OS**: Ubuntu (무료). **시간 예상**: 2~3분.
+**트리거**: PR + push to main. **OS**: Ubuntu. **시간 예상**: 2~4분.
 
-```yaml
-name: Frontend unit tests
+현재 기본 게이트는 `.github/workflows/frontend-tests.yml`에 구현되어 있습니다.
 
-on:
-  push:
-    branches: [main]
-  pull_request:
+검증 범위:
+- `npm ci --prefer-offline --no-audit --fund=false`
+- `npm run build`
+- `npm run build:electron`
+- `npm run test:run`
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  vitest:
-    name: Vitest
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - run: npm ci
-
-      # Type-check the production app config so .test.tsx leaks would fail
-      # the build (matches our local `npm run build` invariant).
-      - run: npx tsc -b tsconfig.app.json
-
-      - run: npm run test:run -- --coverage
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: vitest-coverage
-          path: frontend/coverage/
-          retention-days: 14
-```
-
-검증 포인트:
-- npm cache 가 lockfile 변경 없을 때 hit 되는지 확인
-- `tsc -b tsconfig.app.json` 단계가 production 빌드와 동일한 invariant 를 유지
+후속 문서의 나머지 항목은 Electron E2E와 macOS 수동 검증처럼 runner/시스템 의존성이 큰 부분만 다룹니다.
 
 ---
 

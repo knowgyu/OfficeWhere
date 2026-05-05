@@ -5,7 +5,6 @@ __pycache__/
 *.so
 .Python
 !python-runtime/**/*.pyd
-!python-runtime/**/*.so
 venv/
 env/
 .env
@@ -52,6 +51,14 @@ logs/
 
 # Python runtime download cache (prepare_python_runtime.py)
 .cache/
+
+# macOS Python runtime is prepared locally during packaging; keep generated
+# runtime files out of git while preserving the documented staging layout.
+python-runtime/mac-arm64/**
+!python-runtime/mac-arm64/
+!python-runtime/mac-arm64/README.md
+!python-runtime/mac-arm64/bin/
+!python-runtime/mac-arm64/bin/.gitkeep
 
 # Excel temp files
 ~$*.xlsx
