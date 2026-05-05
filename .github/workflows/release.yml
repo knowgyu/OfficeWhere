@@ -23,6 +23,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: "24"
   PYTHON_VERSION: "3.13"
@@ -112,7 +116,7 @@ jobs:
 
       - name: Cache Python virtualenv
         id: backend-venv-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .venv
           key: ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-venv-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}-${{ env.VENV_CACHE_VERSION }}
@@ -169,7 +173,7 @@ jobs:
         run: python scripts/ci_frontend_cache_key.py >> "$GITHUB_OUTPUT"
 
       - name: Cache npm downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache/npm
           key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-npm-${{ steps.frontend-cache-key.outputs.hash }}
@@ -178,13 +182,13 @@ jobs:
 
       - name: Cache frontend node_modules
         id: frontend-node-modules-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: frontend/node_modules
           key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ steps.frontend-cache-key.outputs.hash }}
 
       - name: Cache Electron package downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .cache/electron
@@ -259,6 +263,7 @@ jobs:
             ${{ steps.bundle.outputs.zip_path }}
             ${{ steps.bundle.outputs.sha_path }}
           if-no-files-found: error
+          compression-level: 0
 
   macos-release:
     name: macOS arm64
@@ -287,7 +292,7 @@ jobs:
         run: python scripts/ci_frontend_cache_key.py >> "$GITHUB_OUTPUT"
 
       - name: Cache npm downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache/npm
           key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-npm-${{ steps.frontend-cache-key.outputs.hash }}
@@ -296,13 +301,13 @@ jobs:
 
       - name: Cache frontend node_modules
         id: frontend-node-modules-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: frontend/node_modules
           key: ${{ runner.os }}-node-${{ env.NODE_VERSION }}-modules-${{ steps.frontend-cache-key.outputs.hash }}
 
       - name: Cache Electron package downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .cache/electron
@@ -312,7 +317,7 @@ jobs:
             ${{ runner.os }}-electron-
 
       - name: Cache macOS backend runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .cache/python-runtime
@@ -387,6 +392,7 @@ jobs:
             ${{ steps.bundle.outputs.zip_path }}
             ${{ steps.bundle.outputs.zip_sha_path }}
           if-no-files-found: error
+          compression-level: 0
 
   publish-release:
     name: Publish GitHub Release assets

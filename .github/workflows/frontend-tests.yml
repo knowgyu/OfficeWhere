@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - "frontend/**"
+      - "scripts/ci_frontend_cache_key.py"
       - ".github/workflows/frontend-tests.yml"
   push:
     branches: [main]
     paths:
       - "frontend/**"
+      - "scripts/ci_frontend_cache_key.py"
       - ".github/workflows/frontend-tests.yml"
 
 concurrency:
@@ -24,16 +26,29 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Resolve frontend dependency cache key
+        id: frontend-cache-key
+        working-directory: .
+        run: python scripts/ci_frontend_cache_key.py >> "$GITHUB_OUTPUT"
+
+      - name: Cache frontend node_modules
+        id: frontend-node-modules-cache
+        uses: actions/cache@v5
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-24-modules-${{ steps.frontend-cache-key.outputs.hash }}
+
       - name: Install frontend dependencies
-        run: npm ci --prefer-offline --no-audit --fund=false
+        if: steps.frontend-node-modules-cache.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --fund=false
 
       - name: Build renderer
         run: npm run build

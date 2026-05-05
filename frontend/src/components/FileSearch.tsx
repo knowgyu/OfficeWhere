@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, SearchResponse, SearchResult, SearchScope } from '../api/client'
+import { api, FileInfo, SearchResponse, SearchResult, SearchScope } from '../api/client'
 import {
   Badge,
   Button,
@@ -60,6 +60,7 @@ const SEARCH_DEBOUNCE_MS = 600
 const INITIAL_SEARCH_FILE_LIMIT = 20
 const SEARCH_FILE_LIMIT_STEP = 20
 const MAX_SEARCH_FILE_LIMIT = 100
+const INITIAL_DOCUMENT_LIMIT = 6
 
 type ModifiedDateFilter = 'all' | '7d' | '30d' | '90d' | 'custom'
 
@@ -129,6 +130,16 @@ function HighlightedSnippet({
 
 function SnippetText({ snippet }: { snippet: string }) {
   return <HighlightedSnippet snippet={snippet} />
+}
+
+function formatInitialDocumentDate(file: FileInfo) {
+  if (file.file_mtime) {
+    return `수정 ${new Date(file.file_mtime * 1000).toLocaleDateString('ko-KR', { dateStyle: 'medium' })}`
+  }
+  if (file.created_at) {
+    return `등록 ${new Date(file.created_at).toLocaleDateString('ko-KR', { dateStyle: 'medium' })}`
+  }
+  return '최근 문서'
 }
 
 function getContentFileKey(item: SearchResult) {
@@ -201,11 +212,13 @@ function SearchResultListItem({
 }
 
 export default function FileSearch({
+  active = true,
   tutorialStep,
   libraryDataRevision = 0,
   onTutorialStep,
   onOpenLibrarySettings,
 }: {
+  active?: boolean
   tutorialStep?: TutorialStep | null
   libraryDataRevision?: number
   onTutorialStep?: (step: TutorialStep | null) => void
@@ -222,6 +235,10 @@ export default function FileSearch({
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [prefetching, setPrefetching] = useState(false)
+  const [initialDataLoading, setInitialDataLoading] = useState(false)
+  const [initialFiles, setInitialFiles] = useState<FileInfo[]>([])
+  const [initialFileTotal, setInitialFileTotal] = useState(0)
+  const [watchedFolderCount, setWatchedFolderCount] = useState<number | null>(null)
   const [searched, setSearched] = useState(false)
   const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>([])
   const [searchScope, setSearchScope] = useState<SearchScope>('filename_content')
@@ -232,6 +249,7 @@ export default function FileSearch({
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRequestSeq = useRef(0)
+  const initialDataRequestSeq = useRef(0)
   const prefetchedSearchRef = useRef<PrefetchedSearch | null>(null)
   const tutorialSearchAdvanceRef = useRef<string | null>(null)
 
@@ -483,6 +501,7 @@ export default function FileSearch({
   }
 
   useEffect(() => {
+    if (!active) return
     if (libraryDataRevision === 0) return
     if (!query.trim()) {
       setResults([])
@@ -496,7 +515,43 @@ export default function FileSearch({
       return
     }
     void doSearch(query)
-  }, [libraryDataRevision])
+  }, [active, libraryDataRevision])
+
+  useEffect(() => {
+    if (!active) return
+    const requestId = initialDataRequestSeq.current + 1
+    initialDataRequestSeq.current = requestId
+    let cancelled = false
+    setInitialDataLoading(true)
+
+    void Promise.all([
+      api.library.getSettings(),
+      api.files.page({
+        limit: INITIAL_DOCUMENT_LIMIT,
+        offset: 0,
+        sort: 'file_mtime_desc',
+      }),
+    ])
+      .then(([settingsResponse, filesResponse]) => {
+        if (cancelled || requestId !== initialDataRequestSeq.current) return
+        setWatchedFolderCount(settingsResponse.data.watched_folders.length)
+        setInitialFiles(filesResponse.data.items)
+        setInitialFileTotal(filesResponse.data.total)
+      })
+      .catch(() => {
+        if (cancelled || requestId !== initialDataRequestSeq.current) return
+        setWatchedFolderCount(null)
+        setInitialFiles([])
+        setInitialFileTotal(0)
+      })
+      .finally(() => {
+        if (!cancelled && requestId === initialDataRequestSeq.current) setInitialDataLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [active, libraryDataRevision])
 
   const groupedSearch = useMemo(() => {
     const map = new Map<string, { fileName: string; items: SearchResult[] }>()
@@ -556,6 +611,22 @@ export default function FileSearch({
   const allContentMatchesExpanded =
     contentFileKeys.length > 0 && contentFileKeys.every((key) => expandedContentFiles.has(key))
   const hasResults = !loading && results.length > 0
+  const hasWatchedFolders = (watchedFolderCount ?? 0) > 0
+  const initialReadyAction = onOpenLibrarySettings
+    ? watchedFolderCount === 0
+      ? (
+          <Button variant="filled" leadingIcon="drive_folder_upload" onClick={onOpenLibrarySettings}>
+            대상 폴더 추가
+          </Button>
+        )
+      : hasWatchedFolders
+        ? (
+            <Button variant="tonal" leadingIcon="settings" onClick={onOpenLibrarySettings}>
+              검색 대상 확인
+            </Button>
+          )
+        : undefined
+    : undefined
   const tutorialSearchReviewKey = tutorialStep === 'search-review' ? contentFileKeys[0] : null
   const visibleLocationCount = useMemo(
     () => groupedSearch.visibleGroups.reduce((total, group) => total + group.items.length, 0),
@@ -827,18 +898,89 @@ export default function FileSearch({
         />
       )}
 
-      {!loading && !searched && !query && (
+      {!loading && !searched && !query && initialFiles.length > 0 && (
+        <Card variant="outlined" className="console-panel p-4 md:p-5 space-y-4 shadow-none ring-1 ring-[var(--ow-inset-highlight)]">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <p className="type-title-md text-[var(--md-sys-color-on-surface)]">최근 준비된 문서</p>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                검색 전에는 새로 읽지 않고, 이미 준비된 문서 {Math.min(initialFiles.length, initialFileTotal)}개만 가볍게 보여줍니다
+                {initialFileTotal > initialFiles.length ? ` · 전체 ${initialFileTotal}개` : ''}.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {initialDataLoading && (
+                <span className="inline-flex items-center gap-1.5 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                  <Spinner size={16} />
+                  확인 중
+                </span>
+              )}
+              {initialReadyAction}
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {initialFiles.map((file) => (
+              <div
+                key={file.id}
+                className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3"
+              >
+                <div className="flex items-start gap-2">
+                  <FileTypeBadge fileType={file.file_type} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={file.name}>
+                      {file.name}
+                    </p>
+                    <p className="mt-1 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]" title={file.path}>
+                      {file.path}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                    {formatInitialDocumentDate(file)}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="text"
+                      size="sm"
+                      leadingIcon="open_in_new"
+                      onClick={() => handleOpenFile(file.id, file.name)}
+                    >
+                      열기
+                    </Button>
+                    <Button
+                      variant="text"
+                      size="sm"
+                      leadingIcon="folder_open"
+                      onClick={() => handleShowInFolder(file.id, file.name, file.path)}
+                    >
+                      폴더
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {!loading && !searched && !query && initialFiles.length === 0 && initialDataLoading && (
+        <div className="flex items-center justify-center gap-3 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
+          <Spinner size={20} />
+          <span>검색 준비 상태를 확인하는 중…</span>
+        </div>
+      )}
+
+      {!loading && !searched && !query && initialFiles.length === 0 && !initialDataLoading && (
         <EmptyState
-          icon="manage_search"
-          title={SEARCH_SCOPE_READY[searchScope].title}
-          description={SEARCH_SCOPE_READY[searchScope].description}
-          action={
-            onOpenLibrarySettings ? (
-              <Button variant="filled" leadingIcon="drive_folder_upload" onClick={onOpenLibrarySettings}>
-                대상 폴더 추가
-              </Button>
-            ) : undefined
+          icon={hasWatchedFolders ? 'folder_open' : 'manage_search'}
+          title={hasWatchedFolders ? '대상 폴더가 등록되어 있습니다' : SEARCH_SCOPE_READY[searchScope].title}
+          description={
+            hasWatchedFolders
+              ? '문서 새로고침을 실행하면 검색 전에도 최근 문서를 보여주고, 파일명과 본문 검색을 바로 사용할 수 있습니다.'
+              : SEARCH_SCOPE_READY[searchScope].description
           }
+          action={initialReadyAction}
         />
       )}
 

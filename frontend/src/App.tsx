@@ -583,6 +583,7 @@ export default function App() {
             </section>
             <section className={activeTab === 'search' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'search'}>
               <FileSearch
+                active={activeTab === 'search'}
                 tutorialStep={tutorialStep}
                 libraryDataRevision={libraryDataRevision}
                 onTutorialStep={handleTutorialStep}

@@ -64,6 +64,9 @@ def test_release_workflow_caches_downloads_and_reusable_install_outputs():
     publish_job = workflow.split("  publish-release:", 1)[1]
 
     assert "backend-verification:" in workflow
+    assert "cancel-in-progress: true" in workflow
+    assert "actions/cache@v4" not in workflow
+    assert "actions/cache@v5" in workflow
     assert workflow.count('cache: "pip"') == 1
     assert workflow.count("Cache Python virtualenv") == 1
     assert "steps.backend-venv-cache.outputs.cache-hit != 'true'" in workflow
@@ -82,9 +85,23 @@ def test_release_workflow_caches_downloads_and_reusable_install_outputs():
     assert workflow.count("scripts/ci_frontend_cache_key.py") == 2
     assert workflow.count("npm ci --no-audit --fund=false") == 2
     assert "npm ci --prefer-offline" not in workflow
+    assert workflow.count("compression-level: 0") == 2
     assert "pip install --upgrade pip" not in workflow
     assert "electron_config_cache" in workflow
     assert "- backend-verification" in publish_job
+
+
+def test_frontend_tests_workflow_reuses_dependency_cache():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "frontend-tests.yml").read_text(encoding="utf-8")
+
+    assert "actions/checkout@v6" in workflow
+    assert "actions/setup-node@v6" in workflow
+    assert "scripts/ci_frontend_cache_key.py" in workflow
+    assert "Cache frontend node_modules" in workflow
+    assert "actions/cache@v5" in workflow
+    assert "steps.frontend-node-modules-cache.outputs.cache-hit != 'true'" in workflow
+    assert "npm ci --no-audit --fund=false" in workflow
+    assert "npm ci --prefer-offline" not in workflow
 
 
 def test_mac_runtime_layout_contract_is_documented():

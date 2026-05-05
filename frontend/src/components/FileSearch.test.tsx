@@ -16,8 +16,13 @@ vi.mock('../api/client', async () => {
       },
       files: {
         ...actual.api.files,
+        page: vi.fn(),
         open: vi.fn(),
         showInFolder: vi.fn(),
+      },
+      library: {
+        ...actual.api.library,
+        getSettings: vi.fn(),
       },
     },
   }
@@ -25,12 +30,34 @@ vi.mock('../api/client', async () => {
 
 import FileSearch from './FileSearch'
 import { api } from '../api/client'
-import type { SearchResponse } from '../api/client'
+import type { FileListResponse, LibrarySettings, SearchResponse } from '../api/client'
 
 const mockedSearchQuery = vi.mocked(api.search.query)
+const mockedFilesPage = vi.mocked(api.files.page)
+const mockedLibraryGetSettings = vi.mocked(api.library.getSettings)
+
+const defaultLibrarySettings: LibrarySettings = {
+  watched_folders: [],
+  excluded_folder_names: [],
+  auto_rescan_mode: 'interval',
+  auto_rescan_interval_hours: 24,
+  auto_rescan_daily_time: '03:00',
+  fast_worker_count: 24,
+}
 
 function emptyResponse(query = ''): SearchResponse {
   return { query, total: 0, results: [], file_count: 0, file_limit: 20, has_more: false }
+}
+
+function fileListResponse(overrides: Partial<FileListResponse> = {}): FileListResponse {
+  return {
+    total: 0,
+    items: [],
+    counts_by_type: {},
+    limit: 6,
+    offset: 0,
+    ...overrides,
+  }
 }
 
 function searchHit(overrides: Partial<SearchResponse['results'][number]> = {}) {
@@ -45,8 +72,16 @@ function searchHit(overrides: Partial<SearchResponse['results'][number]> = {}) {
   }
 }
 
+function renderInactiveFileSearch(props: Partial<Parameters<typeof FileSearch>[0]> = {}) {
+  return renderWithProviders(<FileSearch active={false} {...props} />, { withLibraryRescan: false })
+}
+
 beforeEach(() => {
   mockedSearchQuery.mockReset()
+  mockedFilesPage.mockReset()
+  mockedLibraryGetSettings.mockReset()
+  mockedFilesPage.mockResolvedValue({ data: fileListResponse() })
+  mockedLibraryGetSettings.mockResolvedValue({ data: defaultLibrarySettings })
 })
 
 describe('FileSearch', () => {
@@ -55,7 +90,7 @@ describe('FileSearch', () => {
       vi.useFakeTimers()
       mockedSearchQuery.mockResolvedValue({ data: emptyResponse('회의') })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       const input = screen.getByPlaceholderText(/파일 안의 단어를 검색/)
 
       fireEvent.change(input, { target: { value: '회의' } })
@@ -75,7 +110,7 @@ describe('FileSearch', () => {
       vi.useFakeTimers()
       mockedSearchQuery.mockResolvedValue({ data: emptyResponse() })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       const input = screen.getByPlaceholderText(/파일 안의 단어를 검색/)
 
       fireEvent.change(input, { target: { value: '회' } })
@@ -96,7 +131,7 @@ describe('FileSearch', () => {
     it('does not query the backend when input is whitespace', () => {
       vi.useFakeTimers()
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       const input = screen.getByPlaceholderText(/파일 안의 단어를 검색/)
 
       fireEvent.change(input, { target: { value: '   ' } })
@@ -114,9 +149,55 @@ describe('FileSearch', () => {
         { withLibraryRescan: false },
       )
 
-      await userEvent.click(screen.getByRole('button', { name: '대상 폴더 추가' }))
+      await userEvent.click(await screen.findByRole('button', { name: '대상 폴더 추가' }))
 
       expect(onOpenLibrarySettings).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not ask to add a target folder when one is already registered', async () => {
+      mockedLibraryGetSettings.mockResolvedValue({
+        data: {
+          ...defaultLibrarySettings,
+          watched_folders: [{ path: '/work/docs', recursive: true }],
+        },
+      })
+      mockedFilesPage.mockResolvedValue({
+        data: fileListResponse({
+          total: 1,
+          items: [
+            {
+              id: 7,
+              name: '분기보고.xlsx',
+              path: '/work/docs/분기보고.xlsx',
+              file_type: 'Excel',
+              column_count: 3,
+              file_mtime: 1_700_000_000,
+            },
+          ],
+        }),
+      })
+
+      renderWithProviders(<FileSearch onOpenLibrarySettings={vi.fn()} />, { withLibraryRescan: false })
+
+      expect(await screen.findByText('최근 준비된 문서')).toBeInTheDocument()
+      expect(screen.getByText('분기보고.xlsx')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '대상 폴더 추가' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '검색 대상 확인' })).toBeInTheDocument()
+    })
+
+    it('guides users to refresh documents when folders exist but no indexed files are ready', async () => {
+      mockedLibraryGetSettings.mockResolvedValue({
+        data: {
+          ...defaultLibrarySettings,
+          watched_folders: [{ path: '/work/docs', recursive: true }],
+        },
+      })
+
+      renderWithProviders(<FileSearch onOpenLibrarySettings={vi.fn()} />, { withLibraryRescan: false })
+
+      expect(await screen.findByText('대상 폴더가 등록되어 있습니다')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '대상 폴더 추가' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '검색 대상 확인' })).toBeInTheDocument()
     })
   })
 
@@ -124,7 +205,7 @@ describe('FileSearch', () => {
     it('clicking 검색 triggers a query without waiting for debounce', async () => {
       mockedSearchQuery.mockResolvedValue({ data: emptyResponse('회의') })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       const input = screen.getByPlaceholderText(/파일 안의 단어를 검색/)
       await userEvent.type(input, '회의')
 
@@ -136,7 +217,7 @@ describe('FileSearch', () => {
     })
 
     it('the 검색 button is disabled when the query is empty', () => {
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       expect(screen.getByRole('button', { name: /^검색$/ })).toBeDisabled()
     })
   })
@@ -145,7 +226,7 @@ describe('FileSearch', () => {
     it('toggling .xlsx chip re-runs the search with file_types=["xlsx"]', async () => {
       mockedSearchQuery.mockResolvedValue({ data: emptyResponse('회의') })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
@@ -159,7 +240,7 @@ describe('FileSearch', () => {
     it('초기화 clears file-type filters and re-queries with file_types undefined', async () => {
       mockedSearchQuery.mockResolvedValue({ data: emptyResponse('회의') })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
@@ -176,7 +257,7 @@ describe('FileSearch', () => {
     it('changing scope to 파일명만 re-runs the search with search_scope=filename', async () => {
       mockedSearchQuery.mockResolvedValue({ data: emptyResponse('회의') })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
@@ -201,7 +282,7 @@ describe('FileSearch', () => {
         },
       })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
@@ -239,7 +320,7 @@ describe('FileSearch', () => {
         },
       })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
@@ -251,10 +332,7 @@ describe('FileSearch', () => {
       mockedSearchQuery.mockResolvedValue({ data: emptyResponse('없는단어') })
       const onOpenLibrarySettings = vi.fn()
 
-      renderWithProviders(
-        <FileSearch onOpenLibrarySettings={onOpenLibrarySettings} />,
-        { withLibraryRescan: false },
-      )
+      renderInactiveFileSearch({ onOpenLibrarySettings })
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '없는단어')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
@@ -281,7 +359,7 @@ describe('FileSearch', () => {
         },
       })
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       const input = screen.getByPlaceholderText(/파일 안의 단어를 검색/)
       await userEvent.type(input, '회의')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
@@ -299,7 +377,7 @@ describe('FileSearch', () => {
     it('shows an error snackbar when api.search.query rejects', async () => {
       mockedSearchQuery.mockRejectedValue(new Error('network'))
 
-      renderWithProviders(<FileSearch />, { withLibraryRescan: false })
+      renderInactiveFileSearch()
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
