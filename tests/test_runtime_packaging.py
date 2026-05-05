@@ -80,7 +80,8 @@ def test_release_workflow_caches_downloads_and_reusable_install_outputs():
     assert workflow.count("Cache Electron package downloads") == 2
     assert "Cache macOS backend runtime" in workflow
     assert workflow.count("scripts/ci_frontend_cache_key.py") == 2
-    assert "npm ci --prefer-offline --no-audit --fund=false" in workflow
+    assert workflow.count("npm ci --no-audit --fund=false") == 2
+    assert "npm ci --prefer-offline" not in workflow
     assert "pip install --upgrade pip" not in workflow
     assert "electron_config_cache" in workflow
     assert "- backend-verification" in publish_job
