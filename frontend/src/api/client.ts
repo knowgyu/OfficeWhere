@@ -421,6 +421,7 @@ export interface SearchRequest {
   search_scope?: SearchScope
   modified_from?: string
   modified_to?: string
+  excluded_folder_paths?: string[]
 }
 
 export interface SearchResponse {
@@ -548,6 +549,7 @@ export function normalizeFileType(fileType: unknown): FileType {
   if (raw.includes('excel')) return 'Excel'
   if (raw.includes('word')) return 'Word'
   if (raw.includes('power') || raw === 'ppt' || raw === 'pptx') return 'PowerPoint'
+  if (raw === 'pdf' || raw.includes('pdf')) return 'PDF'
   return 'Unknown'
 }
 
@@ -556,11 +558,15 @@ export function getCompareMode(input: unknown, fileType?: unknown): CompareMode 
   if (raw === 'excel') return 'excel'
   if (raw === 'word') return 'word'
   if (raw === 'ppt' || raw === 'powerpoint') return 'ppt'
+  if (raw === 'pdf') return 'pdf'
+  if (raw === 'none' || raw === 'unknown') return 'none'
 
   const normalizedType = normalizeFileType(fileType)
   if (normalizedType === 'Excel') return 'excel'
   if (normalizedType === 'Word') return 'word'
-  return 'ppt'
+  if (normalizedType === 'PowerPoint') return 'ppt'
+  if (normalizedType === 'PDF') return 'pdf'
+  return 'none'
 }
 
 export function getFileTypeLabel(fileType: unknown): string {
@@ -572,7 +578,9 @@ export function getFileTypeLabel(fileType: unknown): string {
 function buildCapabilitySummary(mode: CompareMode, _fileType: FileType): string[] {
   if (mode === 'excel') return ['Excel 문서', '검색 및 비교 가능', '표 내용 확인 가능']
   if (mode === 'word') return ['Word 문서', '2개 문서 비교', '문단/표 행 변경 확인']
-  return ['2개 발표자료 비교', '슬라이드 추가/삭제 확인', '슬라이드 내용 변경 확인']
+  if (mode === 'ppt') return ['2개 발표자료 비교', '슬라이드 추가/삭제 확인', '슬라이드 내용 변경 확인']
+  if (mode === 'pdf') return ['PDF 문서', '텍스트 검색 가능', '비교는 지원하지 않음']
+  return ['검색 가능', '미리보기 제한', '비교는 지원하지 않음']
 }
 
 function normalizePreviewBlocks(value: unknown): PreviewBlock[] {

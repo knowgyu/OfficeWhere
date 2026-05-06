@@ -5,7 +5,7 @@
 ## 현재 기준
 
 - 앱 이름은 **OfficeWhere**입니다.
-- 지원하는 등록/검색 대상은 Excel(`.xlsx`), Word(`.docx`), PowerPoint(`.pptx`)입니다.
+- 지원하는 등록/검색 대상은 Excel(`.xlsx`), Word(`.docx`), PowerPoint(`.pptx`), PDF(`.pdf`)입니다. PDF는 텍스트 검색 대상이며 변경 이력 비교 대상은 아닙니다.
 - 원본 문서는 읽기 전용입니다. 앱은 경로, 메타데이터, 색인, 비교 캐시, 설정만 앱 데이터 영역에 저장합니다.
 - Windows x64와 macOS arm64 배포를 만듭니다. Linux 패키지는 아직 제공하지 않습니다.
 - 릴리스 이력은 저장소의 markdown 파일이 아니라 GitHub Releases를 기준으로 봅니다.
@@ -19,7 +19,6 @@
 | 테스트를 어디에 추가할지 | [`test-guidelines.md`](test-guidelines.md) |
 | 릴리스 전 자동/수동 확인 | [`release-test-checklist.md`](release-test-checklist.md) |
 | Electron 패키징/업데이트/bridge | [`electron-migration.md`](electron-migration.md) |
-| 보호 문서 수동 호환성 확인 | [`protected-document-testbed.md`](protected-document-testbed.md) |
 
 ## 문서 관리 원칙
 

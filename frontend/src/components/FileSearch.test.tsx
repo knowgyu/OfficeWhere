@@ -251,6 +251,20 @@ describe('FileSearch', () => {
       await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalled())
       expect(mockedSearchQuery.mock.lastCall?.[0]?.file_types).toBeUndefined()
     })
+
+    it('toggling .pdf chip re-runs the search with file_types=["pdf"]', async () => {
+      mockedSearchQuery.mockResolvedValue({ data: emptyResponse('회의') })
+
+      renderInactiveFileSearch()
+      await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
+      await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      mockedSearchQuery.mockClear()
+      await userEvent.click(screen.getByRole('button', { name: '.pdf' }))
+
+      await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalled())
+      expect(mockedSearchQuery.mock.lastCall?.[0]?.file_types).toEqual(['pdf'])
+    })
   })
 
   describe('search scope', () => {
@@ -289,6 +303,136 @@ describe('FileSearch', () => {
       await waitFor(() => {
         expect(screen.getByText('주간보고_v1.0.docx')).toBeInTheDocument()
       })
+    })
+
+    it('shows current watched folders directly on the search page', async () => {
+      mockedLibraryGetSettings.mockResolvedValue({
+        data: {
+          ...defaultLibrarySettings,
+          watched_folders: [{ path: '/work/finance', recursive: true }],
+        },
+      })
+
+      renderWithProviders(<FileSearch onOpenLibrarySettings={vi.fn()} />, { withLibraryRescan: false })
+
+      expect(await screen.findByText('검색 대상 1개 폴더')).toBeInTheDocument()
+      expect(screen.getByText('/work/finance')).toBeInTheDocument()
+    })
+
+    it('can temporarily hide the clicked result folder for the current search', async () => {
+      mockedSearchQuery
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 2,
+            results: [
+              searchHit({
+                file_id: 1,
+                name: '숨길문서.docx',
+                path: '/lib/archive/숨길문서.docx',
+              }),
+              searchHit({
+                file_id: 2,
+                name: '남길문서.docx',
+                path: '/lib/current/남길문서.docx',
+              }),
+            ],
+            file_count: 2,
+            file_limit: 20,
+            has_more: false,
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 1,
+            results: [
+              searchHit({
+                file_id: 2,
+                name: '남길문서.docx',
+                path: '/lib/current/남길문서.docx',
+              }),
+            ],
+            file_count: 1,
+            file_limit: 20,
+            has_more: false,
+          },
+        })
+
+      renderInactiveFileSearch()
+      await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
+      await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      await waitFor(() => expect(screen.getByText('숨길문서.docx')).toBeInTheDocument())
+      await userEvent.click(screen.getAllByRole('button', { name: '이번 검색 제외' })[0])
+
+      await waitFor(() => {
+        expect(mockedSearchQuery.mock.lastCall?.[0]?.excluded_folder_paths).toEqual(['/lib/archive'])
+      })
+      await waitFor(() => expect(screen.queryByText('숨길문서.docx')).not.toBeInTheDocument())
+      expect(screen.getByText('남길문서.docx')).toBeInTheDocument()
+      expect(screen.getByText('숨김: archive')).toBeInTheDocument()
+    })
+
+    it('automatically loads the next result page when the sentinel scrolls into view', async () => {
+      let latestObserver: {
+        trigger: () => void
+        observe: ReturnType<typeof vi.fn>
+        disconnect: ReturnType<typeof vi.fn>
+      } | null = null
+      class MockIntersectionObserver {
+        observe = vi.fn()
+        disconnect = vi.fn()
+        private callback: IntersectionObserverCallback
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback
+          latestObserver = this
+        }
+
+        trigger() {
+          this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+        }
+      }
+      vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+
+      mockedSearchQuery
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 1,
+            results: [searchHit({ file_id: 1, name: '첫문서.docx', path: '/lib/첫문서.docx' })],
+            file_count: 1,
+            file_limit: 20,
+            has_more: true,
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 2,
+            results: [
+              searchHit({ file_id: 1, name: '첫문서.docx', path: '/lib/첫문서.docx' }),
+              searchHit({ file_id: 2, name: '다음문서.docx', path: '/lib/다음문서.docx' }),
+            ],
+            file_count: 2,
+            file_limit: 40,
+            has_more: false,
+          },
+        })
+
+      renderInactiveFileSearch()
+      await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
+      await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      await waitFor(() => expect(screen.getByText('첫문서.docx')).toBeInTheDocument())
+      await waitFor(() => expect(latestObserver?.observe).toHaveBeenCalled())
+      latestObserver?.trigger()
+
+      await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
+      expect(mockedSearchQuery.mock.calls[1]?.[0]?.file_limit).toBe(40)
+
+      vi.unstubAllGlobals()
     })
 
     it('does not add a duplicate-page CTA inside search results', async () => {

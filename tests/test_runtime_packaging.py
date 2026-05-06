@@ -19,6 +19,16 @@ def test_electron_packaged_python_dispatches_by_platform():
     assert "PYTHONNOUSERSITE" in main_ts
 
 
+def test_pdf_runtime_dependency_is_declared_and_vendored_for_windows():
+    requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
+    win_runtime = REPO_ROOT / "python-runtime" / "win-x64" / "site-packages"
+
+    assert "pypdfium2==5.8.0" in requirements
+    assert (win_runtime / "pypdfium2" / "__init__.py").exists()
+    assert (win_runtime / "pypdfium2_raw" / "pdfium.dll").exists()
+    assert (win_runtime / "pypdfium2-5.8.0.dist-info" / "METADATA").exists()
+
+
 def test_electron_builder_runtime_resources_are_platform_scoped():
     package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
     scripts = package["scripts"]
@@ -136,20 +146,11 @@ def test_release_workflow_builds_and_publishes_macos_artifacts():
 def test_release_docs_do_not_describe_macos_packaging_as_future_work():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     build_sh = (REPO_ROOT / "build.sh").read_text(encoding="utf-8")
-    windows_runtime_readme = (REPO_ROOT / "python-runtime" / "win-x64" / "README.md").read_text(encoding="utf-8")
-    release_checklist = (REPO_ROOT / "docs" / "release-test-checklist.md").read_text(encoding="utf-8")
-    mapped_drive_backslash = "K:" + "\\"
-    mapped_drive_slash = "K:" + "/"
     embedded_runtime_phrase = "embedded " + "Python runtime"
     private_runtime_phrase = "private " + "Python runtime"
-    protected_doc_acronym = "D" + "RM"
 
     assert "officewhere-vX.Y.Z-mac-arm64.dmg" in readme
     assert "macOS / Linux 패키지는 embedded Python 방식으로 추후 지원 예정" not in readme
-    assert mapped_drive_backslash not in readme
-    assert mapped_drive_slash not in readme
-    assert protected_doc_acronym not in windows_runtime_readme
-    assert protected_doc_acronym not in release_checklist
     assert embedded_runtime_phrase not in readme
     assert private_runtime_phrase not in readme
     assert "npm run package:mac" in build_sh

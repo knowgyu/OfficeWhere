@@ -15,6 +15,19 @@ from ..runtime import get_worker_count
 logger = logging.getLogger(__name__)
 
 
+def comparison_mode_for_file_type(file_type: str) -> str:
+    normalized = file_type.strip().lower()
+    if normalized == "excel":
+        return "excel"
+    if normalized == "word":
+        return "word"
+    if normalized == "powerpoint":
+        return "ppt"
+    if normalized == "pdf":
+        return "pdf"
+    return "none"
+
+
 def inspect_file_path(path: str) -> Dict[str, Any]:
     """Inspect a local file path before registration."""
     normalized_path = os.path.normpath(path.strip())
@@ -36,7 +49,7 @@ def inspect_file_path(path: str) -> Dict[str, Any]:
         "file_type": file_type,
         "columns": columns,
         "sample": schema["sample"],
-        "comparison_mode": file_type.lower().replace("powerpoint", "ppt"),
+        "comparison_mode": comparison_mode_for_file_type(file_type),
     }
 
 
@@ -64,10 +77,11 @@ def pick_local_file() -> str:
             parent=root,
             title="등록할 파일 선택",
             filetypes=[
-                ("지원 파일", "*.xlsx *.docx *.pptx"),
+                ("지원 파일", "*.xlsx *.docx *.pptx *.pdf"),
                 ("Excel", "*.xlsx"),
                 ("Word", "*.docx"),
                 ("PowerPoint", "*.pptx"),
+                ("PDF", "*.pdf"),
                 ("모든 파일", "*.*"),
             ],
         )
@@ -132,7 +146,7 @@ def scan_folder(
                 "file_type": get_file_type(str(file_path)),
                 "columns": [],
                 "sample": [],
-                "comparison_mode": get_file_type(str(file_path)).lower().replace("powerpoint", "ppt"),
+                "comparison_mode": comparison_mode_for_file_type(get_file_type(str(file_path))),
                 "error": str(e),
             }
 

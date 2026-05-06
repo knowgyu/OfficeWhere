@@ -56,7 +56,7 @@ const ICONS: Record<Tone, string> = {
 
 const TONE: Record<Tone, string> = {
   neutral:
-    'bg-[var(--md-sys-color-on-surface)] text-[var(--md-sys-color-surface-container-lowest)]',
+    'border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-highest)] text-[var(--md-sys-color-on-surface)]',
   success:
     'bg-[var(--md-sys-color-success)] text-white',
   danger:

@@ -52,6 +52,10 @@ export function FileTypeBadge({ fileType }: { fileType: string }) {
     tone = 'warning'
     label = 'PowerPoint'
     icon = 'slideshow'
+  } else if (raw.includes('pdf')) {
+    tone = 'danger'
+    label = 'PDF'
+    icon = 'picture_as_pdf'
   }
   return (
     <span

@@ -35,7 +35,7 @@ git diff --check
 
 - DB 테스트는 `tmp_path`로 `backend.database.DB_PATH`와 `DB_DIR`를 monkeypatch한 뒤 `init_db()`를 호출합니다.
 - 원본 문서 안전성 테스트는 파일이 실제로 남아 있는지까지 확인합니다.
-- 문서 새로고침 테스트는 `backend.core.library._collect_supported_paths_with_stats`와 `inspect_and_chunk`를 monkeypatch해 느린 Office parser 없이 상태 전이를 검증합니다.
+- 문서 새로고침 테스트는 `backend.core.library._collect_supported_paths_with_stats`와 `inspect_and_chunk`를 monkeypatch해 느린 Office/PDF parser 없이 상태 전이를 검증합니다.
 - 검색/중복/버전 그룹은 app-owned DB 파생 데이터가 결과에서 빠지거나 포함되는 경계를 명확히 검증합니다.
 
 ## Frontend 테스트 패턴

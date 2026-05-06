@@ -26,6 +26,7 @@ from ..database import (
 from .excel_analysis import extract_excel_used_ranges
 from .file_scope import SUPPORTED_EXTENSIONS
 from .index_perf import elapsed_ms, log_index_perf, log_parse_perf, timed_ms
+from .pdf_analysis import extract_pdf_pages, inspect_pdf_pages
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_slides
 from ..runtime import get_worker_count
@@ -254,6 +255,42 @@ def _inspect_and_chunk_pptx(path: str) -> Tuple[Dict[str, Any], List[Dict[str, s
         raise
 
 
+def _inspect_and_chunk_pdf(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
+    started = time.perf_counter()
+    metrics: Dict[str, Any] = {
+        "path": path,
+        "name": Path(path).name,
+        "ext": Path(path).suffix.lower(),
+        "size_bytes": os.path.getsize(path) if os.path.exists(path) else None,
+    }
+    try:
+        pages = extract_pdf_pages(path)
+        inspection = inspect_pdf_pages(pages)
+        chunks = [
+            {"location": page["location"], "content": page["text"]}
+            for page in pages
+        ]
+        metrics.update(
+            success=True,
+            file_type="PDF",
+            page_count_with_text=len(pages),
+            chunk_count=len(chunks),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("pdf_parse_done", **metrics)
+        return inspection, chunks
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            file_type="PDF",
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            duration_ms=elapsed_ms(started),
+        )
+        log_parse_perf("pdf_parse_done", **metrics)
+        raise
+
+
 def inspect_and_chunk(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     ext = Path(path).suffix.lower()
     if ext == ".xlsx":
@@ -262,6 +299,8 @@ def inspect_and_chunk(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
         inspection, chunks = _inspect_and_chunk_word(path)
     elif ext == ".pptx":
         inspection, chunks = _inspect_and_chunk_pptx(path)
+    elif ext == ".pdf":
+        inspection, chunks = _inspect_and_chunk_pdf(path)
     else:
         raise ValueError(f"지원하지 않는 파일 형식: {ext}")
 
@@ -306,6 +345,9 @@ def index_file(file_id: int, path: str) -> int:
             excel_index_payload = {
                 "comparison_artifacts": inspection.get("comparison_artifacts", []),
             }
+        elif ext == ".pdf":
+            inspection, chunks = timed_ms(metrics, "inspect_chunk_ms", lambda: _inspect_and_chunk_pdf(path))
+            excel_index_payload = {}
         else:
             log_index_perf(
                 "file_done",
@@ -345,7 +387,9 @@ def _sanitize_fts_query(raw: str) -> str:
     words = raw.split()
     if not words:
         return '""'
-    return " ".join(f'"{word}"' for word in words)
+    if len(words) > 1:
+        return f'"{" ".join(words)}"'
+    return f'"{words[0]}"'
 
 
 def search(
@@ -356,6 +400,7 @@ def search(
     modified_to: Optional[float] = None,
     file_limit: Optional[int] = None,
     per_file_limit: int = 3,
+    excluded_folder_paths: Optional[Sequence[str]] = None,
 ) -> list:
     if not query.strip():
         return []
@@ -368,6 +413,7 @@ def search(
         modified_to=modified_to,
         file_limit=file_limit,
         per_file_limit=per_file_limit,
+        excluded_folder_paths=excluded_folder_paths,
     )
 
 

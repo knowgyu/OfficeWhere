@@ -94,10 +94,6 @@ export default function DuplicateFiles({ libraryDataRevision = 0 }: { libraryDat
       ),
     )
   }, [groups, query])
-  const fileCount = useMemo(
-    () => filteredGroups.reduce((totalFiles, group) => totalFiles + group.files.length, 0),
-    [filteredGroups],
-  )
   const hasPrevious = offset > 0
   const hasNext = offset + DUPLICATE_PAGE_SIZE < total
   const visibleStart = total === 0 ? 0 : offset + 1
@@ -120,50 +116,23 @@ export default function DuplicateFiles({ libraryDataRevision = 0 }: { libraryDat
   }
 
   return (
-    <div className="space-y-6">
-      <Card variant="elevated">
+    <div className="space-y-4">
+      <Card variant="outlined" className="console-panel shadow-none">
         <CardSection
           title="같은 내용 문서"
-          description="파일명은 달라도 본문이 같은 문서를 한곳에 모아 확인합니다. 원본 문서는 여기서 삭제하거나 이동하지 않습니다."
+          description="본문이 같은 문서를 묶어서 보여줍니다. 원본 문서는 삭제하거나 이동하지 않습니다."
           trailing={
-            <Button
-              variant="outlined"
-              size="sm"
-              leadingIcon="refresh"
-              onClick={() => void fetchDuplicates(0)}
-              loading={loading}
-            >
-              새로고침
-            </Button>
-          }
-        >
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="surface-summary rounded-lg p-4">
-              <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">같은 내용 묶음</p>
-              <p className="mt-1 type-title-lg text-[var(--md-sys-color-on-surface)]">{total.toLocaleString('ko-KR')}개</p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outlined"
+                size="sm"
+                leadingIcon="refresh"
+                onClick={() => void fetchDuplicates(0)}
+                loading={loading}
+              >
+                새로고침
+              </Button>
             </div>
-            <div className="surface-summary rounded-lg p-4">
-              <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">표시 중인 파일</p>
-              <p className="mt-1 type-title-lg text-[var(--md-sys-color-on-surface)]">{fileCount.toLocaleString('ko-KR')}개</p>
-            </div>
-            <div className="surface-summary rounded-lg p-4">
-              <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">동작 방식</p>
-              <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface)]">
-                앱에서는 후보만 보여주고, 정리는 폴더에서 직접 진행합니다.
-              </p>
-            </div>
-          </div>
-        </CardSection>
-      </Card>
-
-      <Card variant="outlined">
-        <CardSection
-          title="내용이 같은 파일 묶음"
-          description="같은 파일이 여러 이름으로 저장된 후보를 묶음 단위로 보여줍니다."
-          trailing={
-            total > 0 ? (
-              <Chip label={`${visibleStart}-${visibleEnd} / ${total}`} tone="neutral" icon="view_list" as="span" />
-            ) : null
           }
         >
           <div className="mb-4 flex items-start gap-2 flex-wrap md:flex-nowrap">
@@ -276,9 +245,6 @@ function DuplicateGroupCard({
             {signatureLabel(group.content_signature)}
           </p>
         </div>
-        <span className="hidden rounded-md border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 py-1 type-label-md text-[var(--md-sys-color-on-surface-variant)] md:inline-flex">
-          확인 후보
-        </span>
       </header>
       <ul className="divide-y divide-[var(--md-sys-color-outline-variant)]">
         {group.files.map((file) => (

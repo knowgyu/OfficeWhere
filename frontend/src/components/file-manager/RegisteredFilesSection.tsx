@@ -188,7 +188,7 @@ export default function RegisteredFilesSection({
         <EmptyState
           icon="library_add"
           title="아직 등록된 파일이 없습니다"
-          description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT 파일을 추가해 보세요."
+          description="파일 경로를 입력하거나 '파일 찾기'로 Excel / Word / PPT / PDF 파일을 추가해 보세요."
           compact
         />
       ) : (

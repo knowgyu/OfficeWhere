@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, FileInfo, SearchResponse, SearchResult, SearchScope } from '../api/client'
+import {
+  api,
+  type FileInfo,
+  type SearchResponse,
+  type SearchResult,
+  type SearchScope,
+  type WatchedFolder,
+} from '../api/client'
 import {
   Badge,
   Button,
@@ -21,6 +28,7 @@ const FILE_TYPE_FILTERS = [
   { label: '.xlsx', value: 'xlsx', icon: 'table_chart' },
   { label: '.docx', value: 'docx', icon: 'article' },
   { label: '.pptx', value: 'pptx', icon: 'slideshow' },
+  { label: '.pdf', value: 'pdf', icon: 'picture_as_pdf' },
 ]
 
 const SEARCH_SCOPE_STATUS: Record<SearchScope, string> = {
@@ -44,7 +52,7 @@ const SEARCH_SCOPE_EMPTY: Record<SearchScope, string> = {
 const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: string }> = {
   filename_content: {
     title: '파일명과 본문을 한 번에 검색',
-    description: '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT 문서 안의 단어까지 검색할 수 있습니다.',
+    description: '먼저 설정에서 대상 폴더를 추가하면 Excel, Word, PPT, PDF 문서 안의 단어까지 검색할 수 있습니다.',
   },
   filename: {
     title: '파일명으로 빠르게 검색',
@@ -52,7 +60,7 @@ const SEARCH_SCOPE_READY: Record<SearchScope, { title: string; description: stri
   },
   content: {
     title: '본문만 정밀 검색',
-    description: '파일명 일치를 제외하고 Excel, Word, PPT 문서 본문에서만 검색합니다.',
+    description: '파일명 일치를 제외하고 Excel, Word, PPT, PDF 문서 본문에서만 검색합니다.',
   },
 }
 
@@ -140,6 +148,23 @@ function formatInitialDocumentDate(file: FileInfo) {
     return `등록 ${new Date(file.created_at).toLocaleDateString('ko-KR', { dateStyle: 'medium' })}`
   }
   return '최근 문서'
+}
+
+function normalizePathForFilter(path: string) {
+  return path.trim().replace(/\\/g, '/').replace(/\/+$/g, '').toLocaleLowerCase('ko-KR')
+}
+
+function getParentFolderPath(filePath: string) {
+  const trimmed = filePath.trim()
+  const slashIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  if (slashIndex <= 0) return trimmed
+  return trimmed.slice(0, slashIndex)
+}
+
+function shortPathLabel(path: string) {
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  if (parts.length === 0) return path || '대상 폴더'
+  return parts[parts.length - 1] ?? path
 }
 
 function getContentFileKey(item: SearchResult) {
@@ -238,13 +263,14 @@ export default function FileSearch({
   const [initialDataLoading, setInitialDataLoading] = useState(false)
   const [initialFiles, setInitialFiles] = useState<FileInfo[]>([])
   const [initialFileTotal, setInitialFileTotal] = useState(0)
-  const [watchedFolderCount, setWatchedFolderCount] = useState<number | null>(null)
+  const [watchedFolders, setWatchedFolders] = useState<WatchedFolder[] | null>(null)
   const [searched, setSearched] = useState(false)
   const [selectedFileTypes, setSelectedFileTypes] = useState<string[]>([])
   const [searchScope, setSearchScope] = useState<SearchScope>('filename_content')
   const [modifiedDateFilter, setModifiedDateFilter] = useState<ModifiedDateFilter>('all')
   const [customModifiedFrom, setCustomModifiedFrom] = useState('')
   const [customModifiedTo, setCustomModifiedTo] = useState('')
+  const [excludedFolderPaths, setExcludedFolderPaths] = useState<string[]>([])
   const [expandedContentFiles, setExpandedContentFiles] = useState<Set<string>>(new Set())
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -252,6 +278,7 @@ export default function FileSearch({
   const initialDataRequestSeq = useRef(0)
   const prefetchedSearchRef = useRef<PrefetchedSearch | null>(null)
   const tutorialSearchAdvanceRef = useRef<string | null>(null)
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
 
   const buildModifiedDateParams = useCallback(
     (
@@ -283,7 +310,17 @@ export default function FileSearch({
     dateFilter: ModifiedDateFilter,
     customFrom: string,
     customTo: string,
-  ) => JSON.stringify([q.trim(), [...fileTypes].sort(), scope, dateFilter, customFrom, customTo])
+    excludedFolders: string[],
+  ) =>
+    JSON.stringify([
+      q.trim(),
+      [...fileTypes].sort(),
+      scope,
+      dateFilter,
+      customFrom,
+      customTo,
+      [...excludedFolders].map(normalizePathForFilter).sort(),
+    ])
 
   const applySearchResponse = (
     data: SearchResponse,
@@ -314,6 +351,7 @@ export default function FileSearch({
       dateFilter = modifiedDateFilter,
       customFrom = customModifiedFrom,
       customTo = customModifiedTo,
+      excludedFolders = excludedFolderPaths,
       fileLimit = INITIAL_SEARCH_FILE_LIMIT,
       mode: 'replace' | 'more' = 'replace',
     ) => {
@@ -336,7 +374,7 @@ export default function FileSearch({
         return false
       }
       const nextFileLimit = Math.min(Math.max(fileLimit, INITIAL_SEARCH_FILE_LIMIT), MAX_SEARCH_FILE_LIMIT)
-      const baseKey = searchKey(q, fileTypes, scope, dateFilter, customFrom, customTo)
+      const baseKey = searchKey(q, fileTypes, scope, dateFilter, customFrom, customTo, excludedFolders)
       const prefetched = prefetchedSearchRef.current
       if (mode === 'replace') prefetchedSearchRef.current = null
       if (mode === 'more') {
@@ -355,6 +393,7 @@ export default function FileSearch({
                 file_limit: nextFileLimit,
                 file_types: fileTypes.length > 0 ? fileTypes : undefined,
                 search_scope: scope,
+                excluded_folder_paths: excludedFolders.length > 0 ? excludedFolders : undefined,
                 ...modifiedDateParams,
               })
         if (requestId !== searchRequestSeq.current) return false
@@ -370,6 +409,7 @@ export default function FileSearch({
               file_limit: preloadFileLimit,
               file_types: fileTypes.length > 0 ? fileTypes : undefined,
               search_scope: scope,
+              excluded_folder_paths: excludedFolders.length > 0 ? excludedFolders : undefined,
               ...modifiedDateParams,
             })
             .then((prefetchResponse) => {
@@ -413,6 +453,7 @@ export default function FileSearch({
       customModifiedFrom,
       customModifiedTo,
       modifiedDateFilter,
+      excludedFolderPaths,
       selectedFileTypes,
       searchScope,
       snackbar,
@@ -500,6 +541,47 @@ export default function FileSearch({
     }
   }
 
+  const addTemporaryExcludedFolder = (filePath: string) => {
+    const folderPath = getParentFolderPath(filePath)
+    if (!folderPath) return
+
+    let nextFolders = excludedFolderPaths
+    const normalized = normalizePathForFilter(folderPath)
+    if (!nextFolders.some((path) => normalizePathForFilter(path) === normalized)) {
+      nextFolders = [...nextFolders, folderPath]
+      setExcludedFolderPaths(nextFolders)
+      snackbar.info(`이번 검색에서 "${shortPathLabel(folderPath)}" 폴더를 숨겼습니다.`)
+    }
+    if (query.trim()) {
+      void doSearch(
+        query,
+        selectedFileTypes,
+        searchScope,
+        modifiedDateFilter,
+        customModifiedFrom,
+        customModifiedTo,
+        nextFolders,
+      )
+    }
+  }
+
+  const removeTemporaryExcludedFolder = (folderPath: string) => {
+    const normalized = normalizePathForFilter(folderPath)
+    const nextFolders = excludedFolderPaths.filter((path) => normalizePathForFilter(path) !== normalized)
+    setExcludedFolderPaths(nextFolders)
+    if (query.trim()) {
+      void doSearch(
+        query,
+        selectedFileTypes,
+        searchScope,
+        modifiedDateFilter,
+        customModifiedFrom,
+        customModifiedTo,
+        nextFolders,
+      )
+    }
+  }
+
   useEffect(() => {
     if (!active) return
     if (libraryDataRevision === 0) return
@@ -535,13 +617,13 @@ export default function FileSearch({
     ])
       .then(([settingsResponse, filesResponse]) => {
         if (cancelled || requestId !== initialDataRequestSeq.current) return
-        setWatchedFolderCount(settingsResponse.data.watched_folders.length)
+        setWatchedFolders(settingsResponse.data.watched_folders)
         setInitialFiles(filesResponse.data.items)
         setInitialFileTotal(filesResponse.data.total)
       })
       .catch(() => {
         if (cancelled || requestId !== initialDataRequestSeq.current) return
-        setWatchedFolderCount(null)
+        setWatchedFolders(null)
         setInitialFiles([])
         setInitialFileTotal(0)
       })
@@ -608,13 +690,15 @@ export default function FileSearch({
     searchScope !== 'filename_content' ||
     modifiedDateFilter !== 'all' ||
     Boolean(customModifiedFrom) ||
-    Boolean(customModifiedTo)
+    Boolean(customModifiedTo) ||
+    excludedFolderPaths.length > 0
   const allContentMatchesExpanded =
     contentFileKeys.length > 0 && contentFileKeys.every((key) => expandedContentFiles.has(key))
   const hasResults = !loading && results.length > 0
-  const hasWatchedFolders = (watchedFolderCount ?? 0) > 0
+  const watchedFolderCount = watchedFolders?.length ?? 0
+  const hasWatchedFolders = watchedFolderCount > 0
   const initialReadyAction = onOpenLibrarySettings
-    ? watchedFolderCount === 0
+    ? watchedFolders !== null && watchedFolderCount === 0
       ? (
           <Button variant="filled" leadingIcon="drive_folder_upload" onClick={onOpenLibrarySettings}>
             대상 폴더 추가
@@ -640,8 +724,9 @@ export default function FileSearch({
     setModifiedDateFilter('all')
     setCustomModifiedFrom('')
     setCustomModifiedTo('')
+    setExcludedFolderPaths([])
     if (query.trim()) {
-      void doSearch(query, [], 'filename_content', 'all', '', '')
+      void doSearch(query, [], 'filename_content', 'all', '', '', [])
     }
   }
 
@@ -655,6 +740,7 @@ export default function FileSearch({
 
   const loadMoreFiles = () => {
     if (!searchMeta.hasMore || loadingMore || loading) return
+    if (!query.trim()) return
     const nextLimit = Math.min(searchMeta.fileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
     void doSearch(
       query,
@@ -663,10 +749,40 @@ export default function FileSearch({
       modifiedDateFilter,
       customModifiedFrom,
       customModifiedTo,
+      excludedFolderPaths,
       nextLimit,
       'more',
     )
   }
+
+  useEffect(() => {
+    const node = loadMoreSentinelRef.current
+    if (!node || !searchMeta.hasMore || loading || loadingMore) return undefined
+    if (typeof IntersectionObserver === 'undefined') return undefined
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries
+        if (!entry?.isIntersecting) return
+        loadMoreFiles()
+      },
+      { rootMargin: '360px 0px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [
+    customModifiedFrom,
+    customModifiedTo,
+    excludedFolderPaths,
+    loading,
+    loadingMore,
+    modifiedDateFilter,
+    query,
+    searchMeta.fileLimit,
+    searchMeta.hasMore,
+    searchScope,
+    selectedFileTypes,
+  ])
 
   useEffect(() => {
     return () => {
@@ -691,7 +807,7 @@ export default function FileSearch({
 
   return (
     <div className="space-y-6">
-      <Card variant="elevated" className="console-panel p-5 md:p-6 space-y-5">
+      <Card variant="elevated" className="console-panel p-4 md:p-5 space-y-4">
         <div className="flex flex-col md:flex-row gap-3 md:items-center">
           <div className="flex-1">
             <div
@@ -703,7 +819,7 @@ export default function FileSearch({
                 placeholder={tutorialStep === 'search' ? `따라 쓰세요: ${EXAMPLE_SEARCH_QUERY}` : '파일 안의 단어를 검색 (예: 일정, 예산안, 실험 결과)'}
                 value={query}
                 onChange={(event) => handleQueryChange(event.target.value)}
-                className="h-12 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_var(--ow-inset-highlight)_inset,0_0_0_1px_color-mix(in_srgb,var(--md-sys-color-outline-variant)_55%,transparent)]"
+                className="h-11 rounded-lg bg-[var(--md-sys-color-surface-container-lowest)] pr-11 text-[1rem] shadow-[0_1px_0_var(--ow-inset-highlight)_inset,0_0_0_1px_color-mix(in_srgb,var(--md-sys-color-outline-variant)_55%,transparent)]"
                 trailing={
                   query ? (
                     <IconButton
@@ -721,6 +837,7 @@ export default function FileSearch({
                           hasMore: false,
                         })
                         setSearched(false)
+                        setExcludedFolderPaths([])
                         setExpandedContentFiles(new Set())
                         setLoading(false)
                         setLoadingMore(false)
@@ -771,8 +888,58 @@ export default function FileSearch({
           )}
         </div>
 
+        <div className="surface-summary flex flex-col gap-2.5 rounded-lg p-2.5 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0 flex items-start gap-3">
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]">
+              <Icon name="folder_open" size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="type-label-lg text-[var(--md-sys-color-on-surface)]">
+                {watchedFolders === null
+                  ? '검색 대상 확인 중'
+                  : watchedFolderCount > 0
+                    ? `검색 대상 ${watchedFolderCount}개 폴더`
+                    : '검색 대상 폴더 없음'}
+              </p>
+              <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
+                {watchedFolders === null ? (
+                  <span className="inline-flex items-center gap-1.5 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    <Spinner size={14} />
+                    설정을 읽는 중
+                  </span>
+                ) : watchedFolderCount === 0 ? (
+                  <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    설정에서 대상 폴더를 추가하면 바로 검색할 수 있습니다.
+                  </span>
+                ) : (
+                  <>
+                    {watchedFolders.slice(0, 3).map((folder) => (
+                      <Chip
+                        key={folder.path}
+                        label={folder.path}
+                        tone="secondary"
+                        as="span"
+                        icon={folder.recursive ? 'account_tree' : 'folder'}
+                        className="max-w-full truncate"
+                      />
+                    ))}
+                    {watchedFolderCount > 3 && (
+                      <Chip label={`+${watchedFolderCount - 3}개`} tone="neutral" as="span" />
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          {onOpenLibrarySettings && (
+            <Button variant="text" size="sm" leadingIcon="settings" onClick={onOpenLibrarySettings}>
+              대상 관리
+            </Button>
+          )}
+        </div>
+
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,0.55fr)]">
-          <div className="console-subpanel rounded-lg p-4 space-y-2">
+          <div className="console-subpanel rounded-lg p-3 space-y-2">
             <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">검색 범위</span>
             <div>
               <SegmentedButton<SearchScope>
@@ -790,7 +957,7 @@ export default function FileSearch({
               {SEARCH_SCOPE_DESCRIPTION[searchScope]}
             </p>
           </div>
-          <div className="console-subpanel rounded-lg p-4">
+          <div className="console-subpanel rounded-lg p-3">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">문서 형식</span>
               {FILE_TYPE_FILTERS.map((filter) => {
@@ -818,7 +985,7 @@ export default function FileSearch({
               </Button>
             </div>
           </div>
-          <div className="console-subpanel rounded-lg p-4 space-y-2 lg:col-span-2">
+          <div className="console-subpanel rounded-lg p-3 space-y-1.5 lg:col-span-2">
             <div className="flex items-center justify-between gap-3">
               <span className="type-label-lg text-[var(--md-sys-color-on-surface-variant)]">수정일</span>
               <Button
@@ -871,6 +1038,16 @@ export default function FileSearch({
                 {modifiedDateFilter !== 'all' && (
                   <Chip label={activeModifiedDateLabel} tone="secondary" as="span" />
                 )}
+                {excludedFolderPaths.map((folderPath) => (
+                  <Chip
+                    key={folderPath}
+                    label={`숨김: ${shortPathLabel(folderPath)}`}
+                    tone="secondary"
+                    as="span"
+                    icon="visibility_off"
+                    onRemove={() => removeTemporaryExcludedFolder(folderPath)}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -996,6 +1173,9 @@ export default function FileSearch({
             {modifiedDateFilter !== 'all' && (
               <Chip label={`수정일 ${activeModifiedDateLabel}`} tone="secondary" as="span" icon="event" />
             )}
+            {excludedFolderPaths.length > 0 && (
+              <Chip label={`임시 숨김 ${excludedFolderPaths.length}개`} tone="secondary" as="span" icon="visibility_off" />
+            )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
               파일별로 묶어서 보여줍니다
               {prefetching ? ' · 다음 결과 준비 중' : ''}
@@ -1090,6 +1270,15 @@ export default function FileSearch({
                         >
                           폴더
                         </Button>
+                        <Button
+                          variant="text"
+                          size="sm"
+                          leadingIcon="visibility_off"
+                          onClick={() => addTemporaryExcludedFolder(items[0].path)}
+                          title="이번 검색에서 이 파일이 있는 폴더의 결과를 숨깁니다."
+                        >
+                          이번 검색 제외
+                        </Button>
                       </div>
                     </div>
                     {firstContentItem && !contentExpanded && (
@@ -1130,7 +1319,8 @@ export default function FileSearch({
             })}
           </div>
           {searchMeta.hasMore && (
-            <div className="flex justify-center pt-2">
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <div ref={loadMoreSentinelRef} className="h-2 w-full" aria-hidden="true" />
               <Button
                 variant="tonal"
                 leadingIcon="expand_more"
@@ -1138,7 +1328,7 @@ export default function FileSearch({
                 loading={loadingMore}
                 disabled={loadingMore || loading}
               >
-                더 보기 · 최대 {MAX_SEARCH_FILE_LIMIT}개 파일
+                더 보기 · 스크롤해도 자동으로 불러옵니다
               </Button>
             </div>
           )}

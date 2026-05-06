@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from .excel_analysis import ExcelUsedRange, extract_excel_used_range, inspect_excel_file
 from .file_scope import SUPPORTED_EXTENSIONS
+from .pdf_analysis import inspect_pdf_file
 from .ppt_analysis import inspect_ppt_file
 from .word_analysis import inspect_word_file
 
@@ -16,6 +17,7 @@ def get_file_type(path: str) -> str:
         ".xlsx": "Excel",
         ".docx": "Word",
         ".pptx": "PowerPoint",
+        ".pdf": "PDF",
     }
     return mapping.get(ext, "Unknown")
 
@@ -50,4 +52,6 @@ def get_file_schema(path: str) -> Dict[str, Any]:
         return inspect_word_file(path)
     if file_type == "PowerPoint":
         return inspect_ppt_file(path)
+    if file_type == "PDF":
+        return inspect_pdf_file(path)
     raise ValueError(f"지원하지 않는 파일 형식입니다: {Path(path).suffix.lower()}")

@@ -25,10 +25,11 @@ FILE_TYPE_ALIASES = {
     "powerpoint": "PowerPoint",
     "excel": "Excel",
     "xlsx": "Excel",
+    "pdf": "PDF",
 }
 DEFAULT_SEARCH_FILE_LIMIT = 20
 MAX_SEARCH_FILE_LIMIT = 100
-CONTENT_MATCHES_PER_FILE = 3
+CONTENT_MATCHES_PER_FILE = 8
 
 
 def normalize_file_type_filters(values: list[str]) -> list[str]:
@@ -109,6 +110,7 @@ def _filename_matches(
     limit: int,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
+    excluded_folder_paths: Optional[list[str]] = None,
 ) -> list[dict]:
     normalized_query = query.strip()
     if not normalized_query:
@@ -120,6 +122,7 @@ def _filename_matches(
         file_types=file_types,
         modified_from=modified_from,
         modified_to=modified_to,
+        excluded_folder_paths=excluded_folder_paths,
         limit=limit,
     ):
         matches.append(
@@ -146,6 +149,7 @@ def _content_matches(
     file_limit: int,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
+    excluded_folder_paths: Optional[list[str]] = None,
 ) -> list[dict]:
     return search(
         query,
@@ -155,6 +159,7 @@ def _content_matches(
         modified_to=modified_to,
         file_limit=file_limit,
         per_file_limit=CONTENT_MATCHES_PER_FILE,
+        excluded_folder_paths=excluded_folder_paths,
     )
 
 
@@ -163,12 +168,20 @@ def search_files(req: SearchRequest):
     file_types = normalize_file_type_filters(req.file_types)
     modified_from = _parse_modified_bound(req.modified_from, end_of_day=False)
     modified_to = _parse_modified_bound(req.modified_to, end_of_day=True)
+    excluded_folder_paths = [path for path in req.excluded_folder_paths if path.strip()]
     file_limit = _bounded_file_limit(req.file_limit)
     query_limit = min(max(req.limit, file_limit * CONTENT_MATCHES_PER_FILE), file_limit * (CONTENT_MATCHES_PER_FILE + 1))
     fetch_file_limit = file_limit + 1
 
     if req.search_scope == "filename":
-        name_matches = _filename_matches(req.query, file_types, fetch_file_limit, modified_from, modified_to)
+        name_matches = _filename_matches(
+            req.query,
+            file_types,
+            fetch_file_limit,
+            modified_from,
+            modified_to,
+            excluded_folder_paths,
+        )
         results, has_more = _cap_unique_files(name_matches, file_limit)
     elif req.search_scope == "content":
         results = _content_matches(
@@ -178,10 +191,18 @@ def search_files(req: SearchRequest):
             file_limit=fetch_file_limit,
             modified_from=modified_from,
             modified_to=modified_to,
+            excluded_folder_paths=excluded_folder_paths,
         )
         results, has_more = _cap_unique_files(results, file_limit)
     else:
-        name_matches = _filename_matches(req.query, file_types, fetch_file_limit, modified_from, modified_to)
+        name_matches = _filename_matches(
+            req.query,
+            file_types,
+            fetch_file_limit,
+            modified_from,
+            modified_to,
+            excluded_folder_paths,
+        )
         seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
         content_results = []
         for item in _content_matches(
@@ -191,6 +212,7 @@ def search_files(req: SearchRequest):
             file_limit=fetch_file_limit,
             modified_from=modified_from,
             modified_to=modified_to,
+            excluded_folder_paths=excluded_folder_paths,
         ):
             key = (item["file_id"], item["location"], item["snippet"])
             if key in seen:

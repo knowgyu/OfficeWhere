@@ -142,6 +142,17 @@ describe('FileManager', () => {
       })
     })
 
+    it('separates document source, app behavior, and maintenance settings areas', async () => {
+      renderWithProviders(<FileManager />)
+      await waitFor(() => expect(mocked.getSettings).toHaveBeenCalled())
+
+      expect(screen.getByRole('heading', { name: '문서 소스' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '등록된 문서' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '표시와 앱 동작' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '문제 해결과 앱 데이터' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '스캔/제외 설정' })).toBeInTheDocument()
+    })
+
     it('renders the configured watched folders', async () => {
       mocked.getSettings.mockResolvedValueOnce({
         data: {

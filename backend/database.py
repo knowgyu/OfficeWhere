@@ -2182,6 +2182,7 @@ def search_file_names(
     file_types: Optional[Sequence[str]] = None,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
+    excluded_folder_paths: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, Any]]:
     normalized_query = query.strip()
     if not normalized_query:
@@ -2202,6 +2203,7 @@ def search_file_names(
     if modified_to is not None:
         clauses.append("file_mtime <= ?")
         params.append(modified_to)
+    _extend_excluded_path_filters(clauses, params, excluded_folder_paths)
     params.append(max(1, limit))
 
     with _read_connection(row_factory=sqlite3.Row) as conn:
@@ -2653,6 +2655,45 @@ def _search_terms_for_table(raw_query: str) -> List[str]:
     return [term.strip().lower() for term in cleaned.split() if term.strip()]
 
 
+def _normalize_excluded_folder_path(value: str) -> str:
+    normalized = str(value or "").strip().replace("\\", "/")
+    if not normalized:
+        return ""
+    normalized = os.path.normpath(normalized).replace("\\", "/")
+    while len(normalized) > 1 and normalized.endswith("/"):
+        normalized = normalized[:-1]
+    return normalized.lower()
+
+
+def _normalize_excluded_folder_paths(values: Optional[Sequence[str]]) -> List[str]:
+    seen: set[str] = set()
+    normalized_paths: List[str] = []
+    for value in values or []:
+        normalized = _normalize_excluded_folder_path(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        normalized_paths.append(normalized)
+    return normalized_paths
+
+
+def _extend_excluded_path_filters(
+    clauses: List[str],
+    params: List[Any],
+    excluded_folder_paths: Optional[Sequence[str]],
+    *,
+    column_expr: str = "rf.path",
+) -> None:
+    normalized_paths = _normalize_excluded_folder_paths(excluded_folder_paths)
+    if not normalized_paths:
+        return
+
+    normalized_column_expr = f"lower(replace({column_expr}, char(92), '/'))"
+    for folder_path in normalized_paths:
+        clauses.append(f"NOT ({normalized_column_expr} = ? OR {normalized_column_expr} LIKE ?)")
+        params.extend([folder_path, f"{folder_path}/%"])
+
+
 def _search_table_for_query(raw_query: str) -> str:
     terms = _search_terms_for_table(raw_query)
     if _supports_fts5_trigram() and terms and all(len(term) >= 3 for term in terms):
@@ -2719,6 +2760,7 @@ def search_chunks(
     modified_to: Optional[float] = None,
     file_limit: Optional[int] = None,
     per_file_limit: int = 3,
+    excluded_folder_paths: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, Any]]:
     started = perf_counter()
     query_text = raw_query or fts_query
@@ -2741,6 +2783,10 @@ def search_chunks(
     if modified_to is not None:
         filter_clause += " AND rf.file_mtime <= ?"
         params.append(modified_to)
+    excluded_clauses: List[str] = []
+    _extend_excluded_path_filters(excluded_clauses, params, excluded_folder_paths)
+    if excluded_clauses:
+        filter_clause += " AND " + " AND ".join(excluded_clauses)
 
     try:
         if file_limit is None:

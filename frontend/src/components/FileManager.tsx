@@ -1,4 +1,12 @@
-import { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 import {
   api,
@@ -184,6 +192,59 @@ function normalizeExcludedFolderNames(values: string[]) {
     output.push(name)
   })
   return output
+}
+
+function SettingsArea({
+  eyebrow,
+  title,
+  description,
+  children,
+  defaultCollapsed = false,
+  collapsedLabel = '필요할 때 펼쳐서 사용',
+  collapsedHint = '원본 문서는 삭제하지 않음',
+}: {
+  eyebrow: string
+  title: string
+  description: string
+  children: ReactNode
+  defaultCollapsed?: boolean
+  collapsedLabel?: string
+  collapsedHint?: string
+}) {
+  const content = defaultCollapsed ? (
+    <details className="group rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/55 p-3">
+      <summary className="state-host flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-3 py-2 text-[var(--md-sys-color-on-surface)] transition-colors hover:bg-[var(--md-sys-color-surface-container-low)]">
+        <span className="state-layer" />
+        <span className="relative inline-flex items-center gap-2 type-label-lg">
+          <Icon name="unfold_more" size={18} className="transition-transform group-open:rotate-180" />
+          {collapsedLabel}
+        </span>
+        <span className="relative type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          {collapsedHint}
+        </span>
+      </summary>
+      <div className="pt-3">{children}</div>
+    </details>
+  ) : (
+    children
+  )
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1 px-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="type-label-lg uppercase tracking-[0.08em] text-[var(--md-sys-color-primary)]">
+            {eyebrow}
+          </p>
+          <h2 className="type-title-lg text-[var(--md-sys-color-on-surface)]">{title}</h2>
+        </div>
+        <p className="max-w-2xl type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+          {description}
+        </p>
+      </div>
+      {content}
+    </section>
+  )
 }
 
 export default function FileManager({
@@ -813,7 +874,12 @@ export default function FileManager({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      <SettingsArea
+        eyebrow="Document source"
+        title="문서 소스"
+        description="검색 대상 폴더와 새로고침 규칙을 한곳에서 관리합니다. 원본 문서는 읽기 전용으로만 확인합니다."
+      >
       <Card variant="elevated" className="console-panel">
         <CardSection
           title="대상 폴더"
@@ -826,7 +892,7 @@ export default function FileManager({
                 onClick={() => setIndexSettingsOpen(true)}
                 disabled={settingsLoading}
               >
-                문서 확인 속도 설정
+                스캔/제외 설정
               </Button>
               <Button
                 variant="filled"
@@ -1040,7 +1106,13 @@ export default function FileManager({
           </div>
         </CardSection>
       </Card>
+      </SettingsArea>
 
+      <SettingsArea
+        eyebrow="Library"
+        title="등록된 문서"
+        description="현재 검색과 비교에 쓰이는 파일 목록입니다. 파일 해제는 OfficeWhere 등록만 지우며 원본 문서는 삭제하지 않습니다."
+      >
       <RegisteredFilesSection
         files={files}
         fileTotal={fileTotal}
@@ -1078,7 +1150,16 @@ export default function FileManager({
         onPreview={(file) => void handlePreview(file)}
         onPage={goToFilePage}
       />
+      </SettingsArea>
 
+      <SettingsArea
+        eyebrow="App behavior"
+        title="표시와 앱 동작"
+        description="화면 밀도, 테마, 닫기 동작처럼 문서 소스와 분리된 개인 사용 환경을 조정합니다."
+        defaultCollapsed
+        collapsedLabel="테마·글자·닫기 동작 펼치기"
+        collapsedHint="문서 소스와 별도 설정"
+      >
       <GeneralSettingsSection
         textSize={textSize}
         themeMode={themeMode}
@@ -1110,7 +1191,14 @@ export default function FileManager({
           />
         </Card>
       )}
+      </SettingsArea>
 
+      <SettingsArea
+        eyebrow="Maintenance"
+        title="문제 해결과 앱 데이터"
+        description="캐시와 앱 설정을 정리합니다. 이 영역의 삭제 작업도 원본 문서와 대상 폴더 파일은 건드리지 않습니다."
+        defaultCollapsed
+      >
       <AppDataManagementSection
         appDataAvailable={appDataAvailable}
         appDataPaths={appDataPaths}
@@ -1128,6 +1216,7 @@ export default function FileManager({
         onToggleAdvanced={setAppDataAdvancedOpen}
         onOpenSelectedDelete={() => setClearAppDataOpen(true)}
       />
+      </SettingsArea>
 
 
       <Dialog
@@ -1135,8 +1224,8 @@ export default function FileManager({
         onClose={() => setIndexSettingsOpen(false)}
         size="md"
         icon="tune"
-        title="문서 확인 속도 설정"
-        description="한 번에 확인할 문서 수와 건너뛸 폴더 이름을 정합니다."
+        title="스캔/제외 설정"
+        description="폴더를 다시 읽을 때 적용되는 성능 옵션과 항상 건너뛸 폴더 이름을 정합니다."
         actions={
           <>
             <Button variant="text" onClick={() => setIndexSettingsOpen(false)}>
@@ -1213,9 +1302,9 @@ export default function FileManager({
           <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-4 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">제외 폴더</p>
+                <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">항상 제외할 폴더 이름</p>
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                  이름이 같은 폴더는 확인하지 않습니다. 불필요한 폴더를 건너뛰면 큰 폴더에서도 빠르게 시작합니다.
+                  대상 폴더를 새로 읽을 때 이름이 같은 하위 폴더는 계속 건너뜁니다. 검색 결과에서 일시적으로 숨기는 기능과는 별개입니다.
                 </p>
               </div>
               <Button
@@ -1249,7 +1338,7 @@ export default function FileManager({
               <div className="flex flex-wrap gap-2">
                 {excludedFolderDraft.length === 0 ? (
                   <span className="type-body-sm px-2 py-1 text-[var(--md-sys-color-on-surface-variant)]">
-                    제외 폴더가 없습니다.
+                    항상 제외할 폴더 이름이 없습니다.
                   </span>
                 ) : (
                   excludedFolderDraft.map((name) => (
@@ -1274,7 +1363,7 @@ export default function FileManager({
           </div>
 
           <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-            네트워크 폴더나 외장 저장장치에서는 동시 확인 수를 너무 높이면 오히려 느려질 수 있습니다. 제외 폴더는 이름 기준으로만 적용됩니다.
+            네트워크 폴더나 외장 저장장치에서는 동시 확인 수를 너무 높이면 오히려 느려질 수 있습니다. 항상 제외할 폴더는 이름 기준으로만 적용됩니다.
           </p>
         </div>
       </Dialog>

@@ -335,6 +335,7 @@ class SearchRequest(BaseModel):
     search_scope: Literal["filename_content", "filename", "content"] = "filename_content"
     modified_from: Optional[str] = None
     modified_to: Optional[str] = None
+    excluded_folder_paths: List[str] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):

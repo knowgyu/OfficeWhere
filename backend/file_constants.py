@@ -1,7 +1,7 @@
 """Neutral file constants shared by API models and file-scope helpers."""
 
-SUPPORTED_EXTENSIONS = {".xlsx", ".docx", ".pptx"}
-SUPPORTED_EXTENSIONS_LABEL = ".xlsx, .docx, .pptx"
+SUPPORTED_EXTENSIONS = {".xlsx", ".docx", ".pptx", ".pdf"}
+SUPPORTED_EXTENSIONS_LABEL = ".xlsx, .docx, .pptx, .pdf"
 
 DEFAULT_EXCLUDED_FOLDER_NAMES = [
     ".git",

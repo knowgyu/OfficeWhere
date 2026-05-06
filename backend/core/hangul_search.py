@@ -107,7 +107,11 @@ def build_trigram_search_text(value: object) -> str:
 
 def _query_terms(raw_query: str) -> list[str]:
     cleaned = raw_query.replace('"', " ").replace("*", " ")
-    return [term.strip().lower() for term in cleaned.split() if term.strip()]
+    compact = WHITESPACE_PATTERN.sub(" ", cleaned).strip().lower()
+    terms = [term.strip().lower() for term in compact.split() if term.strip()]
+    if len(terms) > 1:
+        return [compact, *terms]
+    return terms
 
 
 def _find_direct_span(text: str, terms: list[str]) -> Optional[Tuple[int, int]]:

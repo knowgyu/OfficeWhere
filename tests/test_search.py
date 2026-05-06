@@ -42,6 +42,52 @@ def _make_excel(path: str, data: dict):
     workbook.save(path)
 
 
+def _escape_pdf_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _make_pdf(path: str, pages: list[str]):
+    """Write a minimal text PDF fixture without adding another test dependency."""
+
+    objects: list[str] = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    page_object_ids: list[int] = []
+    for text in pages:
+        page_object_id = len(objects) + 1
+        content_object_id = page_object_id + 1
+        page_object_ids.append(page_object_id)
+        stream = f"BT /F1 14 Tf 72 720 Td ({_escape_pdf_text(text)}) Tj ET\n"
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content_object_id} 0 R >>"
+        )
+        objects.append(f"<< /Length {len(stream.encode('latin-1'))} >>\nstream\n{stream}endstream")
+
+    objects[1] = (
+        f"<< /Type /Pages /Kids [{' '.join(f'{object_id} 0 R' for object_id in page_object_ids)}] "
+        f"/Count {len(page_object_ids)} >>"
+    )
+
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for object_id, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n{body}\nendobj\n".encode("latin-1"))
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("latin-1"))
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n".encode("latin-1")
+    )
+    with open(path, "wb") as handle:
+        handle.write(output)
+
+
 def test_index_and_search_excel(tmp_path):
     xlsx = str(tmp_path / "sample.xlsx")
     _make_excel(xlsx, {"과제명": ["DFBA 챗봇", "스마트팜"], "담당자": ["홍길동", "김철수"]})
@@ -317,9 +363,24 @@ def test_reindex_on_file_change(tmp_path):
 
 
 def test_sanitize_fts_query():
-    assert _sanitize_fts_query("hello world") == '"hello" "world"'
-    assert _sanitize_fts_query('foo "bar"') == '"foo" "bar"'
+    assert _sanitize_fts_query("hello world") == '"hello world"'
+    assert _sanitize_fts_query('foo "bar"') == '"foo bar"'
     assert _sanitize_fts_query("  ") == '""'
+
+
+def test_spaced_query_prefers_exact_phrase_matches(tmp_path):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    phrase_id = register_file(str(tmp_path / 'phrase.docx'), 'phrase.docx', 'Word', 0)
+    loose_id = register_file(str(tmp_path / 'loose.docx'), 'loose.docx', 'Word', 0)
+    save_file_chunks(phrase_id, [{"location": "문단", "content": "데이터 연계 전략을 정리했습니다"}])
+    save_file_chunks(loose_id, [{"location": "문단", "content": "데이터 기반 보고서와 별도 연계표"}])
+
+    response = search_files(SearchRequest(query="데이터 연계", search_scope="content"))
+
+    assert {item.file_id for item in response.results} == {phrase_id}
+    assert "**데이터 연계**" in response.results[0].snippet
 
 
 def test_index_performance_excel(tmp_path):
@@ -507,6 +568,143 @@ def test_ppt_search_locations_hide_shape_details(tmp_path):
     assert len(results) >= 1
     assert {result["location"] for result in results} == {"슬라이드 1"}
     assert all("shape" not in result["location"] for result in results)
+
+
+def test_pdf_inspect_index_and_search(tmp_path):
+    pdf_path = tmp_path / "report.pdf"
+    _make_pdf(str(pdf_path), ["first page data linkage", "second page budget"])
+
+    info, chunks = inspect_and_chunk(str(pdf_path))
+
+    assert info["file_type"] == "PDF"
+    assert info["columns"] == ["페이지", "내용"]
+    assert info["sample"][0][0] == "쪽 1"
+    assert chunks[0]["location"] == "쪽 1"
+
+    file_id = register_file(str(pdf_path), "report.pdf", "PDF", len(info["columns"]))
+    chunk_count = index_file(file_id, str(pdf_path))
+    results = search("budget", file_types=["PDF"])
+
+    assert chunk_count == 2
+    assert len(results) == 1
+    assert results[0]["file_id"] == file_id
+    assert results[0]["file_type"] == "PDF"
+    assert results[0]["location"] == "쪽 2"
+
+
+def test_pdf_page_extraction_failure_fails_whole_index(monkeypatch, tmp_path):
+    from backend.core import pdf_analysis
+
+    class GoodPage:
+        def get_textpage(self):
+            class TextPage:
+                def get_text_bounded(self, errors="replace"):
+                    return "first page"
+
+                def close(self):
+                    pass
+
+            return TextPage()
+
+        def close(self):
+            pass
+
+    class BrokenPage:
+        def get_textpage(self):
+            raise RuntimeError("damaged content stream")
+
+        def close(self):
+            pass
+
+    class FakeDocument:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            self.close()
+
+        def __len__(self):
+            return 2
+
+        def __getitem__(self, index: int):
+            return [GoodPage(), BrokenPage()][index]
+
+        def close(self):
+            pass
+
+    class FakePdfium:
+        class PdfiumError(RuntimeError):
+            err_code = None
+
+        @staticmethod
+        def PdfDocument(_path: str, password=""):
+            return FakeDocument()
+
+    monkeypatch.setattr(pdf_analysis, "_load_pdfium", lambda: FakePdfium)
+
+    with pytest.raises(ValueError, match="PDF 2쪽 텍스트를 읽을 수 없습니다"):
+        inspect_and_chunk(str(tmp_path / "broken.pdf"))
+
+
+def test_search_api_filters_pdf_type(tmp_path):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    pdf_id = register_file(str(tmp_path / "note.pdf"), "note.pdf", "PDF", 2)
+    word_id = register_file(str(tmp_path / "note.docx"), "note.docx", "Word", 0)
+    save_file_chunks(pdf_id, [{"location": "쪽 1", "content": "공통 PDF 키워드"}])
+    save_file_chunks(word_id, [{"location": "문단", "content": "공통 PDF 키워드"}])
+
+    response = search_files(SearchRequest(query="공통", file_types=["pdf"], search_scope="content"))
+
+    assert response.total == 1
+    assert response.results[0].file_id == pdf_id
+    assert response.results[0].file_type == "PDF"
+
+
+def test_search_api_excludes_temporary_folder_paths_without_prefix_bleed(tmp_path):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    hidden_dir = tmp_path / "docs" / "a"
+    visible_prefix_dir = tmp_path / "docs" / "abc"
+    visible_dir = tmp_path / "docs" / "other"
+    hidden_id = register_file(str(hidden_dir / "hidden.docx"), "hidden.docx", "Word", 0)
+    prefix_id = register_file(str(visible_prefix_dir / "prefix.docx"), "prefix.docx", "Word", 0)
+    visible_id = register_file(str(visible_dir / "visible.docx"), "visible.docx", "Word", 0)
+    for file_id in [hidden_id, prefix_id, visible_id]:
+        save_file_chunks(file_id, [{"location": "문단", "content": "폴더제외 키워드"}])
+
+    response = search_files(
+        SearchRequest(
+            query="폴더제외",
+            search_scope="content",
+            excluded_folder_paths=[str(hidden_dir)],
+        )
+    )
+
+    assert {item.file_id for item in response.results} == {prefix_id, visible_id}
+
+
+def test_search_api_excludes_windows_style_folder_paths_without_prefix_bleed(tmp_path):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    hidden_id = register_file(r"C:\Docs\A\hidden.docx", "hidden.docx", "Word", 0)
+    visible_prefix_id = register_file(r"C:\Docs\ABC\prefix.docx", "prefix.docx", "Word", 0)
+    visible_id = register_file(r"C:\Docs\Other\visible.docx", "visible.docx", "Word", 0)
+    for file_id in [hidden_id, visible_prefix_id, visible_id]:
+        save_file_chunks(file_id, [{"location": "문단", "content": "윈도우 제외 키워드"}])
+
+    response = search_files(
+        SearchRequest(
+            query="윈도우 제외",
+            search_scope="content",
+            excluded_folder_paths=[r"c:/docs/a"],
+        )
+    )
+
+    assert {item.file_id for item in response.results} == {visible_prefix_id, visible_id}
 
 
 def test_search_api_filters_by_file_modified_date(tmp_path):

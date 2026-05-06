@@ -1,5 +1,5 @@
-export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'Unknown'
-export type CompareMode = 'excel' | 'word' | 'ppt'
+export type FileType = 'Excel' | 'Word' | 'PowerPoint' | 'PDF' | 'Unknown'
+export type CompareMode = 'excel' | 'word' | 'ppt' | 'pdf' | 'none'
 export type CellValue = string | number | boolean | null | undefined
 
 export interface FileInfo {

@@ -1,6 +1,6 @@
 # OfficeWhere 아키텍처 요약
 
-OfficeWhere는 로컬/공유 폴더에 흩어진 Office 문서를 찾아 색인하고, 검색과 버전 비교를 제공하는 데스크톱 앱입니다. 원본 문서는 항상 읽기 전용으로 다룹니다.
+OfficeWhere는 로컬/공유 폴더에 흩어진 Office/PDF 문서를 찾아 색인하고, 검색과 버전 비교를 제공하는 데스크톱 앱입니다. 원본 문서는 항상 읽기 전용으로 다룹니다.
 
 ## 구성
 
@@ -10,16 +10,20 @@ OfficeWhere는 로컬/공유 폴더에 흩어진 Office 문서를 찾아 색인�
 | Renderer | `frontend/src/` | React + TypeScript + Vite UI. 검색, 문서 관리, 중복/버전 비교 화면 |
 | API backend | `backend/main.py`, `backend/api/` | FastAPI router, CORS, 설정/API 계약 |
 | App data | `backend/database.py` | SQLite schema, 등록 파일, 검색 청크, 서명, 비교/그룹 캐시, 설정 |
-| Parsing/indexing | `backend/core/` | Office parser, rescan, search, comparison, Excel/PPT/Word diff |
-| Packaging | `officewhere_backend.spec`, `scripts/prepare_python_runtime.py`, `frontend/package.json` | backend 실행 파일/runtime과 Electron bundle 생성 |
+| Parsing/indexing | `backend/core/` | Office/PDF parser, rescan, search, comparison, Excel/PPT/Word diff |
+| Packaging | `scripts/prepare_python_runtime.py`, `python-runtime/`, `frontend/package.json` | backend source/runtime과 Electron bundle 생성 |
+
+PDF 텍스트 추출은 PDFium 기반 `pypdfium2`로 수행합니다. `backend/core/pdf_analysis.py`는 PDFium 호출을
+전역 락으로 감싸 스레드 병렬 색인 중에도 한 번에 하나의 PDFium 작업만 수행하고, 원본 PDF는 열람 후 닫기만
+합니다. 일부 PDF는 엔진별 텍스트 추출 결과가 다를 수 있으므로 배포 전 실제 샘플로 확인합니다.
 
 ## 주요 데이터 흐름
 
 1. 사용자가 대상 폴더를 추가합니다.
 2. 문서 새로고침이 watched folder를 스캔해 지원 확장자를 찾습니다.
-3. backend가 Office 문서를 읽어 app-owned SQLite DB에 메타데이터, 검색 청크, 내용 서명, 비교 보조 캐시를 저장합니다.
+3. backend가 지원 문서를 읽어 app-owned SQLite DB에 메타데이터, 검색 청크, 내용 서명, 비교 보조 캐시를 저장합니다.
 4. renderer는 HTTP API로 검색/목록/비교 결과만 받아 표시합니다.
-5. 원본 Office 파일은 이동, 삭제, 덮어쓰기, 저장을 하지 않습니다.
+5. 원본 문서는 이동, 삭제, 덮어쓰기, 저장을 하지 않습니다.
 
 ## 등록 파일 상태
 

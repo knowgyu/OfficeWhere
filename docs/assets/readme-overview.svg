@@ -36,7 +36,7 @@
     </g>
 
     <text x="326" y="128" fill="#1E2B33" font-family="Pretendard, Segoe UI, sans-serif" font-size="34" font-weight="760">찾고, 비교하고, 같은 문서를 정리합니다</text>
-    <text x="326" y="162" fill="#64717A" font-family="Pretendard, Segoe UI, sans-serif" font-size="17">Excel · Word · PowerPoint 문서를 원본 그대로 두고 읽기 전용으로 확인</text>
+    <text x="326" y="162" fill="#64717A" font-family="Pretendard, Segoe UI, sans-serif" font-size="17">Excel · Word · PowerPoint · PDF 문서를 원본 그대로 두고 읽기 전용으로 확인</text>
 
     <rect x="326" y="204" width="316" height="246" rx="22" fill="#F8FBFF" stroke="#D2E2F3"/>
     <text x="354" y="248" fill="#173B5C" font-family="Pretendard, Segoe UI, sans-serif" font-size="24" font-weight="720">문서 검색</text>

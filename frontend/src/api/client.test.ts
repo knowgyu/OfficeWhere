@@ -125,7 +125,9 @@ describe('api.files', () => {
 
 describe('api.search', () => {
   it('search.query POSTs the request body to /api/search', async () => {
-    let captured: { query?: string; search_scope?: string; file_types?: string[] } | undefined
+    let captured:
+      | { query?: string; search_scope?: string; file_types?: string[]; excluded_folder_paths?: string[] }
+      | undefined
     server.use(
       http.post('*/api/search', async ({ request }) => {
         captured = (await request.json()) as typeof captured
@@ -144,12 +146,14 @@ describe('api.search', () => {
       query: '회의',
       search_scope: 'content',
       file_types: ['Excel'],
+      excluded_folder_paths: ['/archive'],
       file_limit: 20,
     })
 
     expect(captured?.query).toBe('회의')
     expect(captured?.search_scope).toBe('content')
     expect(captured?.file_types).toEqual(['Excel'])
+    expect(captured?.excluded_folder_paths).toEqual(['/archive'])
   })
 
   it('search.reindex returns the success/failed/skipped counts', async () => {
