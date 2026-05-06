@@ -288,9 +288,21 @@ export default function App() {
   const { completionKey: rescanCompletionKey } = useLibraryRescan()
   const tutorialCleanupPathRef = useRef('')
   const tutorialCleanupInFlightRef = useRef<Promise<void> | null>(null)
+  const mainScrollRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     window.localStorage.setItem(LS_TAB, activeTab)
+  }, [activeTab])
+
+  useEffect(() => {
+    const scrollRoot = mainScrollRef.current
+    if (!scrollRoot) return
+    if (typeof scrollRoot.scrollTo === 'function') {
+      scrollRoot.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+      return
+    }
+    scrollRoot.scrollTop = 0
+    scrollRoot.scrollLeft = 0
   }, [activeTab])
 
   useEffect(() => {
@@ -569,7 +581,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0">
         <TopAppBar title={current.label} hint={current.hint} />
-        <main className="flex-1 overflow-y-auto">
+        <main ref={mainScrollRef} className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 pt-6 pb-16">
             <section className={activeTab === 'files' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'files'}>
               <FileManager

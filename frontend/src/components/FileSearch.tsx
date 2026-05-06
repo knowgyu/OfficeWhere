@@ -272,6 +272,7 @@ export default function FileSearch({
   const [customModifiedTo, setCustomModifiedTo] = useState('')
   const [excludedFolderPaths, setExcludedFolderPaths] = useState<string[]>([])
   const [expandedContentFiles, setExpandedContentFiles] = useState<Set<string>>(new Set())
+  const contentMatchesDefaultExpandedRef = useRef(true)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRequestSeq = useRef(0)
@@ -335,9 +336,9 @@ export default function FileSearch({
     })
     setExpandedContentFiles((current) => {
       const nextContentFileKeys = getContentFileKeys(data.results)
-      if (!keepExpandedContentFiles) return nextContentFileKeys
+      if (!keepExpandedContentFiles || contentMatchesDefaultExpandedRef.current) return nextContentFileKeys
 
-      return new Set([...nextContentFileKeys, ...current].filter((fileKey) => nextContentFileKeys.has(fileKey)))
+      return new Set([...current].filter((fileKey) => nextContentFileKeys.has(fileKey)))
     })
     setSearched(true)
     return data.results.length > 0
@@ -367,6 +368,7 @@ export default function FileSearch({
         })
         setSearched(false)
         setExpandedContentFiles(new Set())
+        contentMatchesDefaultExpandedRef.current = true
         setLoading(false)
         setLoadingMore(false)
         setPrefetching(false)
@@ -376,7 +378,10 @@ export default function FileSearch({
       const nextFileLimit = Math.min(Math.max(fileLimit, INITIAL_SEARCH_FILE_LIMIT), MAX_SEARCH_FILE_LIMIT)
       const baseKey = searchKey(q, fileTypes, scope, dateFilter, customFrom, customTo, excludedFolders)
       const prefetched = prefetchedSearchRef.current
-      if (mode === 'replace') prefetchedSearchRef.current = null
+      if (mode === 'replace') {
+        prefetchedSearchRef.current = null
+        contentMatchesDefaultExpandedRef.current = true
+      }
       if (mode === 'more') {
         setLoadingMore(true)
       } else {
@@ -512,6 +517,9 @@ export default function FileSearch({
   }
 
   const toggleContentMatches = (fileKey: string) => {
+    if (expandedContentFiles.has(fileKey)) {
+      contentMatchesDefaultExpandedRef.current = false
+    }
     setExpandedContentFiles((current) => {
       const next = new Set(current)
       if (next.has(fileKey)) {
@@ -594,6 +602,7 @@ export default function FileSearch({
       })
       setSearched(false)
       setExpandedContentFiles(new Set())
+      contentMatchesDefaultExpandedRef.current = true
       return
     }
     void doSearch(query)
@@ -731,10 +740,12 @@ export default function FileSearch({
   }
 
   const expandAllContentMatches = () => {
+    contentMatchesDefaultExpandedRef.current = true
     setExpandedContentFiles(new Set(contentFileKeys))
   }
 
   const collapseAllContentMatches = () => {
+    contentMatchesDefaultExpandedRef.current = false
     setExpandedContentFiles(new Set())
   }
 
@@ -839,6 +850,7 @@ export default function FileSearch({
                         setSearched(false)
                         setExcludedFolderPaths([])
                         setExpandedContentFiles(new Set())
+                        contentMatchesDefaultExpandedRef.current = true
                         setLoading(false)
                         setLoadingMore(false)
                         setPrefetching(false)

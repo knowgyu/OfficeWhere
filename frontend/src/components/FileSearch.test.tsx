@@ -435,6 +435,70 @@ describe('FileSearch', () => {
       vi.unstubAllGlobals()
     })
 
+    it('keeps later infinite-scroll results collapsed after the user collapses body matches', async () => {
+      let latestObserver: {
+        trigger: () => void
+        observe: ReturnType<typeof vi.fn>
+        disconnect: ReturnType<typeof vi.fn>
+      } | null = null
+      class MockIntersectionObserver {
+        observe = vi.fn()
+        disconnect = vi.fn()
+        private callback: IntersectionObserverCallback
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback
+          latestObserver = this
+        }
+
+        trigger() {
+          this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+        }
+      }
+      vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+
+      mockedSearchQuery
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 1,
+            results: [searchHit({ file_id: 1, name: '첫문서.docx', path: '/lib/첫문서.docx' })],
+            file_count: 1,
+            file_limit: 20,
+            has_more: true,
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 2,
+            results: [
+              searchHit({ file_id: 1, name: '첫문서.docx', path: '/lib/첫문서.docx' }),
+              searchHit({ file_id: 2, name: '다음문서.docx', path: '/lib/다음문서.docx' }),
+            ],
+            file_count: 2,
+            file_limit: 40,
+            has_more: false,
+          },
+        })
+
+      renderInactiveFileSearch()
+      await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
+      await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      await waitFor(() => expect(screen.getByText('첫문서.docx')).toBeInTheDocument())
+      await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalledTimes(2))
+      await userEvent.click(screen.getAllByRole('button', { name: '본문 위치 접기' })[0])
+      expect(screen.getAllByRole('button', { name: '본문 위치 1건' })).toHaveLength(1)
+
+      latestObserver?.trigger()
+
+      await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
+      expect(screen.getAllByRole('button', { name: '본문 위치 1건' })).toHaveLength(2)
+
+      vi.unstubAllGlobals()
+    })
+
     it('does not add a duplicate-page CTA inside search results', async () => {
       mockedSearchQuery.mockResolvedValue({
         data: {
