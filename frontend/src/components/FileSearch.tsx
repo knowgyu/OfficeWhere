@@ -68,7 +68,7 @@ const SEARCH_DEBOUNCE_MS = 600
 const INITIAL_SEARCH_FILE_LIMIT = 20
 const SEARCH_FILE_LIMIT_STEP = 20
 const MAX_SEARCH_FILE_LIMIT = 100
-const INITIAL_DOCUMENT_LIMIT = 6
+const LANDING_DOCUMENT_PAGE_SIZE = 20
 
 type ModifiedDateFilter = 'all' | '7d' | '30d' | '90d' | 'custom'
 
@@ -261,6 +261,7 @@ export default function FileSearch({
   const [loadingMore, setLoadingMore] = useState(false)
   const [prefetching, setPrefetching] = useState(false)
   const [initialDataLoading, setInitialDataLoading] = useState(false)
+  const [initialDataLoadingMore, setInitialDataLoadingMore] = useState(false)
   const [initialFiles, setInitialFiles] = useState<FileInfo[]>([])
   const [initialFileTotal, setInitialFileTotal] = useState(0)
   const [watchedFolders, setWatchedFolders] = useState<WatchedFolder[] | null>(null)
@@ -277,9 +278,11 @@ export default function FileSearch({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRequestSeq = useRef(0)
   const initialDataRequestSeq = useRef(0)
+  const watchedFoldersRequestSeq = useRef(0)
   const prefetchedSearchRef = useRef<PrefetchedSearch | null>(null)
   const tutorialSearchAdvanceRef = useRef<string | null>(null)
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
+  const landingLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
 
   const buildModifiedDateParams = useCallback(
     (
@@ -608,42 +611,70 @@ export default function FileSearch({
     void doSearch(query)
   }, [active, libraryDataRevision])
 
+  const loadLandingFiles = useCallback(
+    async (offset = 0, mode: 'replace' | 'more' = 'replace') => {
+      const requestId = initialDataRequestSeq.current + 1
+      initialDataRequestSeq.current = requestId
+      if (mode === 'more') {
+        setInitialDataLoadingMore(true)
+      } else {
+        setInitialDataLoading(true)
+      }
+
+      try {
+        const response = await api.files.page({
+          limit: LANDING_DOCUMENT_PAGE_SIZE,
+          offset,
+          sort: 'file_mtime_desc',
+          includeMissing: false,
+        })
+        if (requestId !== initialDataRequestSeq.current) return
+        setInitialFiles((current) =>
+          mode === 'more' ? [...current, ...response.data.items] : response.data.items,
+        )
+        setInitialFileTotal(response.data.total)
+      } catch {
+        if (requestId !== initialDataRequestSeq.current) return
+        if (mode !== 'more') {
+          setInitialFiles([])
+          setInitialFileTotal(0)
+        }
+      } finally {
+        if (requestId === initialDataRequestSeq.current) {
+          setInitialDataLoading(false)
+          setInitialDataLoadingMore(false)
+        }
+      }
+    },
+    [],
+  )
+
   useEffect(() => {
     if (!active) return
-    const requestId = initialDataRequestSeq.current + 1
-    initialDataRequestSeq.current = requestId
+    const requestId = watchedFoldersRequestSeq.current + 1
+    watchedFoldersRequestSeq.current = requestId
     let cancelled = false
-    setInitialDataLoading(true)
 
-    void Promise.all([
-      api.library.getSettings(),
-      api.files.page({
-        limit: INITIAL_DOCUMENT_LIMIT,
-        offset: 0,
-        sort: 'file_mtime_desc',
-        includeMissing: false,
-      }),
-    ])
-      .then(([settingsResponse, filesResponse]) => {
-        if (cancelled || requestId !== initialDataRequestSeq.current) return
+    void api.library
+      .getSettings()
+      .then((settingsResponse) => {
+        if (cancelled || requestId !== watchedFoldersRequestSeq.current) return
         setWatchedFolders(settingsResponse.data.watched_folders)
-        setInitialFiles(filesResponse.data.items)
-        setInitialFileTotal(filesResponse.data.total)
       })
       .catch(() => {
-        if (cancelled || requestId !== initialDataRequestSeq.current) return
+        if (cancelled || requestId !== watchedFoldersRequestSeq.current) return
         setWatchedFolders(null)
-        setInitialFiles([])
-        setInitialFileTotal(0)
-      })
-      .finally(() => {
-        if (!cancelled && requestId === initialDataRequestSeq.current) setInitialDataLoading(false)
       })
 
     return () => {
       cancelled = true
     }
   }, [active, libraryDataRevision])
+
+  useEffect(() => {
+    if (!active) return
+    void loadLandingFiles(0, 'replace')
+  }, [active, libraryDataRevision, loadLandingFiles])
 
   const groupedSearch = useMemo(() => {
     const map = new Map<string, { fileName: string; items: SearchResult[] }>()
@@ -706,6 +737,7 @@ export default function FileSearch({
   const hasResults = !loading && results.length > 0
   const watchedFolderCount = watchedFolders?.length ?? 0
   const hasWatchedFolders = watchedFolderCount > 0
+  const initialFilesHasMore = initialFiles.length < initialFileTotal
   const initialReadyAction = onOpenLibrarySettings
     ? watchedFolders !== null && watchedFolderCount === 0
       ? (
@@ -766,6 +798,11 @@ export default function FileSearch({
     )
   }
 
+  const loadMoreInitialFiles = () => {
+    if (!initialFilesHasMore || initialDataLoading || initialDataLoadingMore) return
+    void loadLandingFiles(initialFiles.length, 'more')
+  }
+
   useEffect(() => {
     const node = loadMoreSentinelRef.current
     if (!node || !searchMeta.hasMore || loading || loadingMore) return undefined
@@ -793,6 +830,32 @@ export default function FileSearch({
     searchMeta.hasMore,
     searchScope,
     selectedFileTypes,
+  ])
+
+  useEffect(() => {
+    const node = landingLoadMoreSentinelRef.current
+    if (!node || !initialFilesHasMore || initialDataLoading || initialDataLoadingMore || query.trim()) {
+      return undefined
+    }
+    if (typeof IntersectionObserver === 'undefined') return undefined
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries
+        if (!entry?.isIntersecting) return
+        loadMoreInitialFiles()
+      },
+      { rootMargin: '360px 0px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [
+    initialDataLoading,
+    initialDataLoadingMore,
+    initialFiles.length,
+    initialFilesHasMore,
+    query,
+    loadLandingFiles,
   ])
 
   useEffect(() => {
@@ -1092,14 +1155,14 @@ export default function FileSearch({
         <Card variant="outlined" className="console-panel p-4 md:p-5 space-y-4 shadow-none ring-1 ring-[var(--ow-inset-highlight)]">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <p className="type-title-md text-[var(--md-sys-color-on-surface)]">최근 준비된 문서</p>
+              <p className="type-title-md text-[var(--md-sys-color-on-surface)]">전체 문서</p>
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                검색 전에는 새로 읽지 않고, 이미 준비된 문서 {Math.min(initialFiles.length, initialFileTotal)}개만 가볍게 보여줍니다
-                {initialFileTotal > initialFiles.length ? ` · 전체 ${initialFileTotal}개` : ''}.
+                검색 준비된 문서를 최근 수정된 순서로 보여줍니다 · {initialFiles.length.toLocaleString('ko-KR')}개 표시
+                {initialFileTotal > initialFiles.length ? ` / 전체 ${initialFileTotal.toLocaleString('ko-KR')}개` : ''}.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {initialDataLoading && (
+              {(initialDataLoading || initialDataLoadingMore) && (
                 <span className="inline-flex items-center gap-1.5 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                   <Spinner size={16} />
                   확인 중
@@ -1108,28 +1171,28 @@ export default function FileSearch({
               {initialReadyAction}
             </div>
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="space-y-2">
             {initialFiles.map((file) => (
               <div
                 key={file.id}
-                className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3"
+                className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 transition-colors hover:bg-[var(--md-sys-color-surface-container-low)]"
               >
-                <div className="flex items-start gap-2">
-                  <FileTypeBadge fileType={file.file_type} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={file.name}>
-                      {file.name}
-                    </p>
-                    <p className="mt-1 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]" title={file.path}>
-                      {file.path}
-                    </p>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                  <div className="min-w-0 flex items-start gap-2.5">
+                    <FileTypeBadge fileType={file.file_type} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate type-title-sm text-[var(--md-sys-color-on-surface)]" title={file.name}>
+                        {file.name}
+                      </p>
+                      <p className="mt-1 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]" title={file.path}>
+                        {file.path}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <span className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">
-                    {formatInitialDocumentDate(file)}
-                  </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center justify-between gap-3 md:justify-end">
+                    <span className="whitespace-nowrap type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                      {formatInitialDocumentDate(file)}
+                    </span>
                     <Button
                       variant="text"
                       size="sm"
@@ -1151,6 +1214,20 @@ export default function FileSearch({
               </div>
             ))}
           </div>
+          {initialFilesHasMore && (
+            <div className="flex flex-col items-center gap-2 pt-2">
+              <div ref={landingLoadMoreSentinelRef} className="h-2 w-full" aria-hidden="true" />
+              <Button
+                variant="tonal"
+                leadingIcon="expand_more"
+                onClick={loadMoreInitialFiles}
+                loading={initialDataLoadingMore}
+                disabled={initialDataLoading || initialDataLoadingMore}
+              >
+                더 보기 · 스크롤해도 자동으로 불러옵니다
+              </Button>
+            </div>
+          )}
         </Card>
       )}
 
@@ -1167,7 +1244,7 @@ export default function FileSearch({
           title={hasWatchedFolders ? '대상 폴더가 등록되어 있습니다' : SEARCH_SCOPE_READY[searchScope].title}
           description={
             hasWatchedFolders
-              ? '문서 새로고침을 실행하면 검색 전에도 최근 문서를 보여주고, 파일명과 본문 검색을 바로 사용할 수 있습니다.'
+              ? '문서 새로고침을 실행하면 검색 창에 전체 문서가 최근 수정된 순서로 표시됩니다.'
               : SEARCH_SCOPE_READY[searchScope].description
           }
           action={initialReadyAction}

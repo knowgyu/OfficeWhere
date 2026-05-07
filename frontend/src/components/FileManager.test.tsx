@@ -40,6 +40,7 @@ vi.mock('../api/client', async () => {
 
 import FileManager from './FileManager'
 import { api } from '../api/client'
+import { installBridge } from '../test/bridge'
 import type { LibrarySettings, LibraryRescanStatus } from '../api/library'
 import type { FileInfo } from '../api/shared'
 
@@ -56,6 +57,7 @@ const mocked = {
   getDataPaths: vi.mocked(api.app.getDataPaths),
   getCloseBehavior: vi.mocked(api.app.getCloseBehavior),
   getStartupSettings: vi.mocked(api.app.getStartupSettings),
+  setStartupSettings: vi.mocked(api.app.setStartupSettings),
 }
 
 const baseSettings: LibrarySettings = {
@@ -104,6 +106,7 @@ function fileInfo(overrides: Partial<FileInfo> = {}): FileInfo {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   // Default: empty library, no files, no bridge-backed app data.
   mocked.filesPage.mockResolvedValue({
     data: { total: 0, items: [], counts_by_type: {}, limit: 50, offset: 0 },
@@ -131,6 +134,13 @@ beforeEach(() => {
   mocked.getDataPaths.mockRejectedValue({ response: { data: { detail: 'no bridge' } } })
   mocked.getCloseBehavior.mockRejectedValue({ response: { data: { detail: 'no bridge' } } })
   mocked.getStartupSettings.mockRejectedValue({ response: { data: { detail: 'no bridge' } } })
+  mocked.setStartupSettings.mockResolvedValue({
+    data: { supported: false, enabled: false, executablePath: '' },
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: {} as never,
+  })
 })
 
 describe('FileManager', () => {
@@ -358,6 +368,95 @@ describe('FileManager', () => {
       await userEvent.click(screen.getByRole('button', { name: '문서 새로고침' }))
 
       await waitFor(() => expect(mocked.startRescan).toHaveBeenCalledWith('fast'))
+    })
+  })
+
+  describe('startup settings', () => {
+    function enableDesktopStartupMocks() {
+      installBridge()
+      mocked.getDataPaths.mockResolvedValue({
+        data: [],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as never,
+      })
+      mocked.getCloseBehavior.mockResolvedValue({
+        data: 'ask',
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as never,
+      })
+    }
+
+    async function openAppBehaviorSettings() {
+      const expandLabel = await screen.findByText('테마·글자·닫기 동작 펼치기')
+      const summary = expandLabel.closest('summary')
+      expect(summary).not.toBeNull()
+      await userEvent.click(summary as HTMLElement)
+    }
+
+    it('shows approval guidance when startup settings require system approval', async () => {
+      enableDesktopStartupMocks()
+      mocked.getStartupSettings.mockResolvedValue({
+        data: {
+          supported: true,
+          enabled: true,
+          executablePath: '/Applications/OfficeWhere.app/Contents/MacOS/OfficeWhere',
+          requiresApproval: true,
+          reason: '시스템 설정에서 허용하면 시작프로그램으로 실행됩니다.',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as never,
+      })
+
+      renderWithProviders(<FileManager />)
+
+      await openAppBehaviorSettings()
+      expect(await screen.findByText('시작프로그램')).toBeInTheDocument()
+      expect(screen.getByLabelText(/로그인할 때 OfficeWhere 실행/)).toBeChecked()
+      expect(screen.getByText('macOS 시스템 설정에서 OfficeWhere 로그인을 허용해야 적용됩니다.')).toBeInTheDocument()
+      expect(screen.getByText('/Applications/OfficeWhere.app/Contents/MacOS/OfficeWhere')).toBeInTheDocument()
+    })
+
+    it('does not show startup success when the returned state differs from the requested state', async () => {
+      enableDesktopStartupMocks()
+      mocked.getStartupSettings.mockResolvedValue({
+        data: {
+          supported: true,
+          enabled: false,
+          executablePath: '/apps/OfficeWhere/OfficeWhere.exe',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as never,
+      })
+      mocked.setStartupSettings.mockResolvedValueOnce({
+        data: {
+          supported: true,
+          enabled: false,
+          executablePath: '/apps/OfficeWhere/OfficeWhere.exe',
+          reason: '시스템 시작 항목에서 OfficeWhere를 확인해 주세요.',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as never,
+      })
+
+      renderWithProviders(<FileManager />)
+
+      await openAppBehaviorSettings()
+      const startupSwitch = await screen.findByLabelText(/로그인할 때 OfficeWhere 실행/)
+      await userEvent.click(startupSwitch)
+
+      await waitFor(() => expect(mocked.setStartupSettings).toHaveBeenCalledWith(true))
+      expect(screen.getAllByText('시스템 시작 항목에서 OfficeWhere를 확인해 주세요.').length).toBeGreaterThanOrEqual(1)
+      expect(screen.queryByText('시작프로그램에 등록했습니다. 앱 위치를 옮기면 다시 켜 주세요.')).not.toBeInTheDocument()
     })
   })
 })

@@ -54,7 +54,7 @@ function fileListResponse(overrides: Partial<FileListResponse> = {}): FileListRe
     total: 0,
     items: [],
     counts_by_type: {},
-    limit: 6,
+    limit: 20,
     offset: 0,
     ...overrides,
   }
@@ -154,7 +154,7 @@ describe('FileSearch', () => {
       expect(onOpenLibrarySettings).toHaveBeenCalledTimes(1)
     })
 
-    it('does not ask to add a target folder when one is already registered', async () => {
+    it('shows all documents by recent modified order when one target folder is registered', async () => {
       mockedLibraryGetSettings.mockResolvedValue({
         data: {
           ...defaultLibrarySettings,
@@ -179,10 +179,17 @@ describe('FileSearch', () => {
 
       renderWithProviders(<FileSearch onOpenLibrarySettings={vi.fn()} />, { withLibraryRescan: false })
 
-      expect(await screen.findByText('최근 준비된 문서')).toBeInTheDocument()
+      expect(await screen.findByText('전체 문서')).toBeInTheDocument()
       expect(screen.getByText('분기보고.xlsx')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '대상 폴더 추가' })).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: '검색 대상 확인' })).toBeInTheDocument()
+      expect(mockedSearchQuery).not.toHaveBeenCalled()
+      expect(mockedFilesPage).toHaveBeenCalledWith({
+        limit: 20,
+        offset: 0,
+        sort: 'file_mtime_desc',
+        includeMissing: false,
+      })
     })
 
     it('guides users to refresh documents when folders exist but no indexed files are ready', async () => {
@@ -198,6 +205,85 @@ describe('FileSearch', () => {
       expect(await screen.findByText('대상 폴더가 등록되어 있습니다')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '대상 폴더 추가' })).not.toBeInTheDocument()
       expect(screen.getByRole('button', { name: '검색 대상 확인' })).toBeInTheDocument()
+    })
+
+    it('loads more recent documents when the landing sentinel scrolls into view', async () => {
+      let latestObserver: {
+        trigger: () => void
+        observe: ReturnType<typeof vi.fn>
+        disconnect: ReturnType<typeof vi.fn>
+      } | null = null
+      class MockIntersectionObserver {
+        observe = vi.fn()
+        disconnect = vi.fn()
+        private callback: IntersectionObserverCallback
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback
+          latestObserver = this
+        }
+
+        trigger() {
+          this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+        }
+      }
+      vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+      mockedLibraryGetSettings.mockResolvedValue({
+        data: {
+          ...defaultLibrarySettings,
+          watched_folders: [{ path: '/work/docs', recursive: true }],
+        },
+      })
+      mockedFilesPage
+        .mockResolvedValueOnce({
+          data: fileListResponse({
+            total: 21,
+            items: Array.from({ length: 20 }, (_, index) => ({
+              id: index + 1,
+              name: `최근문서-${index + 1}.docx`,
+              path: `/work/docs/최근문서-${index + 1}.docx`,
+              file_type: 'Word',
+              column_count: 0,
+              file_mtime: 1_700_000_000 - index,
+            })),
+            limit: 20,
+            offset: 0,
+          }),
+        })
+        .mockResolvedValueOnce({
+          data: fileListResponse({
+            total: 21,
+            items: [
+              {
+                id: 21,
+                name: '다음문서.docx',
+                path: '/work/docs/다음문서.docx',
+                file_type: 'Word',
+                column_count: 0,
+                file_mtime: 1_699_999_000,
+              },
+            ],
+            limit: 20,
+            offset: 20,
+          }),
+        })
+
+      renderWithProviders(<FileSearch onOpenLibrarySettings={vi.fn()} />, { withLibraryRescan: false })
+
+      expect(await screen.findByText('최근문서-1.docx')).toBeInTheDocument()
+      await waitFor(() => expect(latestObserver?.observe).toHaveBeenCalled())
+      latestObserver?.trigger()
+
+      await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
+      expect(mockedFilesPage.mock.calls[1]?.[0]).toEqual({
+        limit: 20,
+        offset: 20,
+        sort: 'file_mtime_desc',
+        includeMissing: false,
+      })
+      expect(mockedSearchQuery).not.toHaveBeenCalled()
+
+      vi.unstubAllGlobals()
     })
   })
 

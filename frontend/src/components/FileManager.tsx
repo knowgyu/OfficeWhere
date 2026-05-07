@@ -588,16 +588,47 @@ export default function FileManager({
       const response = await api.app.setStartupSettings(enabled)
       setStartupSettings(response.data)
       if (!response.data.supported) {
-        snackbar.warn(response.data.reason || '이 환경에서는 시작프로그램 설정을 사용할 수 없습니다.')
+        snackbar.show({
+          key: 'startup-settings',
+          tone: 'warning',
+          message: response.data.reason || '이 환경에서는 시작프로그램 설정을 사용할 수 없습니다.',
+        })
         return
       }
-      snackbar.success(
-        response.data.enabled
+      if (response.data.requiresApproval) {
+        snackbar.show({
+          key: 'startup-settings',
+          tone: 'warning',
+          message: response.data.reason || '시스템 설정에서 허용하면 시작프로그램으로 실행됩니다.',
+        })
+        return
+      }
+      if (response.data.enabled !== enabled) {
+        snackbar.show({
+          key: 'startup-settings',
+          tone: 'warning',
+          message:
+            response.data.reason ||
+            (enabled
+              ? '시작프로그램 등록 상태를 확인하지 못했습니다. 시스템 시작 항목에서 OfficeWhere를 확인해 주세요.'
+              : '다른 시작 항목이 남아 있을 수 있습니다. 시스템 시작 항목에서 OfficeWhere를 확인해 주세요.'),
+          durationMs: 6000,
+        })
+        return
+      }
+      snackbar.show({
+        key: 'startup-settings',
+        tone: 'success',
+        message: response.data.enabled
           ? '시작프로그램에 등록했습니다. 앱 위치를 옮기면 다시 켜 주세요.'
           : '시작프로그램 등록을 껐습니다.',
-      )
+      })
     } catch {
-      snackbar.error('시작프로그램 설정을 저장하지 못했습니다.')
+      snackbar.show({
+        key: 'startup-settings',
+        tone: 'danger',
+        message: '시작프로그램 설정을 저장하지 못했습니다.',
+      })
     } finally {
       setStartupSettingsLoading(false)
     }

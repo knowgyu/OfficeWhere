@@ -1034,9 +1034,13 @@ function readStartupSettings(): AppStartupSettings {
 
   try {
     const settings = app.getLoginItemSettings(startupLoginItemOptions())
+    const enabled =
+      process.platform === 'win32'
+        ? Boolean(settings.openAtLogin || settings.executableWillLaunchAtLogin)
+        : Boolean(settings.openAtLogin)
     return {
       supported: true,
-      enabled: Boolean(settings.openAtLogin),
+      enabled,
       executablePath: process.execPath,
       requiresApproval: settings.status === 'requires-approval',
       reason:
@@ -1068,7 +1072,16 @@ function setStartupSettings(payload: unknown): AppStartupSettings {
       : { openAtLogin: enabled }
 
   app.setLoginItemSettings(settings)
-  return readStartupSettings()
+  const next = readStartupSettings()
+  if (next.supported && next.enabled !== enabled) {
+    return {
+      ...next,
+      reason: enabled
+        ? '시작프로그램 등록 상태를 확인하지 못했습니다. 시스템 시작 항목에서 OfficeWhere를 확인해 주세요.'
+        : '다른 시작 항목이 남아 있을 수 있습니다. 시스템 시작 항목에서 OfficeWhere를 확인해 주세요.',
+    }
+  }
+  return next
 }
 
 function ensureTray() {

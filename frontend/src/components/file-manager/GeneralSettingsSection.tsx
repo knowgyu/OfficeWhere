@@ -216,6 +216,11 @@ export default function GeneralSettingsSection({
                       macOS 시스템 설정에서 OfficeWhere 로그인을 허용해야 적용됩니다.
                     </p>
                   )}
+                  {startupSettings.supported && startupSettings.reason && !startupSettings.requiresApproval && (
+                    <p className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                      {startupSettings.reason}
+                    </p>
+                  )}
                   {startupSettings.executablePath && (
                     <p className="truncate rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 font-mono text-[0.72rem] text-[var(--md-sys-color-on-surface-variant)]">
                       {startupSettings.executablePath}

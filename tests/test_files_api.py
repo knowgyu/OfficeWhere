@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 
 from backend.api.files import list_files_bounded, remove_all_files, show_registered_file_in_folder
-from backend.database import init_db, mark_registered_files_missing, register_file
+from backend.database import init_db, mark_registered_files_missing, register_file, update_file_mtime
 
 
 def _register_rows(count: int = 12):
@@ -54,6 +54,21 @@ def test_files_page_filters_by_query_and_file_type(tmp_path, monkeypatch):
     assert response.total == 1
     assert response.items[0].name == "finance-special.xlsx"
     assert response.counts_by_type == {"Excel": 1}
+
+
+def test_files_page_sorts_by_file_mtime_desc_for_recent_documents(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    older_id = register_file(path='/tmp/project/older.docx', name='older.docx', file_type='Word', column_count=1)
+    newer_id = register_file(path='/tmp/project/newer.docx', name='newer.docx', file_type='Word', column_count=1)
+    update_file_mtime(older_id, 1_700_000_000)
+    update_file_mtime(newer_id, 1_800_000_000)
+
+    response = list_files_bounded(sort="file_mtime_desc", limit=10, include_missing=False)
+
+    assert [item.name for item in response.items] == ["newer.docx", "older.docx"]
 
 
 def test_files_page_shows_missing_by_default_and_can_hide_them(tmp_path, monkeypatch):
