@@ -84,13 +84,6 @@ interface PrefetchedSearch {
   data: SearchResponse
 }
 
-type GroupedSearchResult = {
-  fileKey: string
-  fileName: string
-  items: SearchResult[]
-  contentHash: string | null
-}
-
 const MODIFIED_DATE_FILTERS: Array<{ label: string; value: ModifiedDateFilter }> = [
   { label: '전체', value: 'all' },
   { label: '최근 7일', value: '7d' },
@@ -179,20 +172,6 @@ function getContentFileKeys(results: SearchResult[]) {
     }
   }
   return keys
-}
-
-function normalizeDuplicateTitle(name: string) {
-  return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ko-KR')
-}
-
-function getReliableContentHash(items: SearchResult[]) {
-  const first = items.find(
-    (item) =>
-      item.normalized_hash &&
-      (item.content_chars ?? 0) > 0 &&
-      (item.chunk_count ?? 0) > 0,
-  )
-  return first?.normalized_hash ?? null
 }
 
 function SearchResultListItem({
@@ -684,31 +663,12 @@ export default function FileSearch({
       entry.items.push(result)
       map.set(fileKey, entry)
     }
-    const allGroups: GroupedSearchResult[] = Array.from(map.entries()).map(([fileKey, { fileName, items }]) => ({
-      fileKey,
-      fileName,
-      items,
-      contentHash: getReliableContentHash(items),
-    }))
-
-    const seenExactTitleContent = new Set<string>()
-    let hiddenExactDuplicateCount = 0
-    const visibleGroups: GroupedSearchResult[] = []
-    for (const group of allGroups) {
-      const exactKey = group.contentHash
-        ? `${normalizeDuplicateTitle(group.fileName)}:${group.contentHash}`
-        : null
-      if (exactKey && seenExactTitleContent.has(exactKey)) {
-        hiddenExactDuplicateCount += 1
-        continue
-      }
-      if (exactKey) seenExactTitleContent.add(exactKey)
-      visibleGroups.push(group)
-    }
-
     return {
-      visibleGroups,
-      hiddenExactDuplicateCount,
+      visibleGroups: Array.from(map.entries()).map(([fileKey, { fileName, items }]) => ({
+        fileKey,
+        fileName,
+        items,
+      })),
     }
   }, [results])
 
@@ -1270,14 +1230,6 @@ export default function FileSearch({
               {prefetching ? ' · 다음 결과 준비 중' : ''}
             </span>
             <div className="ml-auto flex gap-2 flex-wrap">
-              {groupedSearch.hiddenExactDuplicateCount > 0 && (
-                <Chip
-                  label={`같은 이름·같은 내용 ${groupedSearch.hiddenExactDuplicateCount}개 숨김`}
-                  tone="neutral"
-                  as="span"
-                  icon="content_copy"
-                />
-              )}
               {contentFileKeys.length > 0 && (
                 <>
                   <Button

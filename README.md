@@ -14,6 +14,26 @@
 
 ![OfficeWhere overview](docs/assets/readme-overview.svg)
 
+## 기능 미리보기
+
+### 문서 검색
+
+<video src="docs/assets/readme-demo-search.mp4" width="980" controls muted loop playsinline title="OfficeWhere 문서 검색 데모"></video>
+
+파일명과 본문을 함께 찾아 문서별 결과를 확인합니다. [영상 파일 열기](docs/assets/readme-demo-search.mp4)
+
+### 변경 이력
+
+<video src="docs/assets/readme-demo-version.mp4" width="980" controls muted loop playsinline title="OfficeWhere 변경 이력 데모"></video>
+
+수정본 묶음에서 바뀐 셀과 내용을 빠르게 펼쳐봅니다. [영상 파일 열기](docs/assets/readme-demo-version.mp4)
+
+### 같은 내용 문서
+
+<img src="docs/assets/readme-demo-duplicates.png" width="980" alt="OfficeWhere 같은 내용 문서 화면" />
+
+이름이 달라도 본문이 같은 문서를 한곳에서 확인합니다. [이미지 파일 열기](docs/assets/readme-demo-duplicates.png)
+
 ## 한눈에 보기
 
 | 기능 | 할 수 있는 일 |

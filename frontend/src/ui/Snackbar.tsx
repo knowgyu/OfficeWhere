@@ -199,11 +199,11 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
   return (
     <SnackbarContext.Provider value={api}>
       {children}
-      <div className="fixed right-4 top-4 z-[61] flex flex-col items-end gap-2">
+      <div className="fixed bottom-4 left-3 z-[61] flex flex-col-reverse items-start gap-2">
         <button
           type="button"
           onClick={() => setNotificationPanelOpen((open) => !open)}
-          className="state-host relative inline-flex h-10 items-center gap-2 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-3 type-label-lg text-[var(--md-sys-color-on-surface)] shadow-elev-2 transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
+          className="state-host relative inline-flex h-11 w-[4.5rem] items-center justify-center gap-1.5 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] px-2 type-label-md text-[var(--md-sys-color-on-surface)] shadow-elev-3 transition-colors hover:bg-[var(--md-sys-color-surface-container-highest)]"
           aria-label={
             notifications.length > 0
               ? `알림함 열기, 최근 알림 ${notifications.length}개`
@@ -216,7 +216,7 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
           <Icon name="notifications" size={18} />
           <span>알림</span>
           {notifications.length > 0 && (
-            <span className="ml-0.5 inline-flex min-w-5 justify-center rounded-full bg-[var(--md-sys-color-primary)] px-1.5 py-0.5 text-[0.7rem] font-semibold leading-none text-[var(--md-sys-color-on-primary)]">
+            <span className="absolute -right-1 -top-1 inline-flex min-w-5 justify-center rounded-full bg-[var(--md-sys-color-primary)] px-1.5 py-0.5 text-[0.7rem] font-semibold leading-none text-[var(--md-sys-color-on-primary)]">
               {notifications.length > 99 ? '99+' : notifications.length}
             </span>
           )}
@@ -227,7 +227,7 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
             id="officewhere-notification-center"
             role="dialog"
             aria-label="알림함"
-            className="w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] shadow-elev-4"
+            className="mb-1 ml-1 w-[min(24rem,calc(100vw-7rem))] overflow-hidden rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-high)] shadow-elev-4"
           >
             <header className="flex items-center justify-between gap-3 border-b border-[var(--md-sys-color-outline-variant)] px-4 py-3">
               <div>

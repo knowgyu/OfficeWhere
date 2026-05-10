@@ -10,7 +10,7 @@ function SnackbarHarness({ mode = 'basic' }: { mode?: 'basic' | 'dedupe' }) {
 
   useEffect(() => {
     if (mode !== 'basic') return
-    snackbar.success('문서 새로고침 완료', 20)
+    snackbar.success('문서 새로고침 완료', 120)
   }, [mode, snackbar])
 
   return (

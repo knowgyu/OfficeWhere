@@ -9,7 +9,7 @@ import {
   ExcelDiffGridResponse,
   ExcelDiffHighlight,
 } from '../../api/client'
-import { Badge, Card, Chip, Icon, Spinner, StatCard } from '../../ui'
+import { Badge, Card, Chip, Icon, SelectField, Spinner, StatCard } from '../../ui'
 import { TutorialStep } from '../../tutorial'
 import { ExcelGridModalState, HistoryTransition } from './types'
 
@@ -529,6 +529,14 @@ function excelGridCellTitle(cell: ExcelDiffGridCell) {
   return `${location} · ${excelGridHighlightLabel(cell.highlight)} · ${displayExcelGridValue(first.before)} → ${displayExcelGridValue(first.after)}`
 }
 
+function excelDiffGridSheetNames(data: ExcelDiffGridResponse | null): string[] {
+  if (!data) return []
+  const names = data.sections
+    .map((section) => section.sheet_name || data.sheet_name || '')
+    .filter((name) => name && name !== '여러 시트')
+  return Array.from(new Set(names))
+}
+
 export function ExcelDiffGridModal({
   modal,
   onClose,
@@ -543,14 +551,8 @@ export function ExcelDiffGridModal({
   onTutorialStep?: (step: TutorialStep | null) => void
 }) {
   const [selectedCell, setSelectedCell] = useState<ExcelDiffGridCell | null>(null)
-  const sheetNames = useMemo(() => {
-    if (!modal.data) return []
-    const names = modal.data.sections
-      .map((section) => section.sheet_name || modal.data?.sheet_name || '')
-      .filter((name) => name && name !== '여러 시트')
-    return Array.from(new Set(names))
-  }, [modal.data])
-  const [selectedSheetName, setSelectedSheetName] = useState('')
+  const sheetNames = useMemo(() => excelDiffGridSheetNames(modal.data), [modal.data])
+  const [selectedSheetName, setSelectedSheetName] = useState(() => excelDiffGridSheetNames(modal.data)[0] ?? '')
   const activeSheetName = selectedSheetName || sheetNames[0] || ''
   const visibleSections = useMemo(() => {
     if (!modal.data || !activeSheetName) return modal.data?.sections ?? []
@@ -683,6 +685,16 @@ function ExcelDiffGridSummary({
   selectedSheetName: string
   onSelectSheet: (sheetName: string) => void
 }) {
+  const sectionCountsBySheet = useMemo(() => {
+    const counts = new Map<string, number>()
+    data.sections.forEach((section) => {
+      const sheetName = section.sheet_name || data.sheet_name
+      if (!sheetName || sheetName === '여러 시트') return
+      counts.set(sheetName, (counts.get(sheetName) ?? 0) + 1)
+    })
+    return counts
+  }, [data])
+
   return (
     <div className="space-y-3">
       <div className="flex gap-2 flex-wrap">
@@ -692,35 +704,33 @@ function ExcelDiffGridSummary({
       </div>
 
       {sheetNames.length > 1 && (
-        <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2 pt-2">
-          <div className="mb-1 flex items-center gap-1.5 px-1 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">
-            <Icon name="view_column" size={15} />
-            시트 선택
-          </div>
-          <div
-            role="tablist"
-            aria-label="Excel 시트 선택"
-            className="flex gap-1 overflow-x-auto pb-2"
+        <div className="grid gap-3 rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 sm:grid-cols-[minmax(13rem,18rem)_minmax(0,1fr)] sm:items-end">
+          <SelectField
+            label="시트 선택"
+            value={selectedSheetName}
+            onChange={(event) => onSelectSheet(event.target.value)}
+            leadingIcon="view_column"
+            helper="여러 시트가 있을 때 선택한 시트만 표에 표시합니다."
+            fullWidth
           >
             {sheetNames.map((sheetName) => {
-              const selected = selectedSheetName === sheetName
+              const count = sectionCountsBySheet.get(sheetName) ?? 0
               return (
-                <button
-                  key={sheetName}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  onClick={() => onSelectSheet(sheetName)}
-                  className={`shrink-0 rounded-t-md border px-3 py-1.5 type-label-sm transition-colors ${
-                    selected
-                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)]'
-                      : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-high)] hover:text-[var(--md-sys-color-on-surface)]'
-                  }`}
-                >
+                <option key={sheetName} value={sheetName}>
                   {sheetName}
-                </button>
+                  {count > 1 ? ` · 구간 ${count}개` : ''}
+                </option>
               )
             })}
+          </SelectField>
+          <div className="min-w-0 rounded-md bg-[var(--md-sys-color-surface-container-low)] px-3 py-2">
+            <p className="type-label-sm text-[var(--md-sys-color-on-surface-variant)]">표시 중</p>
+            <p className="mt-0.5 truncate type-title-sm text-[var(--md-sys-color-on-surface)]">
+              {selectedSheetName} 시트
+            </p>
+            <p className="mt-1 type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+              첫 화면은 첫 번째 시트로 열리고, 다른 시트는 여기서 전환합니다.
+            </p>
           </div>
         </div>
       )}

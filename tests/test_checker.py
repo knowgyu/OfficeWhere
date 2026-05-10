@@ -75,6 +75,14 @@ def _write_multisheet_excel(path: Path, detail_value: str):
     workbook.save(path)
 
 
+def _write_multisheet_grid_excel(path: Path, summary_value: str, detail_value: str):
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "요약"
+    summary["A1"] = summary_value
+    detail = workbook.create_sheet("세부")
+    detail["B2"] = detail_value
+    workbook.save(path)
 
 
 def _write_word(path: Path, paragraph_text: str, table_value: str):
@@ -487,6 +495,74 @@ def test_excel_diff_grid_returns_full_small_latest_sheet(tmp_path):
     assert highlighted[0]["row_number"] == 3
     assert highlighted[0]["value"] == "250"
     assert highlighted[0]["histories"][0]["before"] == "200"
+
+
+def test_excel_diff_grid_keeps_multi_sheet_sections_separable(tmp_path):
+    latest = tmp_path / "multi-grid-latest.xlsx"
+    previous = tmp_path / "multi-grid-previous.xlsx"
+    _write_multisheet_grid_excel(latest, "요약 최신", "세부 최신")
+    _write_multisheet_grid_excel(previous, "요약 이전", "세부 이전")
+
+    result = build_excel_diff_grid(
+        [
+            {'id': 2, 'path': str(latest), 'name': 'multi-grid-latest.xlsx', 'file_type': 'Excel'},
+            {'id': 1, 'path': str(previous), 'name': 'multi-grid-previous.xlsx', 'file_type': 'Excel'},
+        ],
+        [
+            {
+                "sheet_name": "요약",
+                "key": "1",
+                "column": "A",
+                "change_type": "changed",
+                "histories": [
+                    {
+                        "change_type": "changed",
+                        "from_file_id": 1,
+                        "from_file_name": "multi-grid-previous.xlsx",
+                        "to_file_id": 2,
+                        "to_file_name": "multi-grid-latest.xlsx",
+                        "before": "요약 이전",
+                        "after": "요약 최신",
+                        "label": "multi-grid-previous.xlsx → multi-grid-latest.xlsx",
+                    }
+                ],
+            },
+            {
+                "sheet_name": "세부",
+                "key": "2",
+                "column": "B",
+                "change_type": "changed",
+                "histories": [
+                    {
+                        "change_type": "changed",
+                        "from_file_id": 1,
+                        "from_file_name": "multi-grid-previous.xlsx",
+                        "to_file_id": 2,
+                        "to_file_name": "multi-grid-latest.xlsx",
+                        "before": "세부 이전",
+                        "after": "세부 최신",
+                        "label": "multi-grid-previous.xlsx → multi-grid-latest.xlsx",
+                    }
+                ],
+            },
+        ],
+    )
+
+    assert result["sheet_name"] == "여러 시트"
+    section_sheet_names = [section["sheet_name"] for section in result["sections"]]
+    assert section_sheet_names == ["요약", "세부"]
+
+    values_by_sheet = {
+        section["sheet_name"]: [
+            cell["value"]
+            for row in section["rows"]
+            for cell in row["cells"]
+            if cell["highlight"] == "changed"
+        ]
+        for section in result["sections"]
+    }
+    assert values_by_sheet["요약"] == ["요약 최신"]
+    assert values_by_sheet["세부"] == ["세부 최신"]
 
 
 def test_excel_diff_grid_colors_only_latest_vs_previous_but_keeps_older_history(tmp_path):
