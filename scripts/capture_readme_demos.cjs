@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Capture real browser video demos for README.md. */
+/* Capture real browser GIF demos for README.md. */
 const fs = require('node:fs/promises');
 const fss = require('node:fs');
 const net = require('node:net');
@@ -15,6 +15,9 @@ const ARTIFACT_ROOT = path.join(ROOT, '.omx', 'artifacts', 'readme-demo');
 const LOCAL_BROWSER_LIB = path.join(ROOT, '.omx', 'browser-libs', 'usr', 'lib', 'x86_64-linux-gnu');
 const LOCAL_FFMPEG = path.join(ROOT, '.omx', 'tools', 'ffmpeg', 'ffmpeg');
 const VIEWPORT = { width: 1440, height: 960 };
+const GIF_WIDTH = 980;
+const GIF_FPS = 12;
+const GIF_HEIGHT = Math.round((VIEWPORT.height * GIF_WIDTH) / VIEWPORT.width);
 const CAPTURE_LIMITS = {
   maxWidth: 1600,
   maxHeight: 1100,
@@ -22,8 +25,8 @@ const CAPTURE_LIMITS = {
   maxBytes: 14 * 1024 * 1024,
 };
 const CLIP_OUTPUTS = {
-  search: path.join(DOCS_ASSETS, 'readme-demo-search.mp4'),
-  version: path.join(DOCS_ASSETS, 'readme-demo-version.mp4'),
+  search: path.join(DOCS_ASSETS, 'readme-demo-search.gif'),
+  version: path.join(DOCS_ASSETS, 'readme-demo-version.gif'),
 };
 const STILL_OUTPUTS = {
   duplicates: path.join(DOCS_ASSETS, 'readme-demo-duplicates.png'),
@@ -145,27 +148,37 @@ async function runChild(command, args, options = {}) {
   });
 }
 
-async function transcodeVideoToMp4(input, output, trimStartSec, durationSec) {
+async function transcodeVideoToGif(input, output, trimStartSec, durationSec) {
   const ffmpeg = findFfmpeg();
+  const palette = `${output}.palette.png`;
+  const videoFilter = `fps=${GIF_FPS},scale=${GIF_WIDTH}:-1:flags=lanczos`;
   await fs.mkdir(path.dirname(output), { recursive: true });
   await fs.rm(output, { force: true });
+  await fs.rm(palette, { force: true });
   await runChild(ffmpeg, [
     '-hide_banner',
     '-loglevel', 'warning',
     '-y',
-    '-i', input,
     '-ss', trimStartSec.toFixed(3),
     '-t', durationSec.toFixed(3),
-    '-vf', 'format=yuv420p',
-    '-c:v', 'libx264',
-    '-preset', 'slow',
-    '-crf', '14',
-    '-profile:v', 'high',
-    '-pix_fmt', 'yuv420p',
-    '-movflags', '+faststart',
-    '-an',
+    '-i', input,
+    '-vf', `${videoFilter},palettegen=stats_mode=diff`,
+    '-frames:v', '1',
+    palette,
+  ]);
+  await runChild(ffmpeg, [
+    '-hide_banner',
+    '-loglevel', 'warning',
+    '-y',
+    '-ss', trimStartSec.toFixed(3),
+    '-t', durationSec.toFixed(3),
+    '-i', input,
+    '-i', palette,
+    '-lavfi', `${videoFilter}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`,
+    '-loop', '0',
     output,
   ]);
+  await fs.rm(palette, { force: true });
 }
 
 async function copyLibrary(dst) {
@@ -705,22 +718,22 @@ async function startClip(browser, viteUrl, workDir, name, libraryPath, action, o
   if (!rawVideoPath) throw new Error(`native video recording was not available for ${name}`);
   const trimStartSec = Math.max(0, (actionStartedAt - clipOpenedAt) / 1000);
   const durationMs = Math.max(1, actionEndedAt - actionStartedAt);
-  await transcodeVideoToMp4(rawVideoPath, output, trimStartSec, durationMs / 1000);
+  await transcodeVideoToGif(rawVideoPath, output, trimStartSec, durationMs / 1000);
   if (!options.keepFrames) {
     await fs.rm(rawVideoDir, { recursive: true, force: true });
   }
   return {
     name,
     output,
-    width: VIEWPORT.width,
-    height: VIEWPORT.height,
+    width: GIF_WIDTH,
+    height: GIF_HEIGHT,
     duration_ms: durationMs,
-    fps: 30,
-    frame_count: Math.round(durationMs / 1000 * 30),
+    fps: GIF_FPS,
+    frame_count: Math.round(durationMs / 1000 * GIF_FPS),
     bytes: (await fs.stat(output)).size,
     screenshot,
-    encoder: 'ffmpeg/libx264',
-    crf: 14,
+    encoder: 'ffmpeg/palette-gif',
+    dither: 'bayer',
     capture: 'playwright-native-video',
   };
 }
@@ -924,7 +937,7 @@ async function main() {
       child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`validator exited ${code}`)));
       child.on('error', reject);
     });
-    console.log(`Saved README demo videos to ${path.relative(ROOT, DOCS_ASSETS)}`);
+    console.log(`Saved README demo media to ${path.relative(ROOT, DOCS_ASSETS)}`);
     console.log(`Capture artifacts: ${path.relative(ROOT, workDir)}`);
   } finally {
     if (browser) await browser.close().catch(() => {});

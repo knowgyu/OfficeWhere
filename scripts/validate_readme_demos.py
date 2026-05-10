@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Validate README demo media assets.
 
-The capture script writes a JSON report for ffmpeg-encoded MP4/WebM videos and
-static PNG/JPEG screenshots. This validator also supports animated WebP assets
-for older demos.
+The capture script writes a JSON report for GIF demos and static PNG/JPEG
+screenshots. This validator also accepts older WebP/MP4/WebM demo assets.
 """
 from __future__ import annotations
 
@@ -27,19 +26,19 @@ def _frame_duration_ms(frame: Image.Image) -> int:
         return 0
 
 
-def _webp_metrics(path: Path) -> dict[str, Any]:
+def _animated_image_metrics(path: Path) -> dict[str, Any]:
     with Image.open(path) as image:
-        frames = [frame.copy() for frame in ImageSequence.Iterator(image)]
-        durations = [_frame_duration_ms(frame) for frame in frames]
-        frame_count = max(1, len(frames))
-        duration_ms = sum(durations)
-        fps = round((frame_count * 1000 / duration_ms), 2) if duration_ms > 0 else 0
         width, height = image.size
-        for frame in frames:
-            frame.close()
+        frame_count = 0
+        duration_ms = 0
+        for frame in ImageSequence.Iterator(image):
+            frame_count += 1
+            duration_ms += _frame_duration_ms(frame)
+        frame_count = max(1, frame_count)
+        fps = round((frame_count * 1000 / duration_ms), 2) if duration_ms > 0 else 0
     return {
         "path": str(path),
-        "kind": "webp",
+        "kind": path.suffix.lower().lstrip("."),
         "bytes": path.stat().st_size,
         "width": width,
         "height": height,
@@ -70,8 +69,8 @@ def _report_metrics(report_path: Path) -> list[dict[str, Any]]:
 
 def _asset_metrics(path: Path) -> dict[str, Any]:
     suffix = path.suffix.lower()
-    if suffix == ".webp":
-        return _webp_metrics(path)
+    if suffix in {".webp", ".gif"}:
+        return _animated_image_metrics(path)
     if suffix in {".png", ".jpg", ".jpeg"}:
         with Image.open(path) as image:
             width, height = image.size
@@ -108,7 +107,7 @@ def validate(items: list[dict[str, Any]], args: argparse.Namespace) -> dict[str,
         duration_ms = metrics.get("duration_ms")
         checks = {
             "exists": path.exists(),
-            "media_type_ok": path.suffix.lower() in {".webm", ".webp", ".mp4", ".mov", ".png", ".jpg", ".jpeg"},
+            "media_type_ok": path.suffix.lower() in {".gif", ".webm", ".webp", ".mp4", ".mov", ".png", ".jpg", ".jpeg"},
             "size_ok": int(metrics.get("bytes") or 0) <= args.max_bytes,
             "width_ok": width is None or int(width) <= args.max_width,
             "height_ok": height is None or int(height) <= args.max_height,

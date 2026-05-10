@@ -18,15 +18,15 @@
 
 ### 문서 검색
 
-<video src="docs/assets/readme-demo-search.mp4" width="980" controls muted loop playsinline title="OfficeWhere 문서 검색 데모"></video>
+<img src="docs/assets/readme-demo-search.gif" width="980" alt="OfficeWhere 문서 검색 데모" />
 
-파일명과 본문을 함께 찾아 문서별 결과를 확인합니다. [영상 파일 열기](docs/assets/readme-demo-search.mp4)
+파일명과 본문을 함께 찾아 문서별 결과를 확인합니다. [GIF 파일 열기](docs/assets/readme-demo-search.gif)
 
 ### 변경 이력
 
-<video src="docs/assets/readme-demo-version.mp4" width="980" controls muted loop playsinline title="OfficeWhere 변경 이력 데모"></video>
+<img src="docs/assets/readme-demo-version.gif" width="980" alt="OfficeWhere 변경 이력 데모" />
 
-수정본 묶음에서 바뀐 셀과 내용을 빠르게 펼쳐봅니다. [영상 파일 열기](docs/assets/readme-demo-version.mp4)
+수정본 묶음에서 바뀐 셀과 내용을 빠르게 펼쳐봅니다. [GIF 파일 열기](docs/assets/readme-demo-version.gif)
 
 ### 같은 내용 문서
 
