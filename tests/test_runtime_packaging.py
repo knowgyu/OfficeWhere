@@ -29,6 +29,17 @@ def test_pdf_runtime_dependency_is_declared_and_vendored_for_windows():
     assert (win_runtime / "pypdfium2-5.8.0.dist-info" / "METADATA").exists()
 
 
+def test_backend_and_frontend_release_versions_match():
+    import re
+
+    package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    backend_main = (REPO_ROOT / "backend" / "main.py").read_text(encoding="utf-8")
+    match = re.search(r'FastAPI\(title="officewhere", version="([^"]+)"', backend_main)
+
+    assert match is not None
+    assert match.group(1) == package["version"]
+
+
 def test_electron_builder_runtime_resources_are_platform_scoped():
     package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
     scripts = package["scripts"]

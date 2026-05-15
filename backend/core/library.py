@@ -28,6 +28,7 @@ from ..database import (
     get_all_files,
     get_db_path,
     get_file_by_id,
+    get_file_fingerprints,
     get_indexed_library_group,
     get_library_group_index_file,
     get_library_group_index_status,
@@ -1697,8 +1698,10 @@ def _all_file_group_details(*, cache_only: bool = False) -> List[LibraryGroupDet
     return _load_indexed_group_details()
 
 
-def _ensure_group_index_available(*, cache_only: bool = False) -> Dict[str, str]:
+def _ensure_group_index_available(*, cache_only: bool = False, allow_refresh: bool = True) -> Dict[str, str]:
     status = get_library_group_index_status()
+    if not allow_refresh:
+        return status
     if _group_index_needs_repair(status):
         if cache_only or _is_library_rescan_active():
             schedule_group_index_refresh(reason="request_repair", full=True)
@@ -1984,17 +1987,18 @@ def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
     )
 
 
-def _file_info_from_group_summary_row(value: Any) -> Optional[FileInfo]:
+def _file_info_from_group_summary_row(value: Any, *, allow_state_write: bool = True) -> Optional[FileInfo]:
     if not isinstance(value, dict):
         return None
     try:
         return FileInfo(**value)
     except Exception:
-        set_library_group_index_state("repair_needed", error="invalid group summary file payload")
+        if allow_state_write:
+            set_library_group_index_state("repair_needed", error="invalid group summary file payload")
         return None
 
 
-def _group_summary_from_index_row(row: Dict[str, Any]) -> LibraryGroupSummary:
+def _group_summary_from_index_row(row: Dict[str, Any], *, allow_state_write: bool = True) -> LibraryGroupSummary:
     return LibraryGroupSummary(
         id=str(row["group_id"]),
         group_kind=str(row["group_kind"]),
@@ -2005,8 +2009,8 @@ def _group_summary_from_index_row(row: Dict[str, Any]) -> LibraryGroupSummary:
         file_count=int(row["file_count"] or 0),
         confidence=str(row["confidence"]),
         reason=str(row["reason"]),
-        latest_file=_file_info_from_group_summary_row(row.get("latest_file")),
-        previous_file=_file_info_from_group_summary_row(row.get("previous_file")),
+        latest_file=_file_info_from_group_summary_row(row.get("latest_file"), allow_state_write=allow_state_write),
+        previous_file=_file_info_from_group_summary_row(row.get("previous_file"), allow_state_write=allow_state_write),
         manual_latest_file_id=row.get("manual_latest_file_id"),
         tokens_summary=[str(item) for item in row.get("tokens_summary", [])],
         content_status=str(row.get("content_status") or "pending"),
@@ -2026,10 +2030,12 @@ def list_file_groups(
     offset: int = 0,
     include_duplicate_content: bool = False,
     cache_only: bool = False,
+    allow_refresh: bool = True,
+    allow_state_write: bool = True,
 ) -> LibraryGroupsResponse:
     safe_limit = _bounded_limit(limit)
     safe_offset = max(0, offset)
-    _ensure_group_index_available(cache_only=cache_only)
+    _ensure_group_index_available(cache_only=cache_only, allow_refresh=allow_refresh)
     page_data = list_library_group_summaries(
         kind=kind,
         file_type=file_type,
@@ -2038,11 +2044,15 @@ def list_file_groups(
         limit=safe_limit,
         offset=safe_offset,
         include_duplicate_content=include_duplicate_content,
+        allow_state_write=allow_state_write,
     )
     status = get_library_group_index_status()
     return LibraryGroupsResponse(
         total=int(page_data.get("total") or 0),
-        groups=[_group_summary_from_index_row(row) for row in page_data.get("rows", [])],
+        groups=[
+            _group_summary_from_index_row(row, allow_state_write=allow_state_write)
+            for row in page_data.get("rows", [])
+        ],
         limit=safe_limit,
         offset=safe_offset,
         counts_by_kind={str(key): int(value) for key, value in dict(page_data.get("counts_by_kind", {})).items()},
@@ -2058,33 +2068,49 @@ def get_file_group_detail(
     *,
     limit: int = MAX_GROUP_DETAIL_LIMIT,
     cache_only: bool = False,
+    allow_refresh: bool = True,
+    allow_state_write: bool = True,
 ) -> Optional[LibraryGroupDetail]:
     safe_limit = _bounded_limit(limit, default=MAX_GROUP_DETAIL_LIMIT, maximum=MAX_GROUP_DETAIL_LIMIT)
     status = get_library_group_index_status()
-    if _group_index_needs_repair(status):
-        if cache_only or _is_library_rescan_active():
-            schedule_group_index_refresh(reason="detail_request_repair", full=True)
-        else:
-            refresh_group_index_now(reason="detail_request_repair", full=True)
-    elif status.get("state") == "stale":
-        if cache_only or _is_library_rescan_active():
-            schedule_group_index_refresh(reason="detail_request_stale_refresh")
-        else:
-            refresh_group_index_now(reason="detail_request_stale_refresh")
-    row = get_indexed_library_group(group_id)
+    if allow_refresh:
+        if _group_index_needs_repair(status):
+            if cache_only or _is_library_rescan_active():
+                schedule_group_index_refresh(reason="detail_request_repair", full=True)
+            else:
+                refresh_group_index_now(reason="detail_request_repair", full=True)
+        elif status.get("state") == "stale":
+            if cache_only or _is_library_rescan_active():
+                schedule_group_index_refresh(reason="detail_request_stale_refresh")
+            else:
+                refresh_group_index_now(reason="detail_request_stale_refresh")
+    row = get_indexed_library_group(group_id, allow_state_write=allow_state_write)
     if row:
         try:
-            return _paged_group_detail(LibraryGroupDetail(**row["group"]), safe_limit)
+            return _paged_group_detail(
+                LibraryGroupDetail(**row["group"]),
+                safe_limit,
+                allow_fingerprint_write=allow_refresh,
+            )
         except Exception:
-            set_library_group_index_state("repair_needed", error="invalid group detail payload")
+            if allow_state_write:
+                set_library_group_index_state("repair_needed", error="invalid group detail payload")
             return None
     return None
 
 
-def _paged_group_detail(group: LibraryGroupDetail, limit: int = MAX_GROUP_DETAIL_LIMIT) -> LibraryGroupDetail:
+def _paged_group_detail(
+    group: LibraryGroupDetail,
+    limit: int = MAX_GROUP_DETAIL_LIMIT,
+    *,
+    allow_fingerprint_write: bool = True,
+) -> LibraryGroupDetail:
     safe_limit = _bounded_limit(limit, default=MAX_GROUP_DETAIL_LIMIT, maximum=MAX_GROUP_DETAIL_LIMIT)
     page_files = group.files[:safe_limit]
-    enriched = _with_content_evidence(group, page_files)
+    fingerprint_by_id = None
+    if not allow_fingerprint_write:
+        fingerprint_by_id = get_file_fingerprints([file.id for file in page_files])
+    enriched = _with_content_evidence(group, page_files, fingerprint_by_id=fingerprint_by_id)
     return LibraryGroupDetail(
         **{
             **enriched.model_dump(exclude={"files"}),

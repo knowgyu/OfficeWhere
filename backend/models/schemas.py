@@ -373,6 +373,35 @@ class ReindexResponse(BaseModel):
     skipped: int
 
 
+class ProviderHealth(BaseModel):
+    status: Literal["ok"] = "ok"
+    provider: str = "OfficeWhere"
+    app_version: str
+    contract_version: str = "v1"
+
+
+class ProviderOperation(BaseModel):
+    name: str
+    method: str
+    path: str
+    safety: Literal["read_only", "source_read_only_cache_write", "state_changing"]
+    description: str
+
+
+class ProviderManifest(BaseModel):
+    provider: str = "OfficeWhere"
+    contract_version: str = "v1"
+    app_version: str
+    api_base_path: str = "/api/provider/v1"
+    transport: str = "local_http_loopback"
+    source_document_policy: Literal["read_only"] = "read_only"
+    sqlite_access_policy: Literal["forbidden"] = "forbidden"
+    capabilities: List[str] = Field(default_factory=list)
+    operations: List[ProviderOperation] = Field(default_factory=list)
+    maintenance_operations: List[ProviderOperation] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
 class WatchedFolder(BaseModel):
     path: str
     recursive: bool = True

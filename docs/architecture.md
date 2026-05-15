@@ -9,6 +9,7 @@ OfficeWhere는 로컬/공유 폴더에 흩어진 Office/PDF 문서를 찾아 색
 | Desktop shell | `frontend/electron/` | Electron main/preload. Python backend 실행, 포트 전달, 제한된 `window.officeWhere` bridge 제공 |
 | Renderer | `frontend/src/` | React + TypeScript + Vite UI. 검색, 문서 관리, 중복/버전 비교 화면 |
 | API backend | `backend/main.py`, `backend/api/` | FastAPI router, CORS, 설정/API 계약 |
+| Provider contract | `backend/api/provider.py`, `backend/application/`, `docs/provider-contract.md` | where-desk/Codex CLI가 SQLite 직접 접근 없이 쓰는 자동화용 read-oriented 계약 |
 | App data | `backend/database.py` | SQLite schema, 등록 파일, 검색 청크, 서명, 비교/그룹 캐시, 설정 |
 | Parsing/indexing | `backend/core/` | Office/PDF parser, rescan, search, comparison, Excel/PPT/Word diff |
 | Packaging | `scripts/prepare_python_runtime.py`, `python-runtime/`, `frontend/package.json` | backend source/runtime과 Electron bundle 생성 |
@@ -46,6 +47,10 @@ PDF 텍스트 추출은 PDFium 기반 `pypdfium2`로 수행합니다. `backend/c
 | 버전/중복 그룹 | `backend/core/library.py`, `backend/storage/library_groups.py`, `ConsistencyCheck`, `DuplicateFiles` |
 | 비교 결과 | `backend/core/checker.py`, `excel_compare.py`, `word_compare.py`, `ppt_compare.py`, frontend consistency components |
 | Electron bridge/packaging | `frontend/electron/main.ts`, `frontend/electron/preload.ts`, `frontend/package.json`, release workflow |
+
+## Provider 경계
+
+`/api/provider/v1`은 외부 자동화가 사용할 수 있는 얇은 provider 계약입니다. `where-desk` 같은 업무형 agent는 OfficeWhere SQLite를 직접 읽지 않고 이 계약을 통해 검색, 파일 목록, 중복, 캐시된 문서 묶음, 비교 기능만 호출합니다. provider의 문서 묶음 조회는 cache-only snapshot이며, 파생 인덱스 새로고침/repair 표시나 누락된 fingerprint 생성까지 포함해 상태 변경 동작을 수행하지 않습니다. 재색인, 설정 변경, 파일 등록/삭제, OS 파일 열기 같은 작업도 명시적 사용자 의도 없이 자동 호출하지 않습니다. 자세한 규칙은 `docs/provider-contract.md`를 봅니다.
 
 ## 운영 원칙
 

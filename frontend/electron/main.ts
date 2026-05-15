@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron'
 import { execFile, spawn } from 'node:child_process'
+import { resolveBackendStartupBudget } from './backendStartup'
 import type { ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -9,7 +10,6 @@ import net from 'node:net'
 import path from 'node:path'
 
 const HOST = '127.0.0.1'
-const STARTUP_TIMEOUT_MS = 30_000
 const STARTUP_ATTEMPTS = 2
 const RELEASE_API_URL = 'https://api.github.com/repos/knowgyu/OfficeWhere/releases/latest'
 const RELEASE_PAGE_URL = 'https://github.com/knowgyu/OfficeWhere/releases/latest'
@@ -1250,9 +1250,14 @@ async function startBackend(port: number) {
   const indexPerfLogPath = path.join(logDir, 'index-performance.log')
 
   const command = getBackendCommand(port, dataDir)
+  const startupBudget = resolveBackendStartupBudget(dataDir)
   const logStream = fs.createWriteStream(backendLogPath, { flags: 'a' })
   logStream.write(`[officewhere] command: ${command.file} ${command.args.join(' ')}\n`)
   logStream.write(`[officewhere] index performance log: ${indexPerfLogPath}\n`)
+  logStream.write(
+    `[officewhere] backend data footprint: ${startupBudget.footprintBytes} bytes; ` +
+      `startup timeout: ${startupBudget.timeoutMs} ms (${startupBudget.reason})\n`,
+  )
 
   let spawnError: Error | null = null
   let exited = false
@@ -1314,7 +1319,7 @@ async function startBackend(port: number) {
     }
   })
 
-  const deadline = Date.now() + STARTUP_TIMEOUT_MS
+  const deadline = Date.now() + startupBudget.timeoutMs
   while (Date.now() < deadline) {
     if (spawnError) throw spawnError
     if (exited) throw new Error(`backend process exited before health check: ${backendLogPath}`)
@@ -1322,7 +1327,7 @@ async function startBackend(port: number) {
     await delay(400)
   }
 
-  throw new Error(`backend health check timed out: ${backendBaseUrl}`)
+  throw new Error(`backend health check timed out after ${startupBudget.timeoutMs}ms: ${backendBaseUrl}`)
 }
 
 function getBackendCommand(port: number, dataDir: string): { file: string; args: string[]; cwd: string } {

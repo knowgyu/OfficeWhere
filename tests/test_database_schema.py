@@ -104,6 +104,35 @@ def test_comparison_cache_prune_keeps_newest_floor(tmp_path, monkeypatch):
     assert remaining == ["cache-3", "cache-4"]
 
 
+def test_comparison_cache_size_prune_can_exceed_keep_floor_to_bound_growth(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr("backend.database.DB_PATH", db_path)
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    conn = sqlite3.connect(db_path)
+    old_base = datetime.now() - timedelta(minutes=5)
+    for index in range(4):
+        conn.execute(
+            """
+            INSERT INTO comparison_cache (cache_key, file_ids, comparison_mode, result_json, created_at)
+            VALUES (?, '[]', 'version_history', ?, ?)
+            """,
+            (f"cache-{index}", "x" * 60, (old_base + timedelta(seconds=index)).isoformat()),
+        )
+    conn.commit()
+    conn.close()
+
+    result = prune_comparison_cache(max_age_days=0, max_bytes=100, min_keep_rows=3)
+
+    conn = sqlite3.connect(db_path)
+    remaining = [row[0] for row in conn.execute("SELECT cache_key FROM comparison_cache ORDER BY created_at").fetchall()]
+    conn.close()
+
+    assert result["deleted_size"] == 3
+    assert remaining == ["cache-3"]
+
+
 def test_init_db_creates_library_group_index_tables(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setattr("backend.database.DB_PATH", db_path)

@@ -2,6 +2,7 @@ import sys
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import perf_counter
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -15,6 +16,7 @@ from .api.files import router as files_router
 from .api.check import router as check_router
 from .api.search import router as search_router
 from .api.library import router as library_router
+from .api.provider import router as provider_router
 from .core.indexer import start_scheduler
 from .core.tutorial_examples import cleanup_tutorial_library, create_tutorial_library
 
@@ -28,16 +30,28 @@ class TutorialLibraryCleanupRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    startup_started = perf_counter()
+    logger.info("backend startup: init_db start db_path=%s", get_db_path())
     init_db()
+    logger.info(
+        "backend startup: init_db done duration_ms=%s db_path=%s",
+        int(round((perf_counter() - startup_started) * 1000)),
+        get_db_path(),
+    )
     try:
+        cleanup_started = perf_counter()
         cleanup_tutorial_library()
+        logger.info(
+            "backend startup: tutorial cleanup done duration_ms=%s",
+            int(round((perf_counter() - cleanup_started) * 1000)),
+        )
     except Exception:
         logger.warning("failed to clean stale tutorial library", exc_info=True)
     start_scheduler()
     yield
 
 
-app = FastAPI(title="officewhere", version="0.8.1", lifespan=lifespan)
+app = FastAPI(title="officewhere", version="0.9.0", lifespan=lifespan)
 
 # CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(
@@ -54,6 +68,7 @@ app.include_router(files_router)
 app.include_router(check_router)
 app.include_router(search_router)
 app.include_router(library_router)
+app.include_router(provider_router)
 
 
 @app.get("/api/health")

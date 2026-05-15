@@ -48,7 +48,7 @@ LIBRARY_GROUP_INDEX_UPDATED_AT_KEY = "library_group_index_updated_at"
 LIBRARY_GROUP_INDEX_ERROR_KEY = "library_group_index_error"
 COMPARISON_CACHE_MAX_BYTES = 100 * 1024 * 1024
 COMPARISON_CACHE_MAX_AGE_DAYS = 90
-COMPARISON_CACHE_MIN_KEEP_ROWS = 300
+COMPARISON_CACHE_MIN_KEEP_ROWS = 50
 MISSING_FILE_RETENTION_DAYS = 7
 _DB_WRITE_LOCK = threading.RLock()
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
@@ -1213,36 +1213,67 @@ def _prune_unsupported_file_extensions(cursor: sqlite3.Cursor) -> int:
 
 
 def init_db():
-    DB_DIR.mkdir(parents=True, exist_ok=True)
-    with _write_connection() as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
-        cursor = conn.cursor()
-        legacy_reset = _reset_legacy_excel_table_schema_if_needed(cursor)
-        _create_schema(cursor, create_search_triggers=True)
-        if legacy_reset:
-            _set_setting_with_cursor(
-                cursor,
-                "last_schema_reset",
-                json.dumps(
-                    {
-                        "at": datetime.now().isoformat(),
-                        "reason": "remove_legacy_excel_table_metadata",
-                    },
-                    ensure_ascii=False,
-                ),
-            )
+    init_started = perf_counter()
+    metrics: Dict[str, Any] = {"db_path": str(DB_PATH)}
+    log_index_perf("db_init_start", **metrics)
+    try:
+        DB_DIR.mkdir(parents=True, exist_ok=True)
+        with _write_connection() as conn:
+            journal_started = perf_counter()
+            conn.execute("PRAGMA journal_mode=WAL")
+            metrics["journal_mode_ms"] = elapsed_ms(journal_started)
+            cursor = conn.cursor()
 
-        _prune_unsupported_file_extensions(cursor)
-        if _get_setting_with_cursor(cursor, "search_index_version") != SEARCH_INDEX_VERSION:
-            _refresh_search_text(cursor)
-            _drop_current_search_indexes(cursor)
-            _create_fts_tables(cursor)
-            _create_fts_triggers(cursor)
-            _rebuild_search_indexes(cursor, optimize=True)
+            schema_started = perf_counter()
+            legacy_reset = _reset_legacy_excel_table_schema_if_needed(cursor)
+            _create_schema(cursor, create_search_triggers=True)
+            metrics["schema_ms"] = elapsed_ms(schema_started)
+            metrics["legacy_reset"] = legacy_reset
+            if legacy_reset:
+                _set_setting_with_cursor(
+                    cursor,
+                    "last_schema_reset",
+                    json.dumps(
+                        {
+                            "at": datetime.now().isoformat(),
+                            "reason": "remove_legacy_excel_table_metadata",
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
 
-        _ensure_excel_index_version(cursor)
+            prune_started = perf_counter()
+            metrics["unsupported_pruned"] = _prune_unsupported_file_extensions(cursor)
+            metrics["unsupported_prune_ms"] = elapsed_ms(prune_started)
 
-        conn.commit()
+            search_index_version = _get_setting_with_cursor(cursor, "search_index_version")
+            metrics["previous_search_index_version"] = search_index_version
+            if search_index_version != SEARCH_INDEX_VERSION:
+                search_started = perf_counter()
+                _refresh_search_text(cursor)
+                _drop_current_search_indexes(cursor)
+                _create_fts_tables(cursor)
+                _create_fts_triggers(cursor)
+                metrics.update(_rebuild_search_indexes(cursor, optimize=True))
+                metrics["search_rebuild_ms"] = elapsed_ms(search_started)
+
+            excel_started = perf_counter()
+            _ensure_excel_index_version(cursor)
+            metrics["excel_index_check_ms"] = elapsed_ms(excel_started)
+
+            commit_started = perf_counter()
+            conn.commit()
+            metrics["commit_ms"] = elapsed_ms(commit_started)
+        metrics["success"] = True
+        metrics["total_ms"] = elapsed_ms(init_started)
+        log_index_perf("db_init_done", **metrics)
+    except Exception as exc:
+        metrics["success"] = False
+        metrics["error_type"] = exc.__class__.__name__
+        metrics["error"] = str(exc)
+        metrics["total_ms"] = elapsed_ms(init_started)
+        log_index_perf("db_init_done", **metrics)
+        raise
 
 
 def get_library_group_index_status() -> Dict[str, str]:
@@ -1466,10 +1497,11 @@ def clear_library_group_index(*, state: str = "ready", error: str = "") -> None:
         conn.commit()
 
 
-def list_indexed_library_groups() -> List[Dict[str, Any]]:
+def list_indexed_library_groups(*, allow_state_write: bool = True) -> List[Dict[str, Any]]:
     status = get_library_group_index_status()
     if status.get("version") and status.get("version") != LIBRARY_GROUP_INDEX_VERSION:
-        set_library_group_index_state("repair_needed", error="derived index version mismatch")
+        if allow_state_write:
+            set_library_group_index_state("repair_needed", error="derived index version mismatch")
         return []
 
     with _read_connection(row_factory=sqlite3.Row) as conn:
@@ -1489,7 +1521,8 @@ def list_indexed_library_groups() -> List[Dict[str, Any]]:
             row["group"] = json.loads(row["group_json"])
         except (TypeError, json.JSONDecodeError) as exc:
             logger.warning("library group JSON is corrupt", extra={"group_id": row.get("group_id"), "error": str(exc)})
-            set_library_group_index_state("repair_needed", error="corrupt group JSON")
+            if allow_state_write:
+                set_library_group_index_state("repair_needed", error="corrupt group JSON")
             return []
     return rows
 
@@ -1503,10 +1536,12 @@ def list_library_group_summaries(
     limit: int = 50,
     offset: int = 0,
     include_duplicate_content: bool = False,
+    allow_state_write: bool = True,
 ) -> Dict[str, Any]:
     status = get_library_group_index_status()
     if status.get("version") and status.get("version") != LIBRARY_GROUP_INDEX_VERSION:
-        set_library_group_index_state("repair_needed", error="derived index version mismatch")
+        if allow_state_write:
+            set_library_group_index_state("repair_needed", error="derived index version mismatch")
         return {"total": 0, "counts_by_kind": {}, "rows": []}
 
     safe_limit = max(0, min(int(limit), 500))
@@ -1590,7 +1625,7 @@ def list_library_group_summaries(
     }
 
 
-def get_indexed_library_group(group_id: str) -> Optional[Dict[str, Any]]:
+def get_indexed_library_group(group_id: str, *, allow_state_write: bool = True) -> Optional[Dict[str, Any]]:
     with _read_connection(row_factory=sqlite3.Row) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -1609,7 +1644,8 @@ def get_indexed_library_group(group_id: str) -> Optional[Dict[str, Any]]:
         data["group"] = json.loads(data["group_json"])
     except (TypeError, json.JSONDecodeError) as exc:
         logger.warning("library group JSON is corrupt", extra={"group_id": group_id, "error": str(exc)})
-        set_library_group_index_state("repair_needed", error="corrupt group JSON")
+        if allow_state_write:
+            set_library_group_index_state("repair_needed", error="corrupt group JSON")
         return None
     return data
 
@@ -2462,7 +2498,12 @@ def _prune_comparison_cache_with_cursor(
     max_age_days: int = COMPARISON_CACHE_MAX_AGE_DAYS,
     min_keep_rows: int = COMPARISON_CACHE_MIN_KEEP_ROWS,
 ) -> Dict[str, int]:
-    """Bound comparison-cache size without deleting the newest keep-floor rows."""
+    """Bound comparison-cache size while always keeping the newest row.
+
+    Age pruning keeps a small newest-row floor.  Size pruning is stricter so a
+    few very large comparison results cannot grow the app-owned SQLite DB into
+    multi-GB territory indefinitely.
+    """
     keep_floor = max(0, int(min_keep_rows))
     deleted_age = 0
     deleted_size = 0
@@ -2497,7 +2538,7 @@ def _prune_comparison_cache_with_cursor(
         keys_to_delete: List[str] = []
         for index, (cache_key, size) in enumerate(reversed(rows)):
             original_index = len(rows) - 1 - index
-            if original_index < keep_floor:
+            if original_index == 0:
                 continue
             if total_bytes <= max_bytes:
                 break
