@@ -20,7 +20,7 @@
 
 <img src="docs/assets/readme-quick-palette.svg" width="980" alt="OfficeWhere 빠른 검색 팔레트" />
 
-전역 단축키로 바로 띄우고, 결과만 빠르게 고른 뒤 `Ctrl/Cmd K`로 문서 작업을 실행합니다. [SVG 파일 열기](docs/assets/readme-quick-palette.svg)
+전역 단축키로 바로 띄우고, `pdf c 예산안`처럼 좁혀 찾은 뒤 `Ctrl/Cmd K`로 문서 작업을 실행합니다. [SVG 파일 열기](docs/assets/readme-quick-palette.svg)
 
 ### 문서 검색
 

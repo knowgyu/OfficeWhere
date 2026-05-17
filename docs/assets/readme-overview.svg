@@ -1,88 +1,64 @@
-<svg width="1180" height="620" viewBox="0 0 1180 620" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" text-rendering="geometricPrecision">
-  <title id="title">OfficeWhere overview</title>
-  <desc id="desc">OfficeWhere desktop app overview with quick search, change history, duplicate review, and read-only source documents.</desc>
+<svg width="1180" height="620" viewBox="0 0 1180 620" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">OfficeWhere product overview</title>
+  <desc id="desc">A visual overview showing document search, change history, and same-content document review.</desc>
   <defs>
-    <linearGradient id="ow-bg" x1="0" y1="0" x2="1180" y2="620" gradientUnits="userSpaceOnUse">
+    <linearGradient id="bg" x1="0" y1="0" x2="1180" y2="620" gradientUnits="userSpaceOnUse">
       <stop stop-color="#EEF6FF"/>
-      <stop offset="0.52" stop-color="#F7F4EA"/>
-      <stop offset="1" stop-color="#ECF8F0"/>
+      <stop offset="0.55" stop-color="#F7F4EA"/>
+      <stop offset="1" stop-color="#EEF8F1"/>
     </linearGradient>
-    <linearGradient id="ow-card-blue" x1="326" y1="206" x2="326" y2="430" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FBFDFF"/>
-      <stop offset="1" stop-color="#EEF7FF"/>
-    </linearGradient>
-    <linearGradient id="ow-card-amber" x1="578" y1="206" x2="578" y2="430" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFCF4"/>
-      <stop offset="1" stop-color="#F8F1E2"/>
-    </linearGradient>
-    <linearGradient id="ow-card-green" x1="830" y1="206" x2="830" y2="430" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F8FFF9"/>
-      <stop offset="1" stop-color="#EDF8F0"/>
-    </linearGradient>
-    <filter id="ow-shadow" x="40" y="36" width="1100" height="560" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#17324F" flood-opacity="0.16"/>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#16324F" flood-opacity="0.18"/>
     </filter>
   </defs>
+  <rect width="1180" height="620" rx="44" fill="url(#bg)"/>
+  <circle cx="1010" cy="95" r="96" fill="#D7F0DF" opacity="0.75"/>
+  <circle cx="138" cy="518" r="120" fill="#D7E9FF" opacity="0.9"/>
 
-  <rect width="1180" height="620" rx="44" fill="url(#ow-bg)"/>
-  <circle cx="1042" cy="112" r="96" fill="#D7F0DF" opacity="0.78"/>
-  <circle cx="136" cy="510" r="124" fill="#D9EAFE" opacity="0.9"/>
+  <g filter="url(#shadow)">
+    <rect x="82" y="70" width="1016" height="480" rx="28" fill="#FCFCF8"/>
+    <rect x="82" y="70" width="194" height="480" rx="28" fill="#EFF3F5"/>
+    <rect x="82" y="70" width="194" height="480" rx="28" stroke="#D7DEE3"/>
+    <rect x="276" y="70" width="822" height="480" rx="28" stroke="#D7DEE3"/>
 
-  <g filter="url(#ow-shadow)" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', Arial, sans-serif">
-    <rect x="82" y="70" width="1016" height="480" rx="30" fill="#FCFCF8"/>
-    <rect x="82" y="70" width="190" height="480" rx="30" fill="#EFF3F5"/>
-    <path d="M272 70V550" stroke="#D7DEE3"/>
-    <rect x="82.5" y="70.5" width="1015" height="479" rx="29.5" stroke="#D7DEE3"/>
+    <text x="124" y="130" fill="#22313A" font-family="Pretendard, Segoe UI, sans-serif" font-size="28" font-weight="700">OfficeWhere</text>
+    <text x="124" y="160" fill="#66727A" font-family="Pretendard, Segoe UI, sans-serif" font-size="15">내 문서 작업 공간</text>
 
-    <text x="124" y="130" fill="#22313A" font-size="28" font-weight="760">OfficeWhere</text>
-    <text x="124" y="160" fill="#65727B" font-size="15" font-weight="560" textLength="112" lengthAdjust="spacingAndGlyphs">문서 작업 공간</text>
-
-    <g font-size="18" font-weight="700">
-      <rect x="114" y="206" width="130" height="46" rx="14" fill="#DCEBFA"/>
+    <g font-family="Pretendard, Segoe UI, sans-serif" font-size="18" font-weight="650">
+      <rect x="114" y="206" width="132" height="46" rx="14" fill="#DCEBFA"/>
       <text x="148" y="236" fill="#173B5C">검색</text>
-      <rect x="114" y="266" width="130" height="46" rx="14" fill="#F5F1E7"/>
+      <rect x="114" y="266" width="132" height="46" rx="14" fill="#F5F1E7"/>
       <text x="148" y="296" fill="#5A5244">이력</text>
-      <rect x="114" y="326" width="130" height="46" rx="14" fill="#E7F3EA"/>
+      <rect x="114" y="326" width="132" height="46" rx="14" fill="#E7F3EA"/>
       <text x="148" y="356" fill="#274B33">중복</text>
-      <rect x="114" y="386" width="130" height="46" rx="14" fill="#F4F5F3"/>
+      <rect x="114" y="386" width="132" height="46" rx="14" fill="#F4F5F3"/>
       <text x="148" y="416" fill="#5D676B">설정</text>
     </g>
 
-    <text x="326" y="130" fill="#1E2B33" font-size="34" font-weight="800" textLength="430" lengthAdjust="spacingAndGlyphs">문서가 흩어져도 한곳에서</text>
-    <text x="326" y="164" fill="#64717A" font-size="17" font-weight="560" textLength="342" lengthAdjust="spacingAndGlyphs">찾기 · 변경 확인 · 같은 내용 정리</text>
+    <text x="326" y="128" fill="#1E2B33" font-family="Pretendard, Segoe UI, sans-serif" font-size="34" font-weight="760">찾고, 비교하고, 같은 문서를 정리합니다</text>
+    <text x="326" y="162" fill="#64717A" font-family="Pretendard, Segoe UI, sans-serif" font-size="17">Excel · Word · PowerPoint · PDF 문서를 원본 그대로 두고 읽기 전용으로 확인</text>
 
-    <g>
-      <rect x="326" y="206" width="226" height="224" rx="24" fill="url(#ow-card-blue)" stroke="#D2E2F3"/>
-      <text x="354" y="250" fill="#173B5C" font-size="24" font-weight="780">빠른 검색</text>
-      <rect x="354" y="278" width="170" height="42" rx="14" fill="#FFFFFF" stroke="#C4D8EA"/>
-      <text x="374" y="305" fill="#526271" font-size="16" font-weight="650">pdf 예산</text>
-      <rect x="354" y="346" width="142" height="22" rx="9" fill="#DCEBFA"/>
-      <rect x="354" y="382" width="112" height="22" rx="9" fill="#EAF3FB"/>
-    </g>
+    <rect x="326" y="204" width="316" height="246" rx="22" fill="#F8FBFF" stroke="#D2E2F3"/>
+    <text x="354" y="248" fill="#173B5C" font-family="Pretendard, Segoe UI, sans-serif" font-size="24" font-weight="720">문서 검색</text>
+    <rect x="354" y="274" width="248" height="38" rx="12" fill="#FFFFFF" stroke="#C8D8E8"/>
+    <text x="374" y="299" fill="#6A7680" font-family="Pretendard, Segoe UI, sans-serif" font-size="15">일정, 예산안, 실험 결과</text>
+    <rect x="354" y="336" width="248" height="26" rx="8" fill="#E5F0FB"/>
+    <rect x="354" y="374" width="196" height="26" rx="8" fill="#EEF4FA"/>
+    <rect x="354" y="412" width="224" height="26" rx="8" fill="#EEF4FA"/>
 
-    <g>
-      <rect x="578" y="206" width="226" height="224" rx="24" fill="url(#ow-card-amber)" stroke="#E5DCC7"/>
-      <text x="606" y="250" fill="#5A4727" font-size="24" font-weight="780">변경 이력</text>
-      <rect x="606" y="292" width="60" height="78" rx="14" fill="#FFFFFF" stroke="#E3D8C0"/>
-      <rect x="716" y="292" width="60" height="78" rx="14" fill="#FFFFFF" stroke="#D3E5D8"/>
-      <path d="M674 331H708" stroke="#907943" stroke-width="5" stroke-linecap="round"/>
-      <path d="M700 321L710 331L700 341" stroke="#907943" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-      <rect x="622" y="316" width="28" height="10" rx="5" fill="#EEDFC1"/>
-      <rect x="622" y="342" width="20" height="10" rx="5" fill="#F3E9D7"/>
-      <rect x="732" y="316" width="28" height="10" rx="5" fill="#DFF0E3"/>
-      <rect x="732" y="342" width="24" height="10" rx="5" fill="#E8F5EB"/>
-    </g>
+    <rect x="676" y="204" width="316" height="246" rx="22" fill="#FFFCF4" stroke="#E5DCC7"/>
+    <text x="704" y="248" fill="#5A4727" font-family="Pretendard, Segoe UI, sans-serif" font-size="24" font-weight="720">변경 이력</text>
+    <text x="704" y="280" fill="#736A5D" font-family="Pretendard, Segoe UI, sans-serif" font-size="15">수정본 사이에서 바뀐 내용만</text>
+    <rect x="704" y="318" width="104" height="96" rx="16" fill="#FFFFFF" stroke="#E3D8C0"/>
+    <rect x="834" y="318" width="104" height="96" rx="16" fill="#FFFFFF" stroke="#E3D8C0"/>
+    <path d="M812 366H828" stroke="#907943" stroke-width="4" stroke-linecap="round"/>
+    <path d="M822 356L832 366L822 376" stroke="#907943" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="724" y="342" width="64" height="12" rx="6" fill="#EEDFC1"/>
+    <rect x="724" y="368" width="42" height="12" rx="6" fill="#F3E9D7"/>
+    <rect x="854" y="342" width="64" height="12" rx="6" fill="#DFF0E3"/>
+    <rect x="854" y="368" width="52" height="12" rx="6" fill="#E8F5EB"/>
 
-    <g>
-      <rect x="830" y="206" width="226" height="224" rx="24" fill="url(#ow-card-green)" stroke="#CBE2D1"/>
-      <text x="858" y="250" fill="#274B33" font-size="24" font-weight="780">중복 정리</text>
-      <rect x="876" y="292" width="96" height="70" rx="16" fill="#FFFFFF" stroke="#CCE1D2"/>
-      <rect x="862" y="314" width="96" height="70" rx="16" fill="#FFFFFF" stroke="#BBD8C3"/>
-      <rect x="890" y="334" width="42" height="11" rx="5.5" fill="#DDEFE2"/>
-      <rect x="890" y="356" width="54" height="11" rx="5.5" fill="#EAF5ED"/>
-    </g>
-
-    <rect x="435" y="470" width="360" height="46" rx="18" fill="#E9F4ED" stroke="#CBE2D1"/>
-    <text x="615" y="501" text-anchor="middle" fill="#274B33" font-size="18" font-weight="720" textLength="220" lengthAdjust="spacingAndGlyphs">원본 문서는 읽기 전용</text>
+    <rect x="456" y="476" width="406" height="46" rx="18" fill="#E8F4EB" stroke="#CBE2D1"/>
+    <text x="492" y="506" fill="#274B33" font-family="Pretendard, Segoe UI, sans-serif" font-size="18" font-weight="680">같은 내용 문서는 전용 페이지에서 묶음으로 확인</text>
   </g>
 </svg>
