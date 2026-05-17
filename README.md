@@ -12,15 +12,15 @@
   <a href="../../releases">다운로드</a> · <a href="docs/README.md">문서</a> · <a href="docs/release-test-checklist.md">릴리스 체크리스트</a>
 </p>
 
-<img src="docs/assets/readme-overview.png" width="980" alt="OfficeWhere overview" />
+![OfficeWhere overview](docs/assets/readme-overview.svg)
 
 ## 기능 미리보기
 
 ### 빠른 검색 팔레트
 
-<img src="docs/assets/readme-demo-quick-search.png" width="980" alt="OfficeWhere 빠른 검색 팔레트 화면" />
+<img src="docs/assets/readme-quick-palette.svg" width="980" alt="OfficeWhere 빠른 검색 팔레트" />
 
-전역 단축키로 바로 띄우고, 결과만 빠르게 고른 뒤 `Ctrl/Cmd K`로 문서 작업을 실행합니다. [이미지 파일 열기](docs/assets/readme-demo-quick-search.png)
+전역 단축키로 바로 띄우고, 결과만 빠르게 고른 뒤 `Ctrl/Cmd K`로 문서 작업을 실행합니다. [SVG 파일 열기](docs/assets/readme-quick-palette.svg)
 
 ### 문서 검색
 
