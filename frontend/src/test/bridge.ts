@@ -1,5 +1,12 @@
 import { vi } from 'vitest'
 
+function formatTestAccelerator(accelerator = 'CommandOrControl+Alt+F') {
+  return accelerator
+    .split('+')
+    .map((part) => (part === 'CommandOrControl' ? 'Ctrl' : part === 'Shift' ? 'Shift' : part === 'Alt' ? 'Alt' : part))
+    .join(' + ')
+}
+
 /**
  * Install a mocked Electron preload bridge on `window.officeWhere` for the
  * current test. Returns the mock object so individual handlers can be asserted
@@ -32,7 +39,7 @@ export function installBridge(overrides: Partial<OfficeWhereBridge> = {}): Offic
     getQuickSearchSettings: vi.fn().mockResolvedValue({
       supported: true,
       enabled: true,
-      showRecent: true,
+      showRecent: false,
       accelerator: 'CommandOrControl+Alt+F',
       displayShortcut: 'Ctrl + Alt + F',
       registered: true,
@@ -41,14 +48,9 @@ export function installBridge(overrides: Partial<OfficeWhereBridge> = {}): Offic
       Promise.resolve({
         supported: true,
         enabled: settings.enabled ?? true,
-        showRecent: settings.showRecent ?? true,
+        showRecent: settings.showRecent ?? false,
         accelerator: settings.accelerator ?? 'CommandOrControl+Alt+F',
-        displayShortcut:
-          settings.accelerator === 'CommandOrControl+Alt+Space'
-            ? 'Ctrl + Alt + Space'
-            : settings.accelerator === 'CommandOrControl+Shift+F'
-              ? 'Ctrl + Shift + F'
-              : 'Ctrl + Alt + F',
+        displayShortcut: formatTestAccelerator(settings.accelerator),
         registered: settings.enabled !== false,
       }),
     ),

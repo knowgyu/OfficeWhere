@@ -1,3 +1,5 @@
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+
 import type { AppStartupSettings, CloseBehavior, QuickSearchSettings, QuickSearchSettingsPatch } from '../../api/client'
 import {
   APP_TEXT_SIZE_DESCRIPTIONS,
@@ -52,6 +54,34 @@ const QUICK_SEARCH_SHORTCUT_OPTIONS = [
   },
 ]
 
+const MODIFIER_KEYS = new Set(['Alt', 'Control', 'Meta', 'Shift'])
+
+const ELECTRON_ACCELERATOR_KEY_ALIASES: Record<string, string> = {
+  ' ': 'Space',
+  Spacebar: 'Space',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  End: 'End',
+  Enter: 'Enter',
+  Home: 'Home',
+  Insert: 'Insert',
+  Space: 'Space',
+  Tab: 'Tab',
+}
+
+type ShortcutCaptureResult =
+  | { status: 'valid'; accelerator: string }
+  | { status: 'cancel' }
+  | { status: 'pending' }
+  | { status: 'ignore' }
+  | { status: 'invalid'; message: string }
+
 function shortcutParts(label: string) {
   if (label.includes(' + ')) return label.split(' + ').filter(Boolean)
   return label
@@ -59,6 +89,39 @@ function shortcutParts(label: string) {
     .trim()
     .split(/\s+/)
     .filter(Boolean)
+}
+
+function normalizeAcceleratorKey(key: string) {
+  if (/^[a-z]$/i.test(key)) return key.toUpperCase()
+  if (/^[0-9]$/.test(key)) return key
+  if (/^F([1-9]|1[0-9]|2[0-4])$/i.test(key)) return key.toUpperCase()
+  return ELECTRON_ACCELERATOR_KEY_ALIASES[key] ?? ''
+}
+
+function acceleratorFromKeyboardEvent(event: ReactKeyboardEvent<HTMLElement>): ShortcutCaptureResult {
+  if (event.nativeEvent.isComposing) return { status: 'ignore' }
+  if (event.key === 'Escape') return { status: 'cancel' }
+  if (MODIFIER_KEYS.has(event.key)) return { status: 'pending' }
+
+  const mainKey = normalizeAcceleratorKey(event.key)
+  if (!mainKey) {
+    return {
+      status: 'invalid',
+      message: '문자, 숫자, Space, Enter, Tab, 방향키, F1-F24 중 하나를 함께 눌러 주세요.',
+    }
+  }
+
+  const parts: string[] = []
+  if (event.ctrlKey || event.metaKey) parts.push('CommandOrControl')
+  if (event.altKey) parts.push('Alt')
+  if (event.shiftKey) parts.push('Shift')
+
+  if (parts.length === 0) {
+    return { status: 'invalid', message: 'Ctrl/⌘, Alt/⌥, Shift 중 하나 이상과 키를 함께 눌러 주세요.' }
+  }
+
+  parts.push(mainKey)
+  return { status: 'valid', accelerator: parts.join('+') }
 }
 
 export default function GeneralSettingsSection({
@@ -83,6 +146,39 @@ export default function GeneralSettingsSection({
   onQuickSearchSettingsChange,
   onOpenQuickSearch,
 }: GeneralSettingsSectionProps) {
+  const [shortcutCaptureActive, setShortcutCaptureActive] = useState(false)
+  const [shortcutCaptureMessage, setShortcutCaptureMessage] = useState('')
+  const selectedPreset = QUICK_SEARCH_SHORTCUT_OPTIONS.some(
+    (option) => option.accelerator === quickSearchSettings.accelerator,
+  )
+
+  const startShortcutCapture = () => {
+    setShortcutCaptureActive(true)
+    setShortcutCaptureMessage('원하는 단축키 조합을 누르세요. Esc로 취소합니다.')
+  }
+
+  const handleShortcutCaptureKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!shortcutCaptureActive) return
+    event.preventDefault()
+    event.stopPropagation()
+
+    const result = acceleratorFromKeyboardEvent(event)
+    if (result.status === 'ignore' || result.status === 'pending') return
+    if (result.status === 'cancel') {
+      setShortcutCaptureActive(false)
+      setShortcutCaptureMessage('단축키 지정을 취소했습니다.')
+      return
+    }
+    if (result.status === 'invalid') {
+      setShortcutCaptureMessage(result.message)
+      return
+    }
+
+    setShortcutCaptureActive(false)
+    setShortcutCaptureMessage('단축키를 저장하고 전역 등록을 다시 확인합니다.')
+    onQuickSearchSettingsChange({ accelerator: result.accelerator })
+  }
+
   return (
     <Card variant="elevated" className="console-panel overflow-hidden">
       <CardSection
@@ -328,9 +424,9 @@ export default function GeneralSettingsSection({
                   <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3">
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <p className="type-label-md text-[var(--md-sys-color-on-surface)]">단축키 선택</p>
+                        <p className="type-label-md text-[var(--md-sys-color-on-surface)]">단축키 지정</p>
                         <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                          등록 실패가 보이면 다른 조합으로 바꾸면 즉시 재등록합니다.
+                          원하는 조합을 직접 눌러 지정하거나 추천 조합을 고르면 즉시 재등록합니다.
                         </p>
                       </div>
                       <Button
@@ -343,6 +439,37 @@ export default function GeneralSettingsSection({
                         지금 열기
                       </Button>
                     </div>
+                    <button
+                      type="button"
+                      disabled={quickSearchSettingsLoading}
+                      onClick={startShortcutCapture}
+                      onKeyDown={handleShortcutCaptureKeyDown}
+                      className={`state-host relative mb-2 w-full rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                        shortcutCaptureActive || !selectedPreset
+                          ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/38'
+                          : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-high)]'
+                      }`}
+                      aria-pressed={shortcutCaptureActive || !selectedPreset}
+                      aria-label="빠른 검색 단축키 직접 지정"
+                    >
+                      <span className="state-layer" />
+                      <span className="relative flex flex-wrap items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-2 type-label-lg text-[var(--md-sys-color-on-surface)]">
+                          <Icon name={shortcutCaptureActive ? 'keyboard' : 'edit'} size={17} />
+                          {shortcutCaptureActive ? '키 조합 입력 중' : '직접 지정'}
+                        </span>
+                        {!selectedPreset && !shortcutCaptureActive && (
+                          <span className="rounded-full bg-[var(--md-sys-color-primary-container)] px-2 py-0.5 type-label-sm text-[var(--md-sys-color-on-primary-container)]">
+                            사용 중
+                          </span>
+                        )}
+                      </span>
+                      <span className="relative mt-2 block type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                        {shortcutCaptureMessage ||
+                          '버튼을 누른 뒤 Ctrl/⌘, Alt/⌥, Shift 중 하나 이상과 문자·숫자·F키 등을 함께 누르세요.'}
+                      </span>
+                    </button>
+                    <p className="mb-2 type-label-sm text-[var(--md-sys-color-on-surface-variant)]">추천 조합</p>
                     <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
                       {QUICK_SEARCH_SHORTCUT_OPTIONS.map((option) => {
                         const selected = quickSearchSettings.accelerator === option.accelerator
@@ -351,7 +478,11 @@ export default function GeneralSettingsSection({
                             key={option.accelerator}
                             type="button"
                             disabled={quickSearchSettingsLoading}
-                            onClick={() => onQuickSearchSettingsChange({ accelerator: option.accelerator })}
+                            onClick={() => {
+                              setShortcutCaptureActive(false)
+                              setShortcutCaptureMessage('')
+                              onQuickSearchSettingsChange({ accelerator: option.accelerator })
+                            }}
                             className={`state-host relative rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
                               selected
                                 ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/42'
@@ -388,13 +519,6 @@ export default function GeneralSettingsSection({
                       })}
                     </div>
                   </div>
-                  <Switch
-                    checked={quickSearchSettings.showRecent}
-                    disabled={quickSearchSettingsLoading}
-                    onChange={(event) => onQuickSearchSettingsChange({ showRecent: event.currentTarget.checked })}
-                    label="팔레트에 최근 검색어 표시"
-                    description="검색창이 비어 있을 때 최근 검색어를 칩으로 보여줍니다."
-                  />
                 </div>
               )}
             </div>

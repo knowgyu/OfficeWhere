@@ -1229,7 +1229,7 @@ export const api = {
           data: {
             supported: false,
             enabled: false,
-            showRecent: true,
+            showRecent: false,
             accelerator: 'CommandOrControl+Alt+F',
             displayShortcut: 'Ctrl + Alt + F',
             registered: false,

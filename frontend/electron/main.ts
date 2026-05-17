@@ -1087,11 +1087,10 @@ function consumeResetState(): AppResetState {
 }
 
 const QUICK_SEARCH_DEFAULT_ACCELERATOR = 'CommandOrControl+Alt+F'
-const LEGACY_QUICK_SEARCH_DEFAULT_ACCELERATORS = new Set(['CommandOrControl+Shift+Space'])
 
 const DEFAULT_QUICK_SEARCH_SETTINGS: QuickSearchSettings = {
   enabled: true,
-  showRecent: true,
+  showRecent: false,
   accelerator: QUICK_SEARCH_DEFAULT_ACCELERATOR,
 }
 
@@ -1103,10 +1102,7 @@ function normalizeQuickSearchSettings(value: unknown): QuickSearchSettings {
   if (!value || typeof value !== 'object') return DEFAULT_QUICK_SEARCH_SETTINGS
   const record = value as Record<string, unknown>
   const rawAccelerator = typeof record.accelerator === 'string' ? record.accelerator.trim() : ''
-  const accelerator =
-    rawAccelerator && !LEGACY_QUICK_SEARCH_DEFAULT_ACCELERATORS.has(rawAccelerator)
-      ? rawAccelerator
-      : DEFAULT_QUICK_SEARCH_SETTINGS.accelerator
+  const accelerator = rawAccelerator || DEFAULT_QUICK_SEARCH_SETTINGS.accelerator
   return {
     enabled: typeof record.enabled === 'boolean' ? record.enabled : DEFAULT_QUICK_SEARCH_SETTINGS.enabled,
     showRecent: typeof record.showRecent === 'boolean' ? record.showRecent : DEFAULT_QUICK_SEARCH_SETTINGS.showRecent,

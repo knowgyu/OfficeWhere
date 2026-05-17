@@ -56,7 +56,7 @@ beforeEach(() => {
     data: {
       supported: true,
       enabled: true,
-      showRecent: true,
+      showRecent: false,
       accelerator: 'CommandOrControl+Alt+F',
       displayShortcut: 'Ctrl + Alt + F',
       registered: true,
@@ -66,13 +66,26 @@ beforeEach(() => {
 })
 
 describe('QuickSearchPalette', () => {
-  it('shows recent searches before a query is entered', async () => {
+  it('keeps the idle palette as a plain search box even when old recent-search data exists', async () => {
+    mockedGetQuickSearchSettings.mockResolvedValueOnce({
+      data: {
+        supported: true,
+        enabled: true,
+        showRecent: true,
+        accelerator: 'CommandOrControl+Alt+F',
+        displayShortcut: 'Ctrl + Alt + F',
+        registered: true,
+      },
+    })
     window.localStorage.setItem('officewhere:quick-search-recent:v1', JSON.stringify(['예산안']))
 
     renderWithProviders(<QuickSearchPalette />, { withLibraryRescan: false })
 
-    expect(await screen.findByText('OfficeWhere 빠른 검색')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /예산안/ })).toBeInTheDocument()
+    expect(await screen.findByRole('searchbox', { name: '빠른 문서 검색' })).toBeInTheDocument()
+    expect(screen.queryByText('OfficeWhere 빠른 검색')).not.toBeInTheDocument()
+    expect(screen.queryByText('최근 검색')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /예산안/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '닫기' })).not.toBeInTheDocument()
   })
 
   it('searches, groups duplicate chunks by document, and shows snippets', async () => {

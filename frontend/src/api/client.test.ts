@@ -262,6 +262,7 @@ describe('api.app (bridge-dependent)', () => {
 
     expect(res.data.supported).toBe(false)
     expect(res.data.registered).toBe(false)
+    expect(res.data.showRecent).toBe(false)
     expect(res.data.displayShortcut).toBe('Ctrl + Alt + F')
   })
 

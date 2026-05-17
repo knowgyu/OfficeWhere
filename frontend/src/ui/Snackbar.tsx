@@ -109,6 +109,8 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
   const nextId = useRef(1)
   const nextNotificationId = useRef(1)
+  const quickSearchRenderer =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('quickSearch') === '1'
 
   const dismiss = useCallback((id: number) => {
     setSnacks((current) => current.filter((snack) => snack.id !== id))
@@ -195,6 +197,10 @@ export function SnackbarProvider({ children }: { children: ReactNode }) {
     }),
     [show],
   )
+
+  if (quickSearchRenderer) {
+    return <SnackbarContext.Provider value={api}>{children}</SnackbarContext.Provider>
+  }
 
   return (
     <SnackbarContext.Provider value={api}>

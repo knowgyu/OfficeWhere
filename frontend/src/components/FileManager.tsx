@@ -363,7 +363,7 @@ export default function FileManager({
   const [quickSearchSettings, setQuickSearchSettings] = useState<QuickSearchSettings>({
     supported: false,
     enabled: false,
-    showRecent: true,
+    showRecent: false,
     accelerator: 'CommandOrControl+Alt+F',
     displayShortcut: 'Ctrl + Alt + F',
     registered: false,
