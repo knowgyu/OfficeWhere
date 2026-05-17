@@ -130,6 +130,7 @@ let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let quickSearchWindow: BrowserWindow | null = null
 let quickSearchWindowCreatePromise: Promise<BrowserWindow> | null = null
+let quickSearchReturnWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let backendProcess: ChildProcess | null = null
 const expectedBackendExits = new WeakSet<ChildProcess>()
@@ -1394,6 +1395,35 @@ function positionQuickSearchWindow(window: BrowserWindow) {
   window.setBounds({ x, y, width, height }, false)
 }
 
+function rememberQuickSearchReturnWindow(window: BrowserWindow) {
+  const focusedWindow = BrowserWindow.getFocusedWindow()
+  if (focusedWindow && !focusedWindow.isDestroyed() && focusedWindow.id !== window.id) {
+    quickSearchReturnWindow = focusedWindow
+    return
+  }
+  quickSearchReturnWindow = null
+}
+
+function setQuickSearchFocusable(window: BrowserWindow, focusable: boolean) {
+  if (process.platform !== 'win32') return
+  try {
+    window.setFocusable(focusable)
+  } catch {
+    // Best-effort only: focus restoration should never prevent the palette from closing.
+  }
+}
+
+function restoreQuickSearchReturnFocus() {
+  const returnWindow = quickSearchReturnWindow
+  quickSearchReturnWindow = null
+  if (!returnWindow || returnWindow.isDestroyed() || !returnWindow.isVisible()) return
+  setTimeout(() => {
+    if (!returnWindow.isDestroyed() && returnWindow.isVisible()) {
+      returnWindow.focus()
+    }
+  }, 0)
+}
+
 function installQuickSearchFocusDismissal() {
   if (quickSearchFocusDismissalInstalled) return
   quickSearchFocusDismissalInstalled = true
@@ -1421,7 +1451,12 @@ async function showQuickSearchWindow() {
   if (isQuitting || appDataCleanupInProgress) return
   const window = await createQuickSearchWindow()
   if (window.isDestroyed()) return
+  rememberQuickSearchReturnWindow(window)
   positionQuickSearchWindow(window)
+  setQuickSearchFocusable(window, true)
+  window.webContents.send('quick-search:opened', {
+    displayShortcut: readQuickSearchStatus().displayShortcut,
+  })
   window.setAlwaysOnTop(true, 'pop-up-menu')
   window.show()
   window.focus()
@@ -1429,15 +1464,15 @@ async function showQuickSearchWindow() {
     if (window.isDestroyed() || !window.isVisible()) return
     window.setAlwaysOnTop(false)
   }, 30)
-  window.webContents.send('quick-search:opened', {
-    displayShortcut: readQuickSearchStatus().displayShortcut,
-  })
 }
 
 function hideQuickSearchWindow() {
   if (quickSearchWindow && !quickSearchWindow.isDestroyed()) {
     quickSearchWindow.setAlwaysOnTop(false)
     quickSearchWindow.hide()
+    quickSearchWindow.blur()
+    setQuickSearchFocusable(quickSearchWindow, false)
+    restoreQuickSearchReturnFocus()
   }
 }
 
