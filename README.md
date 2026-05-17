@@ -16,6 +16,12 @@
 
 ## 기능 미리보기
 
+### 빠른 검색 팔레트
+
+<img src="docs/assets/readme-quick-palette.svg" width="980" alt="OfficeWhere 빠른 검색 팔레트" />
+
+전역 단축키로 바로 띄우고, `pdf c 예산안`처럼 좁혀 찾은 뒤 `Ctrl/Cmd K`로 문서 작업을 실행합니다. [SVG 파일 열기](docs/assets/readme-quick-palette.svg)
+
 ### 문서 검색
 
 <img src="docs/assets/readme-demo-search.gif" width="980" alt="OfficeWhere 문서 검색 데모" />
@@ -38,6 +44,7 @@
 
 | 기능 | 할 수 있는 일 |
 | --- | --- |
+| 빠른 검색 팔레트 | 앱 창을 찾지 않고 전역 단축키로 문서를 검색하고, 파일 형식·본문 접두어와 작업 패널로 바로 엽니다. |
 | 문서 검색 | 파일명뿐 아니라 Excel 셀, Word 문단/표, PowerPoint 슬라이드, PDF 텍스트 안의 단어까지 검색합니다. |
 | 변경 이력 | 비슷한 이름의 수정본을 묶고 PPT 슬라이드, Word 문단, Excel 셀에서 바뀐 내용을 보여줍니다. |
 | 같은 내용 문서 | 파일명은 달라도 본문이 같은 문서를 전용 페이지에서 묶음으로 확인합니다. |

@@ -1,0 +1,91 @@
+<svg width="1180" height="620" viewBox="0 0 1180 620" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">OfficeWhere quick search palette</title>
+  <desc id="desc">A quick search palette opens above the current app, filters by file type and content prefix, and exposes document actions with Ctrl/Cmd K.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1180" y2="620" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111923"/>
+      <stop offset="0.52" stop-color="#0B1118"/>
+      <stop offset="1" stop-color="#142235"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#151E29"/>
+      <stop offset="1" stop-color="#0D131A"/>
+    </linearGradient>
+    <linearGradient id="result" x1="0" y1="0" x2="760" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#152331"/>
+      <stop offset="1" stop-color="#101821"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-20%" width="130%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="26" flood-color="#000814" flood-opacity="0.42"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <rect width="1180" height="620" rx="44" fill="url(#bg)"/>
+  <circle cx="180" cy="100" r="120" fill="#A8D2EF" opacity="0.18" filter="url(#soft)"/>
+  <circle cx="1010" cy="520" r="160" fill="#B8E3C8" opacity="0.13" filter="url(#soft)"/>
+
+  <g opacity="0.34" font-family="Pretendard, Segoe UI, sans-serif">
+    <rect x="84" y="78" width="1012" height="464" rx="28" fill="#111821" stroke="#344252"/>
+    <rect x="128" y="128" width="178" height="24" rx="12" fill="#334153"/>
+    <rect x="128" y="180" width="394" height="18" rx="9" fill="#2B3847"/>
+    <rect x="128" y="218" width="280" height="18" rx="9" fill="#25313F"/>
+    <rect x="748" y="132" width="238" height="20" rx="10" fill="#2C3A4A"/>
+    <rect x="748" y="176" width="292" height="124" rx="20" fill="#18212C" stroke="#334252"/>
+    <rect x="748" y="326" width="292" height="124" rx="20" fill="#18212C" stroke="#334252"/>
+  </g>
+
+  <text x="590" y="92" text-anchor="middle" fill="#DDE6F0" font-family="Pretendard, Segoe UI, sans-serif" font-size="26" font-weight="760">앱 창을 열지 않고 바로 문서 찾기</text>
+  <text x="590" y="124" text-anchor="middle" fill="#8FA3B8" font-family="Pretendard, Segoe UI, sans-serif" font-size="16" font-weight="560">전역 단축키 → 접두어 검색 → Ctrl/Cmd K 문서 작업</text>
+
+  <g filter="url(#shadow)">
+    <rect x="160" y="154" width="860" height="370" rx="30" fill="url(#panel)" stroke="#6F8EAA" stroke-opacity="0.72"/>
+    <rect x="160" y="154" width="860" height="370" rx="30" stroke="white" stroke-opacity="0.06"/>
+
+    <g>
+      <rect x="202" y="196" width="776" height="68" rx="22" fill="#0B1219" stroke="#50677C"/>
+      <text x="228" y="239" fill="#E9F1F8" font-family="Pretendard, Segoe UI, sans-serif" font-size="28" font-weight="760">pdf c 예산안</text>
+      <rect x="816" y="212" width="70" height="36" rx="18" fill="#233446" stroke="#496176"/>
+      <text x="851" y="236" text-anchor="middle" fill="#D9E6F0" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="720">PDF</text>
+      <rect x="898" y="212" width="62" height="36" rx="18" fill="#1C3E31" stroke="#5A9473"/>
+      <text x="929" y="236" text-anchor="middle" fill="#DDF7E7" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="720">본문</text>
+    </g>
+
+    <g>
+      <text x="206" y="302" fill="#99C8EB" font-family="Pretendard, Segoe UI, sans-serif" font-size="16" font-weight="760" letter-spacing="1.4">3개 문서</text>
+      <text x="340" y="302" fill="#9AA7B5" font-family="Pretendard, Segoe UI, sans-serif" font-size="15" font-weight="560">↑↓ 이동 · Enter 상세 · Ctrl/Cmd K 작업</text>
+    </g>
+
+    <g>
+      <rect x="202" y="326" width="540" height="82" rx="18" fill="url(#result)" stroke="#95C8EA" stroke-opacity="0.85"/>
+      <rect x="226" y="348" width="38" height="38" rx="10" fill="#132235" stroke="#5A7690"/>
+      <text x="245" y="373" text-anchor="middle" fill="#9CD3F5" font-family="Pretendard, Segoe UI, sans-serif" font-size="13" font-weight="800">PDF</text>
+      <text x="282" y="361" fill="#EEF5FC" font-family="Pretendard, Segoe UI, sans-serif" font-size="21" font-weight="780">2026_예산안_검토.pdf</text>
+      <text x="282" y="387" fill="#AAB7C4" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="560">기획팀 · 1개 일치 · 쪽 12</text>
+      <rect x="565" y="344" width="70" height="26" rx="13" fill="#A20F2E"/>
+      <text x="600" y="363" text-anchor="middle" fill="#FFEAF0" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="800">PDF</text>
+      <circle cx="704" cy="367" r="8" fill="#98C7E6"/>
+    </g>
+
+    <g opacity="0.58">
+      <rect x="202" y="424" width="540" height="54" rx="16" fill="#101821" stroke="#2D3A47"/>
+      <text x="282" y="458" fill="#C5D0DB" font-family="Pretendard, Segoe UI, sans-serif" font-size="17" font-weight="680">분기별_예산_요약.xlsx</text>
+      <rect x="226" y="438" width="38" height="26" rx="8" fill="#123525" stroke="#35684B"/>
+      <text x="245" y="456" text-anchor="middle" fill="#A6E1BE" font-family="Pretendard, Segoe UI, sans-serif" font-size="12" font-weight="800">XLS</text>
+    </g>
+
+    <g>
+      <rect x="770" y="302" width="208" height="176" rx="22" fill="#111922" stroke="#3F5062"/>
+      <text x="792" y="332" fill="#9CCCF0" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="800" letter-spacing="1.2">Ctrl/Cmd K</text>
+      <text x="792" y="360" fill="#F0F6FB" font-family="Pretendard, Segoe UI, sans-serif" font-size="20" font-weight="760">문서 작업</text>
+      <rect x="792" y="380" width="164" height="28" rx="10" fill="#223447"/>
+      <text x="812" y="399" fill="#E9F2FB" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="690">파일 열기</text>
+      <rect x="792" y="416" width="164" height="28" rx="10" fill="#17222D"/>
+      <text x="812" y="435" fill="#C8D4DF" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="620">위치 열기</text>
+      <rect x="792" y="452" width="164" height="28" rx="10" fill="#17222D"/>
+      <text x="812" y="471" fill="#C8D4DF" font-family="Pretendard, Segoe UI, sans-serif" font-size="14" font-weight="620">경로 복사</text>
+    </g>
+  </g>
+</svg>
