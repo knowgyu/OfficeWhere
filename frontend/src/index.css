@@ -55,6 +55,12 @@
     letter-spacing: -0.003em;
   }
 
+  :root[data-window='quick-search'] body {
+    background: transparent;
+    background-color: transparent;
+    overflow: hidden;
+  }
+
   code,
   pre,
   kbd,

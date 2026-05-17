@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { IpcRendererEvent } from 'electron'
 
 const officeWhereBridge = {
   getBackendBaseUrl: () => ipcRenderer.invoke('app:get-backend-base-url'),
@@ -12,6 +13,21 @@ const officeWhereBridge = {
   consumeResetState: () => ipcRenderer.invoke('app:consume-reset-state'),
   getCloseBehavior: () => ipcRenderer.invoke('app:get-close-behavior'),
   setCloseBehavior: (behavior: string) => ipcRenderer.invoke('app:set-close-behavior', { behavior }),
+  getQuickSearchSettings: () => ipcRenderer.invoke('app:get-quick-search-settings'),
+  setQuickSearchSettings: (settings: { enabled?: boolean; showRecent?: boolean; accelerator?: string }) =>
+    ipcRenderer.invoke('app:set-quick-search-settings', settings),
+  hideQuickSearch: () => ipcRenderer.invoke('app:hide-quick-search'),
+  openMainSearch: (query: string) => ipcRenderer.invoke('app:open-main-search', { query }),
+  onQuickSearchOpened: (callback: (payload: { displayShortcut?: string }) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: { displayShortcut?: string }) => callback(payload)
+    ipcRenderer.on('quick-search:opened', listener)
+    return () => ipcRenderer.removeListener('quick-search:opened', listener)
+  },
+  onOpenSearch: (callback: (payload: { query?: string }) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: { query?: string }) => callback(payload)
+    ipcRenderer.on('app:open-search', listener)
+    return () => ipcRenderer.removeListener('app:open-search', listener)
+  },
   getStartupSettings: () => ipcRenderer.invoke('app:get-startup-settings'),
   setStartupSettings: (enabled: boolean) => ipcRenderer.invoke('app:set-startup-settings', { enabled }),
   getExampleLibraryPath: () => ipcRenderer.invoke('app:get-example-library-path'),

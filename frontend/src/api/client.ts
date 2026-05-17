@@ -7,6 +7,8 @@ import type {
   CloseBehavior,
   ExampleLibraryPathResponse,
   FolderPickResponse,
+  QuickSearchSettings,
+  QuickSearchSettingsPatch,
   SchemaResetState,
   TutorialLibraryCleanupResult,
   UpdateCheckResult,
@@ -23,6 +25,8 @@ export type {
   CloseBehavior,
   ExampleLibraryPathResponse,
   FolderPickResponse,
+  QuickSearchSettings,
+  QuickSearchSettingsPatch,
   SchemaResetState,
   TutorialLibraryCleanupResult,
   UpdateAssetInfo,
@@ -1217,6 +1221,42 @@ export const api = {
       const electron = electronApi()
       if (!electron?.setCloseBehavior) desktopError('Electron 앱에서만 닫기 동작을 설정할 수 있습니다.')
       return { data: await electron.setCloseBehavior(behavior) }
+    },
+    getQuickSearchSettings: async () => {
+      const electron = electronApi()
+      if (!electron?.getQuickSearchSettings) {
+        return {
+          data: {
+            supported: false,
+            enabled: false,
+            showRecent: true,
+            accelerator: 'CommandOrControl+Shift+Space',
+            displayShortcut: 'Ctrl + Shift + Space',
+            registered: false,
+            reason: '데스크톱 앱에서만 빠른 검색 단축키를 사용할 수 있습니다.',
+          } satisfies QuickSearchSettings,
+        }
+      }
+      return { data: await electron.getQuickSearchSettings() }
+    },
+    setQuickSearchSettings: async (settings: QuickSearchSettingsPatch) => {
+      const electron = electronApi()
+      if (!electron?.setQuickSearchSettings) {
+        desktopError('Electron 앱에서만 빠른 검색 단축키를 설정할 수 있습니다.')
+      }
+      return { data: await electron.setQuickSearchSettings(settings) }
+    },
+    hideQuickSearch: async () => {
+      const electron = electronApi()
+      if (!electron?.hideQuickSearch) return { data: undefined }
+      await electron.hideQuickSearch()
+      return { data: undefined }
+    },
+    openMainSearch: async (query: string) => {
+      const electron = electronApi()
+      if (!electron?.openMainSearch) return { data: undefined }
+      await electron.openMainSearch(query)
+      return { data: undefined }
     },
     getStartupSettings: async () => {
       const electron = electronApi()

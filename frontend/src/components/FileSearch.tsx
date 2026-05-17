@@ -219,12 +219,14 @@ export default function FileSearch({
   active = true,
   tutorialStep,
   libraryDataRevision = 0,
+  launchQueryRequest,
   onTutorialStep,
   onOpenLibrarySettings,
 }: {
   active?: boolean
   tutorialStep?: TutorialStep | null
   libraryDataRevision?: number
+  launchQueryRequest?: { query: string; nonce: number } | null
   onTutorialStep?: (step: TutorialStep | null) => void
   onOpenLibrarySettings?: () => void
 }) {
@@ -589,6 +591,14 @@ export default function FileSearch({
     }
     void doSearch(query)
   }, [active, libraryDataRevision])
+
+  useEffect(() => {
+    if (!active || !launchQueryRequest) return
+    const nextQuery = launchQueryRequest.query.trim()
+    if (!nextQuery) return
+    setQuery(nextQuery)
+    void doSearch(nextQuery)
+  }, [active, doSearch, launchQueryRequest?.nonce])
 
   const loadLandingFiles = useCallback(
     async (offset = 0, mode: 'replace' | 'more' = 'replace') => {

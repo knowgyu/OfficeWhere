@@ -19,6 +19,8 @@ import {
   LibraryRescanStatus,
   LibrarySettings,
   NormalizedPreview,
+  QuickSearchSettings,
+  QuickSearchSettingsPatch,
   SchemaResponse,
   getOfficeWhereBridge,
   normalizeSchemaResponse,
@@ -96,6 +98,39 @@ const INDEX_WORKER_MIN = 4
 const INDEX_WORKER_MAX = 32
 const INDEX_WORKER_STEP = 4
 const INDEX_WORKER_RECOMMENDED = 24
+type SettingsTab = 'source' | 'registered' | 'behavior' | 'maintenance'
+
+const SETTINGS_TABS: Array<{
+  id: SettingsTab
+  label: string
+  description: string
+  icon: string
+}> = [
+  {
+    id: 'source',
+    label: '문서 소스',
+    description: '대상 폴더와 새로고침',
+    icon: 'folder_managed',
+  },
+  {
+    id: 'registered',
+    label: '등록 문서',
+    description: '검색에 쓰는 파일 목록',
+    icon: 'inventory_2',
+  },
+  {
+    id: 'behavior',
+    label: '앱 동작',
+    description: '표시, 종료, 빠른 검색',
+    icon: 'tune',
+  },
+  {
+    id: 'maintenance',
+    label: '데이터/문제 해결',
+    description: '캐시와 앱 설정 초기화',
+    icon: 'build_circle',
+  },
+]
 const DEFAULT_EXCLUDED_FOLDER_NAMES = [
   '.git',
   '.svn',
@@ -264,6 +299,7 @@ export default function FileManager({
 }) {
   const snackbar = useSnackbar()
   const { textSize, setTextSize, themeMode, resolvedTheme, setThemeMode } = useDisplaySettings()
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('source')
   const [files, setFiles] = useState<FileInfo[]>([])
   const [fileTotal, setFileTotal] = useState(0)
   const [fileCountsByType, setFileCountsByType] = useState<Record<string, number>>({})
@@ -324,6 +360,16 @@ export default function FileManager({
     reason: '데스크톱 앱에서만 시작프로그램 설정을 사용할 수 있습니다.',
   })
   const [startupSettingsLoading, setStartupSettingsLoading] = useState(false)
+  const [quickSearchSettings, setQuickSearchSettings] = useState<QuickSearchSettings>({
+    supported: false,
+    enabled: false,
+    showRecent: true,
+    accelerator: 'CommandOrControl+Shift+Space',
+    displayShortcut: 'Ctrl + Shift + Space',
+    registered: false,
+    reason: '데스크톱 앱에서만 빠른 검색 단축키를 사용할 수 있습니다.',
+  })
+  const [quickSearchSettingsLoading, setQuickSearchSettingsLoading] = useState(false)
   const officeWhereBridge = getOfficeWhereBridge()
   const appDataAvailable = Boolean(officeWhereBridge?.getAppDataPaths && officeWhereBridge?.clearAppData)
   const closeBehaviorAvailable = Boolean(
@@ -331,6 +377,9 @@ export default function FileManager({
   )
   const startupSettingsAvailable = Boolean(
     officeWhereBridge?.getStartupSettings && officeWhereBridge?.setStartupSettings,
+  )
+  const quickSearchSettingsAvailable = Boolean(
+    officeWhereBridge?.getQuickSearchSettings && officeWhereBridge?.setQuickSearchSettings,
   )
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
@@ -396,12 +445,26 @@ export default function FileManager({
     }
   }
 
+  const fetchQuickSearchSettings = async () => {
+    if (!quickSearchSettingsAvailable) return
+    setQuickSearchSettingsLoading(true)
+    try {
+      const response = await api.app.getQuickSearchSettings()
+      setQuickSearchSettings(response.data)
+    } catch {
+      snackbar.error('빠른 검색 설정을 불러오지 못했습니다.')
+    } finally {
+      setQuickSearchSettingsLoading(false)
+    }
+  }
+
   useEffect(() => {
     void fetchFiles(0, '')
     void fetchLibrarySettings()
     void fetchAppDataPaths()
     void fetchCloseBehavior()
     void fetchStartupSettings()
+    void fetchQuickSearchSettings()
   }, [])
 
   useEffect(() => {
@@ -418,6 +481,7 @@ export default function FileManager({
 
   useEffect(() => {
     if (focusFolderInputRequest === 0) return undefined
+    setSettingsTab('source')
     const timer = window.setTimeout(() => {
       folderInputRef.current?.focus()
       folderInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -427,9 +491,14 @@ export default function FileManager({
 
   useEffect(() => {
     if (tutorialStep !== 'example-folder' || !exampleLibraryPath) return
+    setSettingsTab('source')
     setFolderPathDraft(exampleLibraryPath)
     setFolderRecursive(true)
   }, [exampleLibraryPath, tutorialStep])
+
+  useEffect(() => {
+    if (tutorialStep === 'document-refresh') setSettingsTab('source')
+  }, [tutorialStep])
 
   useEffect(() => {
     if (tourRefreshStartKey === null || rescanning) return
@@ -631,6 +700,46 @@ export default function FileManager({
       })
     } finally {
       setStartupSettingsLoading(false)
+    }
+  }
+
+  const handleUpdateQuickSearchSettings = async (settings: QuickSearchSettingsPatch) => {
+    setQuickSearchSettingsLoading(true)
+    try {
+      const response = await api.app.setQuickSearchSettings(settings)
+      setQuickSearchSettings(response.data)
+      if (!response.data.supported) {
+        snackbar.show({
+          key: 'quick-search-settings',
+          tone: 'warning',
+          message: response.data.reason || '이 환경에서는 빠른 검색 단축키를 사용할 수 없습니다.',
+        })
+        return
+      }
+      if (response.data.enabled && !response.data.registered) {
+        snackbar.show({
+          key: 'quick-search-settings',
+          tone: 'warning',
+          message: response.data.reason || '단축키를 등록하지 못했습니다. 다른 앱의 단축키와 충돌할 수 있습니다.',
+          durationMs: 7000,
+        })
+        return
+      }
+      snackbar.show({
+        key: 'quick-search-settings',
+        tone: 'success',
+        message: response.data.enabled
+          ? `빠른 검색 단축키가 ${response.data.displayShortcut}로 준비되었습니다.`
+          : '빠른 검색 단축키를 껐습니다.',
+      })
+    } catch {
+      snackbar.show({
+        key: 'quick-search-settings',
+        tone: 'danger',
+        message: '빠른 검색 설정을 저장하지 못했습니다.',
+      })
+    } finally {
+      setQuickSearchSettingsLoading(false)
     }
   }
 
@@ -905,7 +1014,52 @@ export default function FileManager({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
+      <Card variant="elevated" className="console-panel overflow-hidden">
+        <CardSection
+          className="p-4 md:p-5"
+          title="설정 / 라이브러리"
+          description="문서 소스, 등록 문서, 앱 동작, 문제 해결을 탭으로 나눠 필요한 설정만 빠르게 확인합니다."
+        >
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-4" role="tablist" aria-label="설정 분류">
+            {SETTINGS_TABS.map((tab) => {
+              const active = settingsTab === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setSettingsTab(tab.id)}
+                  className={`state-host relative rounded-xl border p-3 text-left transition-all ${
+                    active
+                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/50 text-[var(--md-sys-color-on-primary-container)] shadow-elev-1'
+                      : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-high)]'
+                  }`}
+                >
+                  <span className="state-layer" />
+                  <span className="relative flex items-start gap-2.5">
+                    <Icon
+                      name={tab.icon}
+                      size={21}
+                      className={active ? 'text-[var(--md-sys-color-primary)]' : 'text-[var(--md-sys-color-on-surface-variant)]'}
+                      filled={active}
+                    />
+                    <span className="min-w-0">
+                      <span className="block type-title-sm">{tab.label}</span>
+                      <span className="mt-0.5 block type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                        {tab.description}
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </CardSection>
+      </Card>
+
+      {settingsTab === 'source' && (
       <SettingsArea
         eyebrow="Document source"
         title="문서 소스"
@@ -1138,7 +1292,9 @@ export default function FileManager({
         </CardSection>
       </Card>
       </SettingsArea>
+      )}
 
+      {settingsTab === 'registered' && (
       <SettingsArea
         eyebrow="Library"
         title="등록된 문서"
@@ -1182,14 +1338,13 @@ export default function FileManager({
         onPage={goToFilePage}
       />
       </SettingsArea>
+      )}
 
+      {settingsTab === 'behavior' && (
       <SettingsArea
         eyebrow="App behavior"
         title="표시와 앱 동작"
         description="화면 밀도, 테마, 닫기 동작처럼 문서 소스와 분리된 개인 사용 환경을 조정합니다."
-        defaultCollapsed
-        collapsedLabel="테마·글자·닫기 동작 펼치기"
-        collapsedHint="문서 소스와 별도 설정"
       >
       <GeneralSettingsSection
         textSize={textSize}
@@ -1202,10 +1357,14 @@ export default function FileManager({
         startupSettings={startupSettings}
         startupSettingsAvailable={startupSettingsAvailable}
         startupSettingsLoading={startupSettingsLoading}
+        quickSearchSettings={quickSearchSettings}
+        quickSearchSettingsAvailable={quickSearchSettingsAvailable}
+        quickSearchSettingsLoading={quickSearchSettingsLoading}
         onTextSizeChange={setTextSize}
         onThemeModeChange={setThemeMode}
         onCloseBehaviorChange={(behavior) => void handleUpdateCloseBehavior(behavior)}
         onStartupSettingsChange={(enabled) => void handleUpdateStartupSettings(enabled)}
+        onQuickSearchSettingsChange={(settings) => void handleUpdateQuickSearchSettings(settings)}
       />
 
       {onReplayOnboarding && (
@@ -1223,12 +1382,13 @@ export default function FileManager({
         </Card>
       )}
       </SettingsArea>
+      )}
 
+      {settingsTab === 'maintenance' && (
       <SettingsArea
         eyebrow="Maintenance"
         title="문제 해결과 앱 데이터"
         description="캐시와 앱 설정을 정리합니다. 이 영역의 삭제 작업도 원본 문서와 대상 폴더 파일은 건드리지 않습니다."
-        defaultCollapsed
       >
       <AppDataManagementSection
         appDataAvailable={appDataAvailable}
@@ -1248,6 +1408,7 @@ export default function FileManager({
         onOpenSelectedDelete={() => setClearAppDataOpen(true)}
       />
       </SettingsArea>
+      )}
 
 
       <Dialog

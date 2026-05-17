@@ -5,7 +5,8 @@ import ConsistencyCheck from './components/ConsistencyCheck'
 import FileSearch from './components/FileSearch'
 import DuplicateFiles from './components/DuplicateFiles'
 import OnboardingCarousel from './components/OnboardingCarousel'
-import { api, type UpdateCheckResult } from './api/client'
+import QuickSearchPalette from './components/QuickSearchPalette'
+import { api, getOfficeWhereBridge, type UpdateCheckResult } from './api/client'
 import { Button, Dialog, Icon, Spinner } from './ui'
 import { useSnackbar } from './ui'
 import { useLibraryRescan } from './contexts/LibraryRescanContext'
@@ -70,6 +71,9 @@ const LEGACY_LS_TAB = 'odj:last-tab'
 const LS_ONBOARDING_DONE = 'officewhere:onboarding-complete:v1'
 const LS_UPDATE_DISMISSED_VERSION = 'officewhere:update-dismissed-version'
 const LOCAL_STATE_PREFIXES = ['officewhere:', 'odj:']
+const APP_URL_PARAMS = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search)
+const QUICK_SEARCH_RENDERER = APP_URL_PARAMS.get('quickSearch') === '1'
+const INITIAL_OPEN_SEARCH_QUERY = APP_URL_PARAMS.get('openSearch')?.trim() ?? ''
 
 interface TourRect {
   left: number
@@ -262,9 +266,31 @@ function clearOfficeWhereLocalState() {
   })
 }
 
+type DisplaySettingsValue = ReturnType<typeof useDisplaySettings>
+
 export default function App() {
+  const displaySettings = useDisplaySettings()
+
+  if (QUICK_SEARCH_RENDERER) {
+    return <QuickSearchApp textSize={displaySettings.textSize} />
+  }
+
+  return <MainApp displaySettings={displaySettings} />
+}
+
+function QuickSearchApp({ textSize }: { textSize: DisplaySettingsValue['textSize'] }) {
+  return (
+    <div className={`app-text-${textSize} min-h-screen bg-transparent text-[var(--md-sys-color-on-surface)]`}>
+      <QuickSearchPalette />
+    </div>
+  )
+}
+
+function MainApp({ displaySettings }: { displaySettings: DisplaySettingsValue }) {
+  const { textSize, increaseTextSize, decreaseTextSize, resetTextSize, resetThemeMode } = displaySettings
   const snackbar = useSnackbar()
   const [activeTab, setActiveTab] = useState<Tab>(() => {
+    if (INITIAL_OPEN_SEARCH_QUERY) return 'search'
     if (typeof window === 'undefined') return 'search'
     const stored = window.localStorage.getItem(LS_TAB) ?? window.localStorage.getItem(LEGACY_LS_TAB)
     return stored && TABS.some((tab) => tab.id === stored) ? (stored as Tab) : 'search'
@@ -284,11 +310,24 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState('')
   const [updateError, setUpdateError] = useState('')
   const [updateDownloadedPath, setUpdateDownloadedPath] = useState('')
-  const { textSize, increaseTextSize, decreaseTextSize, resetTextSize, resetThemeMode } = useDisplaySettings()
   const { completionKey: rescanCompletionKey } = useLibraryRescan()
+  const [searchLaunchRequest, setSearchLaunchRequest] = useState<{ query: string; nonce: number } | null>(() =>
+    INITIAL_OPEN_SEARCH_QUERY ? { query: INITIAL_OPEN_SEARCH_QUERY, nonce: Date.now() } : null,
+  )
   const tutorialCleanupPathRef = useRef('')
   const tutorialCleanupInFlightRef = useRef<Promise<void> | null>(null)
   const mainScrollRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    const unsubscribe = getOfficeWhereBridge()?.onOpenSearch?.((payload) => {
+      setActiveTab('search')
+      setSearchLaunchRequest({
+        query: payload.query?.trim() ?? '',
+        nonce: Date.now(),
+      })
+    })
+    return () => unsubscribe?.()
+  }, [])
 
   useEffect(() => {
     window.localStorage.setItem(LS_TAB, activeTab)
@@ -598,6 +637,7 @@ export default function App() {
                 active={activeTab === 'search'}
                 tutorialStep={tutorialStep}
                 libraryDataRevision={libraryDataRevision}
+                launchQueryRequest={searchLaunchRequest}
                 onTutorialStep={handleTutorialStep}
                 onOpenLibrarySettings={() => {
                   setActiveTab('files')

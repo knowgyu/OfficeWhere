@@ -256,4 +256,22 @@ describe('api.app (bridge-dependent)', () => {
     expect(res.data.updateAvailable).toBe(false)
     expect(res.data.currentVersion).toBe('')
   })
+
+  it('app.getQuickSearchSettings returns desktop-only fallback without a bridge', async () => {
+    const res = await api.app.getQuickSearchSettings()
+
+    expect(res.data.supported).toBe(false)
+    expect(res.data.registered).toBe(false)
+    expect(res.data.displayShortcut).toContain('Space')
+  })
+
+  it('app.setQuickSearchSettings passes settings through the Electron bridge', async () => {
+    const bridge = installBridge()
+
+    const res = await api.app.setQuickSearchSettings({ enabled: false, showRecent: false })
+
+    expect(bridge.setQuickSearchSettings).toHaveBeenCalledWith({ enabled: false, showRecent: false })
+    expect(res.data.enabled).toBe(false)
+    expect(res.data.showRecent).toBe(false)
+  })
 })

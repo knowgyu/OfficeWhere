@@ -28,6 +28,20 @@ export interface AppStartupSettings {
   requiresApproval?: boolean
 }
 
+export interface QuickSearchSettings {
+  supported: boolean
+  enabled: boolean
+  showRecent: boolean
+  accelerator: string
+  displayShortcut: string
+  registered: boolean
+  reason?: string
+}
+
+export type QuickSearchSettingsPatch = Partial<
+  Pick<QuickSearchSettings, 'enabled' | 'showRecent' | 'accelerator'>
+>
+
 export interface AppResetState {
   resetPending: boolean
   reason?: AppResetReason
@@ -99,6 +113,12 @@ declare global {
     consumeResetState?: () => Promise<AppResetState>
     getCloseBehavior?: () => Promise<CloseBehavior>
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
+    getQuickSearchSettings?: () => Promise<QuickSearchSettings>
+    setQuickSearchSettings?: (settings: QuickSearchSettingsPatch) => Promise<QuickSearchSettings>
+    hideQuickSearch?: () => Promise<void>
+    openMainSearch?: (query: string) => Promise<void>
+    onQuickSearchOpened?: (callback: (payload: { displayShortcut?: string }) => void) => () => void
+    onOpenSearch?: (callback: (payload: { query?: string }) => void) => () => void
     getStartupSettings?: () => Promise<AppStartupSettings>
     setStartupSettings?: (enabled: boolean) => Promise<AppStartupSettings>
     getExampleLibraryPath?: () => Promise<ExampleLibraryPathResponse>

@@ -105,6 +105,10 @@ function fileInfo(overrides: Partial<FileInfo> = {}): FileInfo {
   }
 }
 
+async function openSettingsTab(label: string) {
+  await userEvent.click(await screen.findByRole('tab', { name: new RegExp(label) }))
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   // Default: empty library, no files, no bridge-backed app data.
@@ -152,15 +156,19 @@ describe('FileManager', () => {
       })
     })
 
-    it('separates document source, app behavior, and maintenance settings areas', async () => {
+    it('separates settings into horizontal category tabs', async () => {
       renderWithProviders(<FileManager />)
       await waitFor(() => expect(mocked.getSettings).toHaveBeenCalled())
 
+      expect(screen.getByRole('tab', { name: /문서 소스/ })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tab', { name: /등록 문서/ })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: /앱 동작/ })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: /데이터\/문제 해결/ })).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: '문서 소스' })).toBeInTheDocument()
-      expect(screen.getByRole('heading', { name: '등록된 문서' })).toBeInTheDocument()
-      expect(screen.getByRole('heading', { name: '표시와 앱 동작' })).toBeInTheDocument()
-      expect(screen.getByRole('heading', { name: '문제 해결과 앱 데이터' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: '스캔/제외 설정' })).toBeInTheDocument()
+
+      await openSettingsTab('앱 동작')
+      expect(screen.getByRole('heading', { name: '표시와 앱 동작' })).toBeInTheDocument()
     })
 
     it('renders the configured watched folders', async () => {
@@ -203,6 +211,7 @@ describe('FileManager', () => {
       })
 
       renderWithProviders(<FileManager />)
+      await openSettingsTab('등록 문서')
       await waitFor(() => {
         expect(screen.getByText('주간보고_v1.0.docx')).toBeInTheDocument()
         expect(screen.getByText('사업예산_v1.0.xlsx')).toBeInTheDocument()
@@ -391,10 +400,7 @@ describe('FileManager', () => {
     }
 
     async function openAppBehaviorSettings() {
-      const expandLabel = await screen.findByText('테마·글자·닫기 동작 펼치기')
-      const summary = expandLabel.closest('summary')
-      expect(summary).not.toBeNull()
-      await userEvent.click(summary as HTMLElement)
+      await openSettingsTab('앱 동작')
     }
 
     it('shows approval guidance when startup settings require system approval', async () => {

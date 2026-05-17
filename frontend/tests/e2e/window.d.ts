@@ -13,6 +13,16 @@ declare global {
 
   type OfficeWhereE2eCloseBehavior = 'ask' | 'hide' | 'quit'
 
+  interface OfficeWhereE2eQuickSearchSettings {
+    supported: boolean
+    enabled: boolean
+    showRecent: boolean
+    accelerator: string
+    displayShortcut: string
+    registered: boolean
+    reason?: string
+  }
+
   interface OfficeWhereE2eUpdateAssetInfo {
     name: string
     url: string
@@ -44,6 +54,12 @@ declare global {
     getAppDataPaths?: () => Promise<OfficeWhereE2eAppDataCandidate[]>
     getCloseBehavior?: () => Promise<OfficeWhereE2eCloseBehavior>
     setCloseBehavior?: (behavior: OfficeWhereE2eCloseBehavior) => Promise<OfficeWhereE2eCloseBehavior>
+    getQuickSearchSettings?: () => Promise<OfficeWhereE2eQuickSearchSettings>
+    setQuickSearchSettings?: (
+      settings: Partial<Pick<OfficeWhereE2eQuickSearchSettings, 'enabled' | 'showRecent' | 'accelerator'>>,
+    ) => Promise<OfficeWhereE2eQuickSearchSettings>
+    hideQuickSearch?: () => Promise<void>
+    openMainSearch?: (query: string) => Promise<void>
     checkForUpdates?: () => Promise<OfficeWhereE2eUpdateCheckResult>
     installUpdate?: () => Promise<OfficeWhereE2eUpdateInstallResult>
   }

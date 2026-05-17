@@ -1,4 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  nativeImage,
+  screen,
+  session,
+  shell,
+  Tray,
+} from 'electron'
 import { execFile, spawn } from 'node:child_process'
 import { resolveBackendStartupBudget } from './backendStartup'
 import type { ChildProcess } from 'node:child_process'
@@ -56,12 +68,30 @@ type ClearAppDataResult = {
 type CloseBehavior = 'ask' | 'hide' | 'quit'
 type AppResetReason = 'safe' | 'full' | 'custom'
 
+type QuickSearchSettings = {
+  enabled: boolean
+  showRecent: boolean
+  accelerator: string
+}
+
+type QuickSearchStatus = QuickSearchSettings & {
+  supported: boolean
+  registered: boolean
+  displayShortcut: string
+  reason?: string
+}
+
 type AppStartupSettings = {
   supported: boolean
   enabled: boolean
   executablePath: string
   reason?: string
   requiresApproval?: boolean
+}
+
+type AppSettings = {
+  closeBehavior?: CloseBehavior
+  quickSearch?: Partial<QuickSearchSettings>
 }
 
 type AppResetState = {
@@ -98,6 +128,7 @@ type UpdateInstallResult = {
 
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
+let quickSearchWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let backendProcess: ChildProcess | null = null
 const expectedBackendExits = new WeakSet<ChildProcess>()
@@ -111,6 +142,8 @@ let appShutdownInProgress = false
 let appRelaunchScheduled = false
 let cachedUpdateCheck: UpdateCheckResult | null = null
 let updateDownloadInProgress = false
+let registeredQuickSearchAccelerator: string | null = null
+let quickSearchRegistrationError: string | undefined
 
 app.setName('OfficeWhere')
 
@@ -132,7 +165,13 @@ if (!hasSingleInstanceLock) {
     isQuitting = true
     stopBackend()
     destroyTray()
+    unregisterQuickSearchShortcut()
+    destroyQuickSearchWindow()
     closeSplashWindow()
+  })
+
+  app.on('will-quit', () => {
+    unregisterQuickSearchShortcut()
   })
 
   app.on('window-all-closed', () => {
@@ -158,6 +197,7 @@ async function startApp() {
   createSplashWindow()
   ensureTray()
   await startBackendWithRetry()
+  registerQuickSearchShortcut()
   await createMainWindow()
 }
 
@@ -170,6 +210,10 @@ function registerIpcHandlers() {
   ipcMain.handle('app:consume-reset-state', () => consumeResetState())
   ipcMain.handle('app:get-close-behavior', () => readCloseBehavior())
   ipcMain.handle('app:set-close-behavior', async (_event, payload: unknown) => setCloseBehavior(payload))
+  ipcMain.handle('app:get-quick-search-settings', () => readQuickSearchStatus())
+  ipcMain.handle('app:set-quick-search-settings', (_event, payload: unknown) => setQuickSearchSettings(payload))
+  ipcMain.handle('app:hide-quick-search', () => hideQuickSearchWindow())
+  ipcMain.handle('app:open-main-search', (_event, payload: unknown) => openMainSearch(payload))
   ipcMain.handle('app:get-startup-settings', () => readStartupSettings())
   ipcMain.handle('app:set-startup-settings', (_event, payload: unknown) => setStartupSettings(payload))
   ipcMain.handle('app:get-example-library-path', () => getExampleLibraryPath())
@@ -633,7 +677,31 @@ async function openLatestReleasePage(): Promise<void> {
   await shell.openExternal(releaseUrl)
 }
 
-async function createMainWindow() {
+async function loadRendererWindow(window: BrowserWindow, query?: Record<string, string>) {
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  if (rendererUrl) {
+    const url = new URL(rendererUrl)
+    Object.entries(query ?? {}).forEach(([key, value]) => url.searchParams.set(key, value))
+    await window.loadURL(url.toString())
+    return
+  }
+
+  const rendererIndex = getRendererIndexPath()
+  if (fs.existsSync(rendererIndex)) {
+    if (query) {
+      await window.loadFile(rendererIndex, { query })
+    } else {
+      await window.loadFile(rendererIndex)
+    }
+    return
+  }
+
+  const fallbackUrl = new URL('http://localhost:15173')
+  Object.entries(query ?? {}).forEach(([key, value]) => fallbackUrl.searchParams.set(key, value))
+  await window.loadURL(fallbackUrl.toString())
+}
+
+async function createMainWindow(query?: Record<string, string>) {
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 940,
@@ -671,19 +739,67 @@ async function createMainWindow() {
     return { action: 'deny' }
   })
 
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL
-  if (rendererUrl) {
-    await mainWindow.loadURL(rendererUrl)
-    return
-  }
+  await loadRendererWindow(mainWindow, query)
+}
 
-  const rendererIndex = getRendererIndexPath()
-  if (fs.existsSync(rendererIndex)) {
-    await mainWindow.loadFile(rendererIndex)
-    return
-  }
+async function createQuickSearchWindow() {
+  if (quickSearchWindow && !quickSearchWindow.isDestroyed()) return quickSearchWindow
 
-  await mainWindow.loadURL('http://localhost:15173')
+  quickSearchWindow = new BrowserWindow({
+    width: 780,
+    height: 580,
+    minWidth: 680,
+    minHeight: 420,
+    maxWidth: 920,
+    maxHeight: 720,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    transparent: true,
+    backgroundColor: '#00000000',
+    title: 'OfficeWhere 빠른 검색',
+    icon: getAppIconPath(),
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+
+  quickSearchWindow.removeMenu()
+  quickSearchWindow.setMenuBarVisibility(false)
+  quickSearchWindow.on('close', (event) => {
+    if (isQuitting || appDataCleanupInProgress) return
+    event.preventDefault()
+    quickSearchWindow?.hide()
+  })
+  quickSearchWindow.on('closed', () => {
+    quickSearchWindow = null
+  })
+  quickSearchWindow.on('blur', () => {
+    setTimeout(() => {
+      if (quickSearchWindow && !quickSearchWindow.isDestroyed() && !quickSearchWindow.isFocused()) {
+        quickSearchWindow.hide()
+      }
+    }, 140)
+  })
+  quickSearchWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) {
+      void shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+
+  await loadRendererWindow(quickSearchWindow, { quickSearch: '1' })
+  return quickSearchWindow
 }
 
 function createSplashWindow() {
@@ -969,20 +1085,50 @@ function consumeResetState(): AppResetState {
   }
 }
 
-function readSettings(): { closeBehavior?: CloseBehavior } {
-  try {
-    const raw = fs.readFileSync(settingsPath(), 'utf-8')
-    const parsed = JSON.parse(raw) as { closeBehavior?: unknown }
-    return parsed.closeBehavior === 'hide' || parsed.closeBehavior === 'quit' || parsed.closeBehavior === 'ask'
-      ? { closeBehavior: parsed.closeBehavior }
-      : {}
-  } catch {
-    return {}
+const DEFAULT_QUICK_SEARCH_SETTINGS: QuickSearchSettings = {
+  enabled: true,
+  showRecent: true,
+  accelerator: 'CommandOrControl+Shift+Space',
+}
+
+function isCloseBehavior(value: unknown): value is CloseBehavior {
+  return value === 'hide' || value === 'quit' || value === 'ask'
+}
+
+function normalizeQuickSearchSettings(value: unknown): QuickSearchSettings {
+  if (!value || typeof value !== 'object') return DEFAULT_QUICK_SEARCH_SETTINGS
+  const record = value as Record<string, unknown>
+  const accelerator = typeof record.accelerator === 'string' && record.accelerator.trim()
+    ? record.accelerator.trim()
+    : DEFAULT_QUICK_SEARCH_SETTINGS.accelerator
+  return {
+    enabled: typeof record.enabled === 'boolean' ? record.enabled : DEFAULT_QUICK_SEARCH_SETTINGS.enabled,
+    showRecent: typeof record.showRecent === 'boolean' ? record.showRecent : DEFAULT_QUICK_SEARCH_SETTINGS.showRecent,
+    accelerator,
   }
 }
 
-function writeSettings(patch: { closeBehavior?: CloseBehavior }) {
+function readSettings(): AppSettings {
+  try {
+    const raw = fs.readFileSync(settingsPath(), 'utf-8')
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      closeBehavior: isCloseBehavior(parsed.closeBehavior) ? parsed.closeBehavior : undefined,
+      quickSearch: normalizeQuickSearchSettings(parsed.quickSearch),
+    }
+  } catch {
+    return { quickSearch: DEFAULT_QUICK_SEARCH_SETTINGS }
+  }
+}
+
+function writeSettings(patch: AppSettings) {
   const next = { ...readSettings(), ...patch }
+  if (patch.quickSearch) {
+    next.quickSearch = {
+      ...normalizeQuickSearchSettings(readSettings().quickSearch),
+      ...patch.quickSearch,
+    }
+  }
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true })
   fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2), 'utf-8')
 }
@@ -1001,6 +1147,120 @@ function setCloseBehavior(payload: unknown): CloseBehavior {
   }
   writeSettings({ closeBehavior: value })
   return value
+}
+
+function formatAcceleratorForDisplay(accelerator: string): string {
+  const keySymbol: Record<string, string> = {
+    CommandOrControl: process.platform === 'darwin' ? '⌘' : 'Ctrl',
+    Command: '⌘',
+    Cmd: '⌘',
+    Control: 'Ctrl',
+    Ctrl: 'Ctrl',
+    Alt: process.platform === 'darwin' ? '⌥' : 'Alt',
+    Option: '⌥',
+    Shift: '⇧',
+    Super: process.platform === 'darwin' ? '⌘' : 'Super',
+    Space: 'Space',
+  }
+  return accelerator
+    .split('+')
+    .map((part) => keySymbol[part] ?? part)
+    .join(process.platform === 'darwin' ? '' : ' + ')
+}
+
+function quickSearchSupported(): boolean {
+  return process.env.OW_E2E !== '1'
+}
+
+function readQuickSearchSettings(): QuickSearchSettings {
+  return normalizeQuickSearchSettings(readSettings().quickSearch)
+}
+
+function readQuickSearchStatus(): QuickSearchStatus {
+  const settings = readQuickSearchSettings()
+  const supported = quickSearchSupported()
+  const registered = Boolean(
+    supported &&
+      settings.enabled &&
+      registeredQuickSearchAccelerator &&
+      globalShortcut.isRegistered(registeredQuickSearchAccelerator),
+  )
+  return {
+    ...settings,
+    supported,
+    registered,
+    displayShortcut: formatAcceleratorForDisplay(settings.accelerator),
+    reason: !supported
+      ? '테스트 실행 중에는 전역 단축키를 등록하지 않습니다.'
+      : !settings.enabled
+        ? '빠른 검색 팔레트가 꺼져 있습니다.'
+        : registered
+          ? undefined
+          : quickSearchRegistrationError || '단축키를 등록하지 못했습니다. 다른 앱이 같은 단축키를 사용 중일 수 있습니다.',
+  }
+}
+
+function registerQuickSearchShortcut(): QuickSearchStatus {
+  unregisterQuickSearchShortcut()
+  quickSearchRegistrationError = undefined
+  const settings = readQuickSearchSettings()
+  if (!quickSearchSupported() || !settings.enabled) return readQuickSearchStatus()
+
+  try {
+    const ok = globalShortcut.register(settings.accelerator, () => {
+      void toggleQuickSearchWindow()
+    })
+    if (ok) {
+      registeredQuickSearchAccelerator = settings.accelerator
+    } else {
+      registeredQuickSearchAccelerator = null
+      quickSearchRegistrationError = `"${formatAcceleratorForDisplay(settings.accelerator)}" 단축키를 OS에 등록하지 못했습니다.`
+    }
+  } catch (error) {
+    registeredQuickSearchAccelerator = null
+    quickSearchRegistrationError = error instanceof Error ? error.message : '단축키 등록 중 알 수 없는 오류가 발생했습니다.'
+  }
+
+  return readQuickSearchStatus()
+}
+
+function unregisterQuickSearchShortcut(): void {
+  if (registeredQuickSearchAccelerator) {
+    try {
+      globalShortcut.unregister(registeredQuickSearchAccelerator)
+    } catch {
+      // Best effort during shutdown/re-registration.
+    }
+  }
+  registeredQuickSearchAccelerator = null
+}
+
+function setQuickSearchSettings(payload: unknown): QuickSearchStatus {
+  const current = readQuickSearchSettings()
+  const patch: Partial<QuickSearchSettings> =
+    payload && typeof payload === 'object'
+      ? {
+          enabled:
+            'enabled' in payload && typeof (payload as { enabled?: unknown }).enabled === 'boolean'
+              ? (payload as { enabled: boolean }).enabled
+              : undefined,
+          showRecent:
+            'showRecent' in payload && typeof (payload as { showRecent?: unknown }).showRecent === 'boolean'
+              ? (payload as { showRecent: boolean }).showRecent
+              : undefined,
+          accelerator:
+            'accelerator' in payload && typeof (payload as { accelerator?: unknown }).accelerator === 'string'
+              ? (payload as { accelerator: string }).accelerator.trim()
+              : undefined,
+        }
+      : {}
+
+  const next = normalizeQuickSearchSettings({
+    ...current,
+    ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+  })
+  writeSettings({ quickSearch: next })
+  return registerQuickSearchShortcut()
 }
 
 function startupSettingsSupported(): boolean {
@@ -1096,6 +1356,7 @@ function ensureTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'OfficeWhere 열기', click: () => showMainWindow() },
+      { label: '빠른 검색 열기', click: () => void toggleQuickSearchWindow(true) },
       { type: 'separator' },
       {
         label: '종료',
@@ -1104,6 +1365,49 @@ function ensureTray() {
     ])
   )
   tray.on('double-click', () => showMainWindow())
+}
+
+function positionQuickSearchWindow(window: BrowserWindow) {
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  const width = 780
+  const height = 580
+  const x = Math.round(display.workArea.x + (display.workArea.width - width) / 2)
+  const y = Math.round(display.workArea.y + Math.max(48, display.workArea.height * 0.14))
+  window.setBounds({ x, y, width, height }, false)
+}
+
+async function showQuickSearchWindow() {
+  if (isQuitting || appDataCleanupInProgress) return
+  const window = await createQuickSearchWindow()
+  if (window.isDestroyed()) return
+  positionQuickSearchWindow(window)
+  window.setAlwaysOnTop(true, 'pop-up-menu')
+  window.show()
+  window.focus()
+  window.webContents.send('quick-search:opened', {
+    displayShortcut: readQuickSearchStatus().displayShortcut,
+  })
+}
+
+function hideQuickSearchWindow() {
+  if (quickSearchWindow && !quickSearchWindow.isDestroyed()) {
+    quickSearchWindow.hide()
+  }
+}
+
+async function toggleQuickSearchWindow(forceOpen = false) {
+  if (!forceOpen && quickSearchWindow && !quickSearchWindow.isDestroyed() && quickSearchWindow.isVisible()) {
+    quickSearchWindow.hide()
+    return
+  }
+  await showQuickSearchWindow()
+}
+
+function destroyQuickSearchWindow() {
+  if (quickSearchWindow && !quickSearchWindow.isDestroyed()) {
+    quickSearchWindow.destroy()
+  }
+  quickSearchWindow = null
 }
 
 function showMainWindow() {
@@ -1120,6 +1424,20 @@ function showMainWindow() {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+}
+
+async function openMainSearch(payload: unknown) {
+  const query =
+    payload && typeof payload === 'object' && 'query' in payload && typeof (payload as { query?: unknown }).query === 'string'
+      ? (payload as { query: string }).query
+      : ''
+  hideQuickSearchWindow()
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    await createMainWindow(query ? { openSearch: query } : undefined)
+  } else {
+    showMainWindow()
+    mainWindow.webContents.send('app:open-search', { query })
+  }
 }
 
 async function handleMainWindowClose() {
@@ -1169,6 +1487,7 @@ function destroyTray() {
 }
 
 function destroyAppWindows() {
+  destroyQuickSearchWindow()
   closeSplashWindow()
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.destroy()

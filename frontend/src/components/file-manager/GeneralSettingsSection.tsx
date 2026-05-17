@@ -1,4 +1,4 @@
-import type { AppStartupSettings, CloseBehavior } from '../../api/client'
+import type { AppStartupSettings, CloseBehavior, QuickSearchSettings, QuickSearchSettingsPatch } from '../../api/client'
 import {
   APP_TEXT_SIZE_DESCRIPTIONS,
   APP_TEXT_SIZE_LABELS,
@@ -21,10 +21,23 @@ type GeneralSettingsSectionProps = {
   startupSettings: AppStartupSettings
   startupSettingsAvailable: boolean
   startupSettingsLoading: boolean
+  quickSearchSettings: QuickSearchSettings
+  quickSearchSettingsAvailable: boolean
+  quickSearchSettingsLoading: boolean
   onTextSizeChange: (size: AppTextSize) => void
   onThemeModeChange: (mode: AppThemeMode) => void
   onCloseBehaviorChange: (behavior: CloseBehavior) => void
   onStartupSettingsChange: (enabled: boolean) => void
+  onQuickSearchSettingsChange: (settings: QuickSearchSettingsPatch) => void
+}
+
+function shortcutParts(label: string) {
+  if (label.includes(' + ')) return label.split(' + ').filter(Boolean)
+  return label
+    .replace(/([⌘⇧⌥])/g, ' $1 ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
 }
 
 export default function GeneralSettingsSection({
@@ -38,10 +51,14 @@ export default function GeneralSettingsSection({
   startupSettings,
   startupSettingsAvailable,
   startupSettingsLoading,
+  quickSearchSettings,
+  quickSearchSettingsAvailable,
+  quickSearchSettingsLoading,
   onTextSizeChange,
   onThemeModeChange,
   onCloseBehaviorChange,
   onStartupSettingsChange,
+  onQuickSearchSettingsChange,
 }: GeneralSettingsSectionProps) {
   return (
     <Card variant="elevated" className="console-panel overflow-hidden">
@@ -226,6 +243,72 @@ export default function GeneralSettingsSection({
                       {startupSettings.executablePath}
                     </p>
                   )}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)]/82 p-4">
+              <div className="mb-3 flex items-start gap-2.5">
+                <Icon name="travel_explore" size={20} className="mt-0.5 text-[var(--md-sys-color-primary)]" />
+                <div>
+                  <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">빠른 검색 팔레트</p>
+                  <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                    앱 창을 열지 않고 화면 위쪽에 Spotlight형 검색창을 띄웁니다.
+                  </p>
+                </div>
+              </div>
+              {!quickSearchSettingsAvailable ? (
+                <EmptyState
+                  icon="keyboard"
+                  title="데스크톱 앱에서만 사용할 수 있습니다"
+                  description="브라우저 실행 환경에서는 전역 단축키와 팔레트 창을 제어할 수 없습니다."
+                  compact
+                />
+              ) : (
+                <div className="space-y-3">
+                  <Switch
+                    checked={quickSearchSettings.enabled}
+                    disabled={quickSearchSettingsLoading || !quickSearchSettings.supported}
+                    onChange={(event) => onQuickSearchSettingsChange({ enabled: event.currentTarget.checked })}
+                    label="전역 단축키로 빠른 검색 열기"
+                    description={
+                      quickSearchSettings.registered
+                        ? '어떤 앱을 쓰는 중이어도 단축키로 검색 팔레트를 엽니다.'
+                        : quickSearchSettings.reason || '단축키 등록 상태를 확인하는 중입니다.'
+                    }
+                  />
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                    <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3">
+                      <p className="type-label-md text-[var(--md-sys-color-on-surface-variant)]">현재 단축키</p>
+                      <p className="mt-2 flex flex-wrap items-center gap-1.5 type-title-sm text-[var(--md-sys-color-on-surface)]">
+                        {shortcutParts(quickSearchSettings.displayShortcut).map((key) => (
+                          <span key={key} className="kbd-token">
+                            {key}
+                          </span>
+                        ))}
+                      </p>
+                    </div>
+                    <div
+                      className={`rounded-lg border p-3 ${
+                        quickSearchSettings.registered
+                          ? 'border-[var(--md-sys-color-success)] bg-[var(--md-sys-color-success-container)]/42 text-[var(--md-sys-color-on-success-container)]'
+                          : 'border-[var(--md-sys-color-warning)] bg-[var(--md-sys-color-warning-container)]/48 text-[var(--md-sys-color-on-warning-container)]'
+                      }`}
+                    >
+                      <p className="type-label-md opacity-80">등록 상태</p>
+                      <p className="mt-1 inline-flex items-center gap-1.5 type-title-sm">
+                        <Icon name={quickSearchSettings.registered ? 'check_circle' : 'info'} size={18} filled />
+                        {quickSearchSettings.registered ? '사용 가능' : '확인 필요'}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={quickSearchSettings.showRecent}
+                    disabled={quickSearchSettingsLoading}
+                    onChange={(event) => onQuickSearchSettingsChange({ showRecent: event.currentTarget.checked })}
+                    label="팔레트에 최근 검색어 표시"
+                    description="검색창이 비어 있을 때 최근 검색어를 칩으로 보여줍니다."
+                  />
                 </div>
               )}
             </div>

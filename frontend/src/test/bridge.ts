@@ -29,6 +29,28 @@ export function installBridge(overrides: Partial<OfficeWhereBridge> = {}): Offic
     consumeResetState: vi.fn().mockResolvedValue({ resetPending: false }),
     getCloseBehavior: vi.fn().mockResolvedValue('ask'),
     setCloseBehavior: vi.fn().mockImplementation((behavior) => Promise.resolve(behavior)),
+    getQuickSearchSettings: vi.fn().mockResolvedValue({
+      supported: true,
+      enabled: true,
+      showRecent: true,
+      accelerator: 'CommandOrControl+Shift+Space',
+      displayShortcut: 'Ctrl + Shift + Space',
+      registered: true,
+    }),
+    setQuickSearchSettings: vi.fn().mockImplementation((settings) =>
+      Promise.resolve({
+        supported: true,
+        enabled: settings.enabled ?? true,
+        showRecent: settings.showRecent ?? true,
+        accelerator: settings.accelerator ?? 'CommandOrControl+Shift+Space',
+        displayShortcut: 'Ctrl + Shift + Space',
+        registered: settings.enabled !== false,
+      }),
+    ),
+    hideQuickSearch: vi.fn().mockResolvedValue(undefined),
+    openMainSearch: vi.fn().mockResolvedValue(undefined),
+    onQuickSearchOpened: vi.fn().mockReturnValue(() => undefined),
+    onOpenSearch: vi.fn().mockReturnValue(() => undefined),
     getStartupSettings: vi.fn().mockResolvedValue({
       supported: false,
       enabled: false,
