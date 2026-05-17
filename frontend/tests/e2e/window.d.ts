@@ -58,6 +58,7 @@ declare global {
     setQuickSearchSettings?: (
       settings: Partial<Pick<OfficeWhereE2eQuickSearchSettings, 'enabled' | 'showRecent' | 'accelerator'>>,
     ) => Promise<OfficeWhereE2eQuickSearchSettings>
+    showQuickSearch?: () => Promise<void>
     hideQuickSearch?: () => Promise<void>
     openMainSearch?: (query: string) => Promise<void>
     checkForUpdates?: () => Promise<OfficeWhereE2eUpdateCheckResult>

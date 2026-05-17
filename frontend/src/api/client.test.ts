@@ -262,7 +262,7 @@ describe('api.app (bridge-dependent)', () => {
 
     expect(res.data.supported).toBe(false)
     expect(res.data.registered).toBe(false)
-    expect(res.data.displayShortcut).toContain('Space')
+    expect(res.data.displayShortcut).toBe('Ctrl + Alt + F')
   })
 
   it('app.setQuickSearchSettings passes settings through the Electron bridge', async () => {
@@ -273,5 +273,13 @@ describe('api.app (bridge-dependent)', () => {
     expect(bridge.setQuickSearchSettings).toHaveBeenCalledWith({ enabled: false, showRecent: false })
     expect(res.data.enabled).toBe(false)
     expect(res.data.showRecent).toBe(false)
+  })
+
+  it('app.showQuickSearch opens the Electron palette through the bridge', async () => {
+    const bridge = installBridge()
+
+    await api.app.showQuickSearch()
+
+    expect(bridge.showQuickSearch).toHaveBeenCalled()
   })
 })

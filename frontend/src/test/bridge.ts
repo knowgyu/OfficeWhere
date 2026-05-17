@@ -33,8 +33,8 @@ export function installBridge(overrides: Partial<OfficeWhereBridge> = {}): Offic
       supported: true,
       enabled: true,
       showRecent: true,
-      accelerator: 'CommandOrControl+Shift+Space',
-      displayShortcut: 'Ctrl + Shift + Space',
+      accelerator: 'CommandOrControl+Alt+F',
+      displayShortcut: 'Ctrl + Alt + F',
       registered: true,
     }),
     setQuickSearchSettings: vi.fn().mockImplementation((settings) =>
@@ -42,11 +42,17 @@ export function installBridge(overrides: Partial<OfficeWhereBridge> = {}): Offic
         supported: true,
         enabled: settings.enabled ?? true,
         showRecent: settings.showRecent ?? true,
-        accelerator: settings.accelerator ?? 'CommandOrControl+Shift+Space',
-        displayShortcut: 'Ctrl + Shift + Space',
+        accelerator: settings.accelerator ?? 'CommandOrControl+Alt+F',
+        displayShortcut:
+          settings.accelerator === 'CommandOrControl+Alt+Space'
+            ? 'Ctrl + Alt + Space'
+            : settings.accelerator === 'CommandOrControl+Shift+F'
+              ? 'Ctrl + Shift + F'
+              : 'Ctrl + Alt + F',
         registered: settings.enabled !== false,
       }),
     ),
+    showQuickSearch: vi.fn().mockResolvedValue(undefined),
     hideQuickSearch: vi.fn().mockResolvedValue(undefined),
     openMainSearch: vi.fn().mockResolvedValue(undefined),
     onQuickSearchOpened: vi.fn().mockReturnValue(() => undefined),

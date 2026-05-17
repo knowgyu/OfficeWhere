@@ -22,8 +22,8 @@ const DEFAULT_QUICK_SEARCH_SETTINGS: QuickSearchSettings = {
   supported: false,
   enabled: false,
   showRecent: true,
-  accelerator: 'CommandOrControl+Shift+Space',
-  displayShortcut: 'Ctrl + Shift + Space',
+  accelerator: 'CommandOrControl+Alt+F',
+  displayShortcut: 'Ctrl + Alt + F',
   registered: false,
   reason: '데스크톱 앱에서만 빠른 검색을 사용할 수 있습니다.',
 }

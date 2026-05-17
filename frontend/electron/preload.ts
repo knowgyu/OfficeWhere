@@ -16,6 +16,7 @@ const officeWhereBridge = {
   getQuickSearchSettings: () => ipcRenderer.invoke('app:get-quick-search-settings'),
   setQuickSearchSettings: (settings: { enabled?: boolean; showRecent?: boolean; accelerator?: string }) =>
     ipcRenderer.invoke('app:set-quick-search-settings', settings),
+  showQuickSearch: () => ipcRenderer.invoke('app:show-quick-search'),
   hideQuickSearch: () => ipcRenderer.invoke('app:hide-quick-search'),
   openMainSearch: (query: string) => ipcRenderer.invoke('app:open-main-search', { query }),
   onQuickSearchOpened: (callback: (payload: { displayShortcut?: string }) => void) => {

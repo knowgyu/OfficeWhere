@@ -1230,8 +1230,8 @@ export const api = {
             supported: false,
             enabled: false,
             showRecent: true,
-            accelerator: 'CommandOrControl+Shift+Space',
-            displayShortcut: 'Ctrl + Shift + Space',
+            accelerator: 'CommandOrControl+Alt+F',
+            displayShortcut: 'Ctrl + Alt + F',
             registered: false,
             reason: '데스크톱 앱에서만 빠른 검색 단축키를 사용할 수 있습니다.',
           } satisfies QuickSearchSettings,
@@ -1245,6 +1245,12 @@ export const api = {
         desktopError('Electron 앱에서만 빠른 검색 단축키를 설정할 수 있습니다.')
       }
       return { data: await electron.setQuickSearchSettings(settings) }
+    },
+    showQuickSearch: async () => {
+      const electron = electronApi()
+      if (!electron?.showQuickSearch) desktopError('Electron 앱에서만 빠른 검색 팔레트를 열 수 있습니다.')
+      await electron.showQuickSearch()
+      return { data: undefined }
     },
     hideQuickSearch: async () => {
       const electron = electronApi()

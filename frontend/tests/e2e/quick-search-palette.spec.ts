@@ -93,9 +93,10 @@ test.describe('quick search visual smoke (Electron)', () => {
     await expect(mainWindow.getByRole('heading', { name: '표시와 앱 동작' })).toBeVisible()
     await expect(mainWindow.getByText('빠른 검색 팔레트')).toBeVisible()
     await expect(mainWindow.getByText('전역 단축키로 빠른 검색 열기')).toBeVisible()
-    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^Ctrl$/ })).toBeVisible()
-    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^(Shift|⇧)$/ })).toBeVisible()
-    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^Space$/ })).toBeVisible()
+    await expect(mainWindow.getByRole('button', { name: /지금 열기/ })).toBeVisible()
+    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^Ctrl$/ }).first()).toBeVisible()
+    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^(Alt|⌥)$/ }).first()).toBeVisible()
+    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^F$/ }).first()).toBeVisible()
     await maybeCapture(mainWindow, 'settings-app-behavior-quick-search.png')
 
     const quickWindow = await openQuickSearchPalette(electronApp)

@@ -115,6 +115,7 @@ declare global {
     setCloseBehavior?: (behavior: CloseBehavior) => Promise<CloseBehavior>
     getQuickSearchSettings?: () => Promise<QuickSearchSettings>
     setQuickSearchSettings?: (settings: QuickSearchSettingsPatch) => Promise<QuickSearchSettings>
+    showQuickSearch?: () => Promise<void>
     hideQuickSearch?: () => Promise<void>
     openMainSearch?: (query: string) => Promise<void>
     onQuickSearchOpened?: (callback: (payload: { displayShortcut?: string }) => void) => () => void

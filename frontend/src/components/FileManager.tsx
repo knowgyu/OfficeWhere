@@ -364,8 +364,8 @@ export default function FileManager({
     supported: false,
     enabled: false,
     showRecent: true,
-    accelerator: 'CommandOrControl+Shift+Space',
-    displayShortcut: 'Ctrl + Shift + Space',
+    accelerator: 'CommandOrControl+Alt+F',
+    displayShortcut: 'Ctrl + Alt + F',
     registered: false,
     reason: '데스크톱 앱에서만 빠른 검색 단축키를 사용할 수 있습니다.',
   })
@@ -381,6 +381,7 @@ export default function FileManager({
   const quickSearchSettingsAvailable = Boolean(
     officeWhereBridge?.getQuickSearchSettings && officeWhereBridge?.setQuickSearchSettings,
   )
+  const quickSearchOpenAvailable = Boolean(officeWhereBridge?.showQuickSearch)
 
   const fetchFiles = async (nextOffset = fileOffset, nextQuery = fileQuery) => {
     setLoading(true)
@@ -740,6 +741,18 @@ export default function FileManager({
       })
     } finally {
       setQuickSearchSettingsLoading(false)
+    }
+  }
+
+  const handleOpenQuickSearch = async () => {
+    try {
+      await api.app.showQuickSearch()
+    } catch {
+      snackbar.show({
+        key: 'quick-search-open',
+        tone: 'danger',
+        message: '빠른 검색 팔레트를 열지 못했습니다.',
+      })
     }
   }
 
@@ -1359,12 +1372,14 @@ export default function FileManager({
         startupSettingsLoading={startupSettingsLoading}
         quickSearchSettings={quickSearchSettings}
         quickSearchSettingsAvailable={quickSearchSettingsAvailable}
+        quickSearchOpenAvailable={quickSearchOpenAvailable}
         quickSearchSettingsLoading={quickSearchSettingsLoading}
         onTextSizeChange={setTextSize}
         onThemeModeChange={setThemeMode}
         onCloseBehaviorChange={(behavior) => void handleUpdateCloseBehavior(behavior)}
         onStartupSettingsChange={(enabled) => void handleUpdateStartupSettings(enabled)}
         onQuickSearchSettingsChange={(settings) => void handleUpdateQuickSearchSettings(settings)}
+        onOpenQuickSearch={() => void handleOpenQuickSearch()}
       />
 
       {onReplayOnboarding && (

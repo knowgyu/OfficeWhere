@@ -57,8 +57,8 @@ beforeEach(() => {
       supported: true,
       enabled: true,
       showRecent: true,
-      accelerator: 'CommandOrControl+Shift+Space',
-      displayShortcut: 'Ctrl + Shift + Space',
+      accelerator: 'CommandOrControl+Alt+F',
+      displayShortcut: 'Ctrl + Alt + F',
       registered: true,
     },
   })

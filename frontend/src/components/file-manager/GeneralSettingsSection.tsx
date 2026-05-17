@@ -8,7 +8,7 @@ import {
   APP_THEME_MODE_ORDER,
 } from '../../contexts/DisplaySettingsContext'
 import type { AppTextSize, AppThemeMode, ResolvedAppTheme } from '../../contexts/DisplaySettingsContext'
-import { Card, CardSection, EmptyState, Icon, SelectField, Switch } from '../../ui'
+import { Button, Card, CardSection, EmptyState, Icon, SelectField, Switch } from '../../ui'
 
 type GeneralSettingsSectionProps = {
   textSize: AppTextSize
@@ -23,13 +23,34 @@ type GeneralSettingsSectionProps = {
   startupSettingsLoading: boolean
   quickSearchSettings: QuickSearchSettings
   quickSearchSettingsAvailable: boolean
+  quickSearchOpenAvailable: boolean
   quickSearchSettingsLoading: boolean
   onTextSizeChange: (size: AppTextSize) => void
   onThemeModeChange: (mode: AppThemeMode) => void
   onCloseBehaviorChange: (behavior: CloseBehavior) => void
   onStartupSettingsChange: (enabled: boolean) => void
   onQuickSearchSettingsChange: (settings: QuickSearchSettingsPatch) => void
+  onOpenQuickSearch: () => void
 }
+
+const QUICK_SEARCH_SHORTCUT_OPTIONS = [
+  {
+    accelerator: 'CommandOrControl+Alt+F',
+    label: 'Ctrl/⌘ + Alt/⌥ + F',
+    badge: '추천',
+    description: 'Space 계열 OS/IME 충돌을 피한 기본 단축키입니다.',
+  },
+  {
+    accelerator: 'CommandOrControl+Alt+Space',
+    label: 'Ctrl/⌘ + Alt/⌥ + Space',
+    description: 'Spotlight 느낌을 유지하고 싶을 때 쓰는 대안입니다.',
+  },
+  {
+    accelerator: 'CommandOrControl+Shift+F',
+    label: 'Ctrl/⌘ + Shift + F',
+    description: 'Alt 조합이 이미 다른 앱과 겹칠 때 선택합니다.',
+  },
+]
 
 function shortcutParts(label: string) {
   if (label.includes(' + ')) return label.split(' + ').filter(Boolean)
@@ -53,12 +74,14 @@ export default function GeneralSettingsSection({
   startupSettingsLoading,
   quickSearchSettings,
   quickSearchSettingsAvailable,
+  quickSearchOpenAvailable,
   quickSearchSettingsLoading,
   onTextSizeChange,
   onThemeModeChange,
   onCloseBehaviorChange,
   onStartupSettingsChange,
   onQuickSearchSettingsChange,
+  onOpenQuickSearch,
 }: GeneralSettingsSectionProps) {
   return (
     <Card variant="elevated" className="console-panel overflow-hidden">
@@ -300,6 +323,69 @@ export default function GeneralSettingsSection({
                         <Icon name={quickSearchSettings.registered ? 'check_circle' : 'info'} size={18} filled />
                         {quickSearchSettings.registered ? '사용 가능' : '확인 필요'}
                       </p>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="type-label-md text-[var(--md-sys-color-on-surface)]">단축키 선택</p>
+                        <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                          등록 실패가 보이면 다른 조합으로 바꾸면 즉시 재등록합니다.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outlined"
+                        size="sm"
+                        leadingIcon="open_in_new"
+                        disabled={!quickSearchOpenAvailable}
+                        onClick={onOpenQuickSearch}
+                      >
+                        지금 열기
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
+                      {QUICK_SEARCH_SHORTCUT_OPTIONS.map((option) => {
+                        const selected = quickSearchSettings.accelerator === option.accelerator
+                        return (
+                          <button
+                            key={option.accelerator}
+                            type="button"
+                            disabled={quickSearchSettingsLoading}
+                            onClick={() => onQuickSearchSettingsChange({ accelerator: option.accelerator })}
+                            className={`state-host relative rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                              selected
+                                ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/42'
+                                : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] hover:bg-[var(--md-sys-color-surface-container-high)]'
+                            }`}
+                            aria-pressed={selected}
+                          >
+                            <span className="state-layer" />
+                            <span className="relative flex flex-wrap items-center gap-1.5">
+                              {shortcutParts(option.label).map((key) => (
+                                <span key={key} className="kbd-token">
+                                  {key}
+                                </span>
+                              ))}
+                              {option.badge && (
+                                <span className="rounded-full bg-[var(--md-sys-color-tertiary-container)] px-2 py-0.5 type-label-sm text-[var(--md-sys-color-on-tertiary-container)]">
+                                  {option.badge}
+                                </span>
+                              )}
+                              {selected && (
+                                <Icon
+                                  name="check_circle"
+                                  size={17}
+                                  filled
+                                  className="ml-auto text-[var(--md-sys-color-primary)]"
+                                />
+                              )}
+                            </span>
+                            <span className="relative mt-2 block type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                              {option.description}
+                            </span>
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
                   <Switch
