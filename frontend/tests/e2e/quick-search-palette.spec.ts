@@ -2,7 +2,6 @@ import { expect, registerAndRescan, test } from './fixtures'
 import type { ElectronApplication, Page } from '@playwright/test'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 async function maybeCapture(page: Page, fileName: string) {
   const outputDir = process.env.OW_VISUAL_QA_DIR
@@ -15,66 +14,24 @@ async function maybeCapture(page: Page, fileName: string) {
   })
 }
 
-async function openQuickSearchPalette(electronApp: ElectronApplication) {
-  const frontendDir = path.resolve(__dirname, '../..')
-  const quickSearchUrl = pathToFileURL(path.join(frontendDir, 'dist', 'index.html'))
-  quickSearchUrl.searchParams.set('quickSearch', '1')
-  const preloadPath = path.join(frontendDir, 'dist-electron', 'preload.js')
-
-  const quickWindowPromise = electronApp.waitForEvent('window', { timeout: 15_000 })
-  await electronApp.evaluate(
-    async (electron, options: { url: string; preloadPath: string }) => {
-      const { BrowserWindow } = electron as unknown as {
-        BrowserWindow: new (options: Record<string, unknown>) => {
-          loadURL: (url: string) => Promise<void>
-          removeMenu: () => void
-          setMenuBarVisibility: (visible: boolean) => void
-          show: () => void
-          focus: () => void
-        }
-      }
-
-      const win = new BrowserWindow({
-        width: 780,
-        height: 580,
-        minWidth: 680,
-        minHeight: 420,
-        maxWidth: 920,
-        maxHeight: 720,
-        resizable: false,
-        movable: true,
-        minimizable: false,
-        maximizable: false,
-        fullscreenable: false,
-        frame: false,
-        show: false,
-        skipTaskbar: true,
-        alwaysOnTop: true,
-        transparent: true,
-        backgroundColor: '#00000000',
-        title: 'OfficeWhere 빠른 검색',
-        autoHideMenuBar: true,
-        webPreferences: {
-          preload: options.preloadPath,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-        },
-      })
-      ;(globalThis as Record<string, unknown>).__officeWhereQuickSearchVisualQaWindow = win
-      win.removeMenu()
-      win.setMenuBarVisibility(false)
-      await win.loadURL(options.url)
-      win.show()
-      win.focus()
-    },
-    { url: quickSearchUrl.toString(), preloadPath },
-  )
-
+async function openQuickSearchPalette(electronApp: ElectronApplication, mainWindow: Page) {
+  const existingQuickWindow = electronApp.windows().find((window) => window.url().includes('quickSearch=1'))
+  const quickWindowPromise = existingQuickWindow
+    ? Promise.resolve(existingQuickWindow)
+    : electronApp.waitForEvent('window', { timeout: 15_000 })
+  await mainWindow.getByRole('button', { name: /지금 열기/ }).click()
   const quickWindow = await quickWindowPromise
   await quickWindow.waitForLoadState('domcontentloaded')
   await expect(quickWindow.getByRole('searchbox', { name: '빠른 문서 검색' })).toBeVisible()
   return quickWindow
+}
+
+async function isQuickSearchVisible(electronApp: ElectronApplication) {
+  return electronApp.evaluate((electron) => {
+    const { BrowserWindow } = electron as unknown as typeof import('electron')
+    const win = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('quickSearch=1'))
+    return Boolean(win && !win.isDestroyed() && win.isVisible())
+  })
 }
 
 test.describe('quick search visual smoke (Electron)', () => {
@@ -97,14 +54,16 @@ test.describe('quick search visual smoke (Electron)', () => {
     await expect(mainWindow.getByRole('button', { name: '빠른 검색 단축키 직접 지정' })).toBeVisible()
     await expect(mainWindow.getByRole('button', { name: /지금 열기/ })).toBeVisible()
     await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^Ctrl$/ }).first()).toBeVisible()
-    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^(Alt|⌥)$/ }).first()).toBeVisible()
+    await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^Alt$/ }).first()).toBeVisible()
     await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^F$/ }).first()).toBeVisible()
+    await expect(mainWindow.getByText(/Ctrl\/\u2318|Alt\/\u2325|\u2318|\u2325|\u21e7/)).toHaveCount(0)
     await mainWindow.getByRole('button', { name: '빠른 검색 단축키 직접 지정' }).click()
     await mainWindow.keyboard.press('Control+Alt+G')
     await expect(mainWindow.locator('.kbd-token').filter({ hasText: /^G$/ }).first()).toBeVisible()
     await maybeCapture(mainWindow, 'settings-app-behavior-quick-search.png')
 
-    const quickWindow = await openQuickSearchPalette(electronApp)
+    const quickWindow = await openQuickSearchPalette(electronApp, mainWindow)
+    await expect.poll(() => isQuickSearchVisible(electronApp)).toBe(true)
     await expect(quickWindow.getByText('OfficeWhere 빠른 검색')).toHaveCount(0)
     await expect(quickWindow.getByText('최근 검색')).toHaveCount(0)
     await expect(quickWindow.getByRole('button', { name: '닫기' })).toHaveCount(0)
@@ -115,7 +74,21 @@ test.describe('quick search visual smoke (Electron)', () => {
     await searchBox.fill('주간보고')
     await expect(quickWindow.getByText(/개 문서/)).toBeVisible({ timeout: 30_000 })
     await expect(quickWindow.getByText(/주간보고.*\.docx/).first()).toBeVisible()
-    await expect(quickWindow.getByText('↑↓ 이동 · Enter 상세 · Ctrl/⌘ Enter 위치 · Shift Enter 열기')).toBeVisible()
-    await maybeCapture(quickWindow, 'quick-search-results-weekly-report.png')
+    await expect(quickWindow.getByText('↑↓ 이동 · Enter 상세 · Ctrl/Cmd Enter 위치 · Shift Enter 열기')).toBeVisible()
+    await expect(quickWindow.getByText(/개 일치/)).toHaveCount(0)
+    await maybeCapture(quickWindow, 'quick-search-results-collapsed-weekly-report.png')
+    await quickWindow.getByRole('button', { name: /주간보고.*선택/ }).first().click()
+    await expect(quickWindow.getByText(/개 일치/)).toHaveCount(0)
+    await quickWindow.keyboard.press('Enter')
+    await expect(quickWindow.getByText(/개 일치/).first()).toBeVisible()
+    await maybeCapture(quickWindow, 'quick-search-results-detail-weekly-report.png')
+    await quickWindow.keyboard.press('Escape')
+    await expect.poll(() => isQuickSearchVisible(electronApp)).toBe(false)
+
+    const transparentMarginWindow = await openQuickSearchPalette(electronApp, mainWindow)
+    await expect.poll(() => isQuickSearchVisible(electronApp)).toBe(true)
+    await expect(transparentMarginWindow.getByRole('searchbox', { name: '빠른 문서 검색' })).toHaveValue('')
+    await transparentMarginWindow.mouse.click(460, 180)
+    await expect.poll(() => isQuickSearchVisible(electronApp)).toBe(false)
   })
 })

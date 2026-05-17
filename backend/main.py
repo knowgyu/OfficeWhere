@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="officewhere", version="0.10.2", lifespan=lifespan)
+app = FastAPI(title="officewhere", version="0.10.3", lifespan=lifespan)
 
 # CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(

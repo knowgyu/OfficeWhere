@@ -1034,7 +1034,11 @@ export default function FileManager({
           title="설정 / 라이브러리"
           description="문서 소스, 등록 문서, 앱 동작, 문제 해결을 탭으로 나눠 필요한 설정만 빠르게 확인합니다."
         >
-          <div className="grid grid-cols-1 gap-2 lg:grid-cols-4" role="tablist" aria-label="설정 분류">
+          <div
+            className="flex flex-col gap-1 rounded-[1.15rem] border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] p-1 shadow-[0_1px_0_var(--ow-inset-highlight)_inset] lg:flex-row"
+            role="tablist"
+            aria-label="설정 분류"
+          >
             {SETTINGS_TABS.map((tab) => {
               const active = settingsTab === tab.id
               return (
@@ -1044,23 +1048,23 @@ export default function FileManager({
                   role="tab"
                   aria-selected={active}
                   onClick={() => setSettingsTab(tab.id)}
-                  className={`state-host relative rounded-xl border p-3 text-left transition-all ${
+                  className={`state-host relative flex-1 rounded-xl border px-3 py-2.5 text-left transition-all ${
                     active
-                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/50 text-[var(--md-sys-color-on-primary-container)] shadow-elev-1'
-                      : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] text-[var(--md-sys-color-on-surface)] hover:bg-[var(--md-sys-color-surface-container-high)]'
+                      ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/52 text-[var(--md-sys-color-on-primary-container)] shadow-elev-1'
+                      : 'border-transparent bg-transparent text-[var(--md-sys-color-on-surface-variant)] hover:bg-[var(--md-sys-color-surface-container-high)] hover:text-[var(--md-sys-color-on-surface)]'
                   }`}
                 >
                   <span className="state-layer" />
-                  <span className="relative flex items-start gap-2.5">
+                  <span className="relative flex items-center gap-2.5">
                     <Icon
                       name={tab.icon}
-                      size={21}
+                      size={20}
                       className={active ? 'text-[var(--md-sys-color-primary)]' : 'text-[var(--md-sys-color-on-surface-variant)]'}
                       filled={active}
                     />
                     <span className="min-w-0">
-                      <span className="block type-title-sm">{tab.label}</span>
-                      <span className="mt-0.5 block type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                      <span className="block type-label-lg text-[var(--md-sys-color-on-surface)]">{tab.label}</span>
+                      <span className="mt-0.5 block truncate type-label-md text-[var(--md-sys-color-on-surface-variant)]">
                         {tab.description}
                       </span>
                     </span>

@@ -88,7 +88,7 @@ describe('QuickSearchPalette', () => {
     expect(screen.queryByRole('button', { name: '닫기' })).not.toBeInTheDocument()
   })
 
-  it('searches, groups duplicate chunks by document, and shows snippets', async () => {
+  it('searches, groups duplicate chunks by document, and keeps rows file-only until detail is opened', async () => {
     mockedSearchQuery.mockResolvedValue({
       data: searchResponse([
         {
@@ -118,7 +118,42 @@ describe('QuickSearchPalette', () => {
       expect.objectContaining({ query: '예산', search_scope: 'filename_content' }),
     ))
     expect(await screen.findByText('2026_예산안.xlsx')).toBeInTheDocument()
-    expect(screen.getByText('2개 일치')).toBeInTheDocument()
+    expect(screen.getByText(/budget/)).toBeInTheDocument()
+    expect(screen.queryByText('2개 일치')).not.toBeInTheDocument()
+    expect(screen.queryByText('Summary')).not.toBeInTheDocument()
+    expect(screen.queryByText(/총액이 조정/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '2026_예산안.xlsx 선택' }))
+    expect(screen.queryByText('2개 일치')).not.toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByLabelText('빠른 문서 검색'), { key: 'Enter' })
+    expect(screen.getByText(/2개 일치/)).toBeInTheDocument()
+    expect(screen.getByText('Summary')).toBeInTheDocument()
+    expect(screen.getByText(/총액이 조정/)).toBeInTheDocument()
+  })
+
+  it('opens result details from the dedicated detail button for pointer users', async () => {
+    mockedSearchQuery.mockResolvedValue({
+      data: searchResponse([
+        {
+          file_id: 11,
+          name: '요약.pdf',
+          path: '/work/docs/요약.pdf',
+          file_type: 'PDF',
+          location: '쪽 3',
+          snippet: '**요약** 문장입니다.',
+        },
+      ]),
+    })
+
+    renderWithProviders(<QuickSearchPalette />, { withLibraryRescan: false })
+
+    fireEvent.change(screen.getByLabelText('빠른 문서 검색'), { target: { value: '요약' } })
+    await screen.findByText('요약.pdf')
+
+    fireEvent.click(screen.getByRole('button', { name: '요약.pdf 상세 보기' }))
+    expect(screen.getByText('1개 일치 · 쪽 3')).toBeInTheDocument()
+    expect(screen.getByText(/문장입니다/)).toBeInTheDocument()
   })
 
   it('uses explicit keyboard actions for revealing and opening files', async () => {

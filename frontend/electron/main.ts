@@ -129,6 +129,7 @@ type UpdateInstallResult = {
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let quickSearchWindow: BrowserWindow | null = null
+let quickSearchWindowCreatePromise: Promise<BrowserWindow> | null = null
 let tray: Tray | null = null
 let backendProcess: ChildProcess | null = null
 const expectedBackendExits = new WeakSet<ChildProcess>()
@@ -144,6 +145,8 @@ let cachedUpdateCheck: UpdateCheckResult | null = null
 let updateDownloadInProgress = false
 let registeredQuickSearchAccelerator: string | null = null
 let quickSearchRegistrationError: string | undefined
+let quickSearchPrewarmScheduled = false
+let quickSearchFocusDismissalInstalled = false
 
 app.setName('OfficeWhere')
 
@@ -194,11 +197,13 @@ if (!hasSingleInstanceLock) {
 async function startApp() {
   app.setAppLogsPath(path.join(app.getPath('userData'), 'logs'))
   registerIpcHandlers()
+  installQuickSearchFocusDismissal()
   createSplashWindow()
   ensureTray()
   await startBackendWithRetry()
   registerQuickSearchShortcut()
   await createMainWindow()
+  scheduleQuickSearchPrewarm()
 }
 
 function registerIpcHandlers() {
@@ -745,62 +750,71 @@ async function createMainWindow(query?: Record<string, string>) {
 
 async function createQuickSearchWindow() {
   if (quickSearchWindow && !quickSearchWindow.isDestroyed()) return quickSearchWindow
+  if (quickSearchWindowCreatePromise) return quickSearchWindowCreatePromise
 
-  quickSearchWindow = new BrowserWindow({
-    width: 780,
-    height: 580,
-    minWidth: 680,
-    minHeight: 420,
-    maxWidth: 920,
-    maxHeight: 720,
-    resizable: false,
-    movable: true,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    frame: false,
-    show: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    transparent: true,
-    backgroundColor: '#00000000',
-    title: 'OfficeWhere 빠른 검색',
-    icon: getAppIconPath(),
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  })
+  quickSearchWindowCreatePromise = (async () => {
+    quickSearchWindow = new BrowserWindow({
+      width: 920,
+      height: 560,
+      minWidth: 780,
+      minHeight: 360,
+      maxWidth: 1120,
+      maxHeight: 700,
+      resizable: false,
+      movable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      frame: false,
+      show: false,
+      skipTaskbar: true,
+      alwaysOnTop: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      title: 'OfficeWhere 빠른 검색',
+      icon: getAppIconPath(),
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    })
 
-  quickSearchWindow.removeMenu()
-  quickSearchWindow.setMenuBarVisibility(false)
-  quickSearchWindow.on('close', (event) => {
-    if (isQuitting || appDataCleanupInProgress) return
-    event.preventDefault()
-    quickSearchWindow?.hide()
-  })
-  quickSearchWindow.on('closed', () => {
-    quickSearchWindow = null
-  })
-  quickSearchWindow.on('blur', () => {
-    setTimeout(() => {
-      if (quickSearchWindow && !quickSearchWindow.isDestroyed() && !quickSearchWindow.isFocused()) {
-        quickSearchWindow.hide()
+    quickSearchWindow.removeMenu()
+    quickSearchWindow.setMenuBarVisibility(false)
+    quickSearchWindow.on('close', (event) => {
+      if (isQuitting || appDataCleanupInProgress) return
+      event.preventDefault()
+      hideQuickSearchWindow()
+    })
+    quickSearchWindow.on('closed', () => {
+      quickSearchWindow = null
+    })
+    quickSearchWindow.on('blur', () => {
+      setTimeout(() => {
+        if (quickSearchWindow && !quickSearchWindow.isDestroyed() && !quickSearchWindow.isFocused()) {
+          hideQuickSearchWindow()
+        }
+      }, 24)
+    })
+    quickSearchWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (isAllowedExternalUrl(url)) {
+        void shell.openExternal(url)
       }
-    }, 140)
-  })
-  quickSearchWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAllowedExternalUrl(url)) {
-      void shell.openExternal(url)
-    }
-    return { action: 'deny' }
-  })
+      return { action: 'deny' }
+    })
 
-  await loadRendererWindow(quickSearchWindow, { quickSearch: '1' })
-  return quickSearchWindow
+    await loadRendererWindow(quickSearchWindow, { quickSearch: '1' })
+    return quickSearchWindow
+  })()
+
+  try {
+    return await quickSearchWindowCreatePromise
+  } finally {
+    quickSearchWindowCreatePromise = null
+  }
 }
 
 function createSplashWindow() {
@@ -1153,21 +1167,21 @@ function setCloseBehavior(payload: unknown): CloseBehavior {
 
 function formatAcceleratorForDisplay(accelerator: string): string {
   const keySymbol: Record<string, string> = {
-    CommandOrControl: process.platform === 'darwin' ? '⌘' : 'Ctrl',
-    Command: '⌘',
-    Cmd: '⌘',
+    CommandOrControl: process.platform === 'darwin' ? 'Cmd' : 'Ctrl',
+    Command: 'Cmd',
+    Cmd: 'Cmd',
     Control: 'Ctrl',
     Ctrl: 'Ctrl',
-    Alt: process.platform === 'darwin' ? '⌥' : 'Alt',
-    Option: '⌥',
-    Shift: '⇧',
-    Super: process.platform === 'darwin' ? '⌘' : 'Super',
+    Alt: 'Alt',
+    Option: 'Alt',
+    Shift: 'Shift',
+    Super: process.platform === 'darwin' ? 'Cmd' : 'Super',
     Space: 'Space',
   }
   return accelerator
     .split('+')
     .map((part) => keySymbol[part] ?? part)
-    .join(process.platform === 'darwin' ? '' : ' + ')
+    .join(' + ')
 }
 
 function quickSearchSupported(): boolean {
@@ -1262,7 +1276,9 @@ function setQuickSearchSettings(payload: unknown): QuickSearchStatus {
     ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
   })
   writeSettings({ quickSearch: next })
-  return registerQuickSearchShortcut()
+  const status = registerQuickSearchShortcut()
+  if (status.supported && status.enabled) scheduleQuickSearchPrewarm()
+  return status
 }
 
 function startupSettingsSupported(): boolean {
@@ -1371,11 +1387,34 @@ function ensureTray() {
 
 function positionQuickSearchWindow(window: BrowserWindow) {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  const width = 780
-  const height = 580
+  const width = 920
+  const height = 560
   const x = Math.round(display.workArea.x + (display.workArea.width - width) / 2)
   const y = Math.round(display.workArea.y + Math.max(48, display.workArea.height * 0.14))
   window.setBounds({ x, y, width, height }, false)
+}
+
+function installQuickSearchFocusDismissal() {
+  if (quickSearchFocusDismissalInstalled) return
+  quickSearchFocusDismissalInstalled = true
+  app.on('browser-window-focus', (_event, focusedWindow) => {
+    if (!quickSearchWindow || quickSearchWindow.isDestroyed() || !quickSearchWindow.isVisible()) return
+    if (!focusedWindow || focusedWindow.id === quickSearchWindow.id) return
+    hideQuickSearchWindow()
+  })
+}
+
+function scheduleQuickSearchPrewarm() {
+  if (quickSearchPrewarmScheduled || isQuitting || appDataCleanupInProgress) return
+  const settings = readQuickSearchSettings()
+  if (!quickSearchSupported() || !settings.enabled) return
+  quickSearchPrewarmScheduled = true
+  setTimeout(() => {
+    if (isQuitting || appDataCleanupInProgress) return
+    void createQuickSearchWindow().catch(() => {
+      quickSearchPrewarmScheduled = false
+    })
+  }, 650)
 }
 
 async function showQuickSearchWindow() {
@@ -1386,6 +1425,10 @@ async function showQuickSearchWindow() {
   window.setAlwaysOnTop(true, 'pop-up-menu')
   window.show()
   window.focus()
+  setTimeout(() => {
+    if (window.isDestroyed() || !window.isVisible()) return
+    window.setAlwaysOnTop(false)
+  }, 30)
   window.webContents.send('quick-search:opened', {
     displayShortcut: readQuickSearchStatus().displayShortcut,
   })
@@ -1393,13 +1436,14 @@ async function showQuickSearchWindow() {
 
 function hideQuickSearchWindow() {
   if (quickSearchWindow && !quickSearchWindow.isDestroyed()) {
+    quickSearchWindow.setAlwaysOnTop(false)
     quickSearchWindow.hide()
   }
 }
 
 async function toggleQuickSearchWindow(forceOpen = false) {
   if (!forceOpen && quickSearchWindow && !quickSearchWindow.isDestroyed() && quickSearchWindow.isVisible()) {
-    quickSearchWindow.hide()
+    hideQuickSearchWindow()
     return
   }
   await showQuickSearchWindow()

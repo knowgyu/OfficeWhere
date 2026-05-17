@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { api, getOfficeWhereBridge, type QuickSearchSettings, type SearchResult } from '../api/client'
 import { Button, FileTypeBadge, Icon } from '../ui'
 
-const SEARCH_DEBOUNCE_MS = 220
+const SEARCH_DEBOUNCE_MS = 140
 const SEARCH_LIMIT = 36
 const SEARCH_FILE_LIMIT = 10
 
@@ -133,6 +133,12 @@ export default function QuickSearchPalette() {
       if (displayShortcut) {
         setSettings((current) => ({ ...current, displayShortcut }))
       }
+      setQuery('')
+      setDocuments([])
+      setSearched(false)
+      setError('')
+      setSelectedIndex(0)
+      setExpandedFileId(null)
       window.setTimeout(() => {
         inputRef.current?.focus()
         inputRef.current?.select()
@@ -141,6 +147,16 @@ export default function QuickSearchPalette() {
     window.setTimeout(() => inputRef.current?.focus(), 0)
     return () => unsubscribe?.()
   }, [])
+
+  useEffect(() => {
+    const onGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      closePalette()
+    }
+    window.addEventListener('keydown', onGlobalKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onGlobalKeyDown, { capture: true })
+  }, [closePalette])
 
   useEffect(() => {
     const requestId = requestSeq.current + 1
@@ -171,7 +187,7 @@ export default function QuickSearchPalette() {
           const grouped = groupResults(response.data.results)
           setDocuments(grouped)
           setSelectedIndex(0)
-          setExpandedFileId(grouped[0]?.fileId ?? null)
+          setExpandedFileId(null)
           setSearched(true)
         })
         .catch(() => {
@@ -230,16 +246,19 @@ export default function QuickSearchPalette() {
 
   return (
     <div
-      className="h-screen w-screen overflow-hidden bg-transparent px-3 py-3 text-[var(--md-sys-color-on-surface)]"
+      className="h-screen w-screen overflow-hidden bg-transparent px-2.5 py-2.5 text-[var(--md-sys-color-on-surface)]"
       onKeyDown={handleKeyDown}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) closePalette()
+      }}
     >
       <section
-        className={`quick-search-shell flex flex-col overflow-hidden rounded-[1.45rem] border border-[color-mix(in_srgb,var(--md-sys-color-outline-variant)_80%,transparent)] bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-lowest)_94%,transparent)] shadow-[0_30px_80px_rgba(0,0,0,0.28),0_1px_0_var(--ow-inset-highlight)_inset] backdrop-blur-2xl ${
+        className={`quick-search-shell flex flex-col overflow-hidden rounded-[1.25rem] border border-[color-mix(in_srgb,var(--md-sys-color-outline-variant)_80%,transparent)] bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-lowest)_94%,transparent)] shadow-[0_30px_80px_rgba(0,0,0,0.28),0_1px_0_var(--ow-inset-highlight)_inset] backdrop-blur-2xl ${
           trimmedQuery ? 'h-full' : 'h-auto'
         }`}
       >
         <header
-          className={`bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-low)_78%,transparent)] px-4 py-3 ${
+          className={`bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-low)_78%,transparent)] px-4 py-2.5 ${
             compactIdle ? '' : 'border-b border-[var(--md-sys-color-outline-variant)]/80'
           }`}
         >
@@ -250,7 +269,7 @@ export default function QuickSearchPalette() {
               value={query}
               onChange={(event) => setQuery(event.currentTarget.value)}
               placeholder="문서, 파일명, 본문 검색..."
-              className="h-12 min-w-0 flex-1 bg-transparent text-[1.35rem] font-semibold tracking-[-0.025em] text-[var(--md-sys-color-on-surface)] outline-none placeholder:text-[var(--md-sys-color-on-surface-variant)]"
+              className="h-11 min-w-0 flex-1 bg-transparent text-[1.28rem] font-semibold tracking-[-0.025em] text-[var(--md-sys-color-on-surface)] outline-none placeholder:text-[var(--md-sys-color-on-surface-variant)]"
               aria-label="빠른 문서 검색"
             />
             {trimmedQuery && (
@@ -266,7 +285,7 @@ export default function QuickSearchPalette() {
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--md-sys-color-primary)]" />
                 {statusText}
               </span>
-              <span>↑↓ 이동 · Enter 상세 · Ctrl/⌘ Enter 위치 · Shift Enter 열기</span>
+              <span>↑↓ 이동 · Enter 상세 · Ctrl/Cmd Enter 위치 · Shift Enter 열기</span>
             </div>
           )}
         </header>
@@ -293,66 +312,73 @@ export default function QuickSearchPalette() {
             )}
 
             {trimmedQuery && documents.length > 0 && (
-              <ul className="space-y-2">
+              <ul className="space-y-1.5" role="listbox" aria-label="빠른 검색 결과">
                 {documents.map((document, index) => {
                   const selected = index === selectedIndex
                   const expanded = expandedFileId === document.fileId
-                  const firstSnippet = document.snippets[0]
                   return (
                     <li key={document.fileId}>
-                    <button
-                      type="button"
+                    <div
                       onMouseEnter={() => setSelectedIndex(index)}
-                      onClick={() => setExpandedFileId((current) => (current === document.fileId ? null : document.fileId))}
-                      className={`state-host relative w-full rounded-2xl border p-3 text-left transition-all ${
+                      className={`group relative flex items-center gap-2 rounded-2xl border p-2.5 transition-all ${
                         selected
-                          ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/36 shadow-elev-2'
+                          ? 'border-[var(--md-sys-color-primary)] bg-[var(--md-sys-color-primary-container)]/34 shadow-elev-2'
                           : 'border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] hover:bg-[var(--md-sys-color-surface-container-high)]'
                       }`}
+                      role="option"
+                      aria-selected={selected}
                     >
-                      <span className="state-layer" />
-                      <span className="relative flex items-start gap-3">
-                        <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--md-sys-color-surface-container-lowest)] text-[var(--md-sys-color-primary)] shadow-[0_1px_0_var(--ow-inset-highlight)_inset]">
-                          <Icon name={fileIcon(document.fileType)} size={22} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-2">
-                            <span className="truncate type-title-sm text-[var(--md-sys-color-on-surface)]">
-                              {document.name}
-                            </span>
-                            <FileTypeBadge fileType={document.fileType} />
+                      <button
+                        type="button"
+                        onClick={() => setSelectedIndex(index)}
+                        className="state-host relative min-w-0 flex-1 rounded-xl text-left outline-none"
+                        aria-label={`${document.name} 선택`}
+                      >
+                        <span className="state-layer rounded-xl" />
+                        <span className="relative flex items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--md-sys-color-surface-container-lowest)] text-[var(--md-sys-color-primary)] shadow-[0_1px_0_var(--ow-inset-highlight)_inset]">
+                            <Icon name={fileIcon(document.fileType)} size={21} />
                           </span>
-                          <span className="mt-1 flex flex-wrap items-center gap-2 type-label-md text-[var(--md-sys-color-on-surface-variant)]">
-                            <span className="truncate">{shortFolder(document.path)}</span>
-                            <span>·</span>
-                            <span>{document.snippets.length}개 일치</span>
-                            {firstSnippet && (
-                              <>
-                                <span>·</span>
-                                <span>{firstSnippet.location}</span>
-                              </>
-                            )}
-                          </span>
-                          {firstSnippet && (
-                            <span className="mt-2 block line-clamp-2 type-body-sm text-[var(--md-sys-color-on-surface)]">
-                              {highlightedParts(firstSnippet.snippet)}
+                          <span className="min-w-0 flex-1">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="truncate type-title-sm text-[var(--md-sys-color-on-surface)]">
+                                {document.name}
+                              </span>
+                              <FileTypeBadge fileType={document.fileType} />
                             </span>
-                          )}
+                            <span className="mt-0.5 block truncate type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                              {shortFolder(document.path)}
+                            </span>
+                          </span>
                         </span>
-                        <Icon
-                          name={expanded ? 'keyboard_arrow_up' : 'keyboard_arrow_down'}
-                          size={20}
-                          className="mt-2 shrink-0 text-[var(--md-sys-color-on-surface-variant)]"
-                        />
-                      </span>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedIndex(index)
+                          setExpandedFileId((current) => (current === document.fileId ? null : document.fileId))
+                        }}
+                        className="state-host relative inline-flex h-9 shrink-0 items-center gap-1 rounded-full border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] px-2.5 type-label-md text-[var(--md-sys-color-on-surface-variant)] transition-colors hover:bg-[var(--md-sys-color-surface-container-high)]"
+                        aria-expanded={expanded}
+                        aria-label={`${document.name} 상세 ${expanded ? '닫기' : '보기'}`}
+                      >
+                        <span className="state-layer rounded-full" />
+                        <span className="relative hidden sm:inline">상세</span>
+                        <Icon name={expanded ? 'keyboard_arrow_up' : 'keyboard_arrow_down'} size={18} className="relative" />
+                      </button>
+                    </div>
 
                     {expanded && (
                       <div className="mx-2 -mt-1 rounded-b-2xl border-x border-b border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-lowest)] p-3 shadow-[0_1px_0_var(--ow-inset-highlight)_inset]">
                         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                          <p className="min-w-0 truncate font-mono text-[0.72rem] text-[var(--md-sys-color-on-surface-variant)]">
-                            {document.path}
-                          </p>
+                          <div className="min-w-0">
+                            <p className="type-label-md text-[var(--md-sys-color-primary)]">
+                              {document.snippets.length}개 일치 · {document.locations.slice(0, 2).join(', ')}
+                            </p>
+                            <p className="mt-0.5 truncate font-mono text-[0.72rem] text-[var(--md-sys-color-on-surface-variant)]">
+                              {document.path}
+                            </p>
+                          </div>
                           <div className="flex items-center gap-2">
                             <Button variant="text" size="sm" leadingIcon="open_in_new" onClick={() => void openOriginalFile(document)}>
                               파일 열기
@@ -389,7 +415,7 @@ export default function QuickSearchPalette() {
         )}
 
         {trimmedQuery && (
-          <footer className="flex items-center justify-between gap-3 border-t border-[var(--md-sys-color-outline-variant)]/80 bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-low)_76%,transparent)] px-4 py-2.5">
+          <footer className="flex items-center justify-between gap-3 border-t border-[var(--md-sys-color-outline-variant)]/80 bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-low)_76%,transparent)] px-4 py-2">
             <div className="flex items-center gap-1.5 type-label-md text-[var(--md-sys-color-on-surface-variant)]">
               <span className="kbd-token">Esc</span>
               닫기
