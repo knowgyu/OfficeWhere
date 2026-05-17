@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, renderWithProviders, screen, waitFor, within } from '../test/utils'
+import { act, fireEvent, renderWithProviders, screen, waitFor, within } from '../test/utils'
+import { installBridge } from '../test/bridge'
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -26,7 +27,7 @@ vi.mock('../api/client', async () => {
   }
 })
 
-import { api, type SearchResponse } from '../api/client'
+import { api, type QuickSearchSettings, type SearchResponse } from '../api/client'
 import QuickSearchPalette from './QuickSearchPalette'
 
 const mockedSearchQuery = vi.mocked(api.search.query)
@@ -262,5 +263,56 @@ describe('QuickSearchPalette', () => {
     fireEvent.click(within(panel).getByRole('button', { name: /경로 복사/ }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('/work/contracts/계약서.pdf'))
     expect(screen.queryByRole('dialog', { name: '문서 작업' })).not.toBeInTheDocument()
+  })
+
+  it('keeps open fast by focusing only, then prepares clean state while hidden', async () => {
+    let openedHandler: ((payload?: Partial<QuickSearchSettings>) => void) | undefined
+    let prepareHandler: ((payload?: Partial<QuickSearchSettings>) => void) | undefined
+    installBridge({
+      onQuickSearchOpened: vi.fn((callback) => {
+        openedHandler = callback
+        return () => undefined
+      }),
+      onQuickSearchPrepare: vi.fn((callback) => {
+        prepareHandler = callback
+        return () => undefined
+      }),
+    })
+    mockedSearchQuery.mockResolvedValue({
+      data: searchResponse([
+        {
+          file_id: 21,
+          name: '빠른검색_계약서.pdf',
+          path: '/work/contracts/빠른검색_계약서.pdf',
+          file_type: 'PDF',
+          location: '쪽 1',
+          snippet: '**계약서** 본문입니다.',
+        },
+      ]),
+    })
+
+    renderWithProviders(<QuickSearchPalette />, { withLibraryRescan: false })
+    const input = screen.getByLabelText('빠른 문서 검색')
+    fireEvent.change(input, { target: { value: '계약서' } })
+    await screen.findByText('빠른검색_계약서.pdf')
+
+    act(() => openedHandler?.())
+
+    expect(input).toHaveValue('계약서')
+    expect(screen.getByText('빠른검색_계약서.pdf')).toBeInTheDocument()
+
+    act(() =>
+      prepareHandler?.({
+        supported: true,
+        enabled: true,
+        showRecent: false,
+        accelerator: 'CommandOrControl+Alt+G',
+        displayShortcut: 'Ctrl + Alt + G',
+        registered: true,
+      }),
+    )
+
+    expect(input).toHaveValue('')
+    expect(screen.queryByText('빠른검색_계약서.pdf')).not.toBeInTheDocument()
   })
 })

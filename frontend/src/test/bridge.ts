@@ -58,6 +58,8 @@ export function installBridge(overrides: Partial<OfficeWhereBridge> = {}): Offic
     hideQuickSearch: vi.fn().mockResolvedValue(undefined),
     openMainSearch: vi.fn().mockResolvedValue(undefined),
     onQuickSearchOpened: vi.fn().mockReturnValue(() => undefined),
+    onQuickSearchPrepare: vi.fn().mockReturnValue(() => undefined),
+    onQuickSearchSettingsChanged: vi.fn().mockReturnValue(() => undefined),
     onOpenSearch: vi.fn().mockReturnValue(() => undefined),
     getStartupSettings: vi.fn().mockResolvedValue({
       supported: false,

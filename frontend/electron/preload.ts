@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 
+type QuickSearchStatusPayload = {
+  supported?: boolean
+  enabled?: boolean
+  showRecent?: boolean
+  accelerator?: string
+  displayShortcut?: string
+  registered?: boolean
+  reason?: string
+}
+
 const officeWhereBridge = {
   getBackendBaseUrl: () => ipcRenderer.invoke('app:get-backend-base-url'),
   pickFile: () => ipcRenderer.invoke('dialog:pick-file'),
@@ -19,10 +29,20 @@ const officeWhereBridge = {
   showQuickSearch: () => ipcRenderer.invoke('app:show-quick-search'),
   hideQuickSearch: () => ipcRenderer.invoke('app:hide-quick-search'),
   openMainSearch: (query: string) => ipcRenderer.invoke('app:open-main-search', { query }),
-  onQuickSearchOpened: (callback: (payload: { displayShortcut?: string }) => void) => {
-    const listener = (_event: IpcRendererEvent, payload: { displayShortcut?: string }) => callback(payload)
+  onQuickSearchOpened: (callback: (payload?: QuickSearchStatusPayload) => void) => {
+    const listener = (_event: IpcRendererEvent, payload?: QuickSearchStatusPayload) => callback(payload)
     ipcRenderer.on('quick-search:opened', listener)
     return () => ipcRenderer.removeListener('quick-search:opened', listener)
+  },
+  onQuickSearchPrepare: (callback: (payload?: QuickSearchStatusPayload) => void) => {
+    const listener = (_event: IpcRendererEvent, payload?: QuickSearchStatusPayload) => callback(payload)
+    ipcRenderer.on('quick-search:prepare', listener)
+    return () => ipcRenderer.removeListener('quick-search:prepare', listener)
+  },
+  onQuickSearchSettingsChanged: (callback: (payload: QuickSearchStatusPayload) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: QuickSearchStatusPayload) => callback(payload)
+    ipcRenderer.on('quick-search:settings-changed', listener)
+    return () => ipcRenderer.removeListener('quick-search:settings-changed', listener)
   },
   onOpenSearch: (callback: (payload: { query?: string }) => void) => {
     const listener = (_event: IpcRendererEvent, payload: { query?: string }) => callback(payload)

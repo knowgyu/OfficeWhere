@@ -118,7 +118,9 @@ declare global {
     showQuickSearch?: () => Promise<void>
     hideQuickSearch?: () => Promise<void>
     openMainSearch?: (query: string) => Promise<void>
-    onQuickSearchOpened?: (callback: (payload: { displayShortcut?: string }) => void) => () => void
+    onQuickSearchOpened?: (callback: (payload?: Partial<QuickSearchSettings>) => void) => () => void
+    onQuickSearchPrepare?: (callback: (payload?: Partial<QuickSearchSettings>) => void) => () => void
+    onQuickSearchSettingsChanged?: (callback: (payload: QuickSearchSettings) => void) => () => void
     onOpenSearch?: (callback: (payload: { query?: string }) => void) => () => void
     getStartupSettings?: () => Promise<AppStartupSettings>
     setStartupSettings?: (enabled: boolean) => Promise<AppStartupSettings>

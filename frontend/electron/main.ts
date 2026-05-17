@@ -146,8 +146,10 @@ let cachedUpdateCheck: UpdateCheckResult | null = null
 let updateDownloadInProgress = false
 let registeredQuickSearchAccelerator: string | null = null
 let quickSearchRegistrationError: string | undefined
-let quickSearchPrewarmScheduled = false
+let quickSearchPrewarmTimer: ReturnType<typeof setTimeout> | null = null
 let quickSearchFocusDismissalInstalled = false
+let cachedAppSettings: AppSettings | null = null
+let cachedQuickSearchStatus: QuickSearchStatus | null = null
 
 app.setName('OfficeWhere')
 
@@ -237,6 +239,8 @@ function registerIpcHandlers() {
     ipcMain.handle('e2e:reset-caches', () => {
       cachedUpdateCheck = null
       updateDownloadInProgress = false
+      cachedAppSettings = null
+      cachedQuickSearchStatus = null
     })
   }
 }
@@ -808,6 +812,7 @@ async function createQuickSearchWindow() {
     })
 
     await loadRendererWindow(quickSearchWindow, { quickSearch: '1' })
+    setQuickSearchFocusable(quickSearchWindow, false)
     return quickSearchWindow
   })()
 
@@ -1126,28 +1131,34 @@ function normalizeQuickSearchSettings(value: unknown): QuickSearchSettings {
 }
 
 function readSettings(): AppSettings {
+  if (cachedAppSettings) return cachedAppSettings
+
   try {
     const raw = fs.readFileSync(settingsPath(), 'utf-8')
     const parsed = JSON.parse(raw) as Record<string, unknown>
-    return {
+    cachedAppSettings = {
       closeBehavior: isCloseBehavior(parsed.closeBehavior) ? parsed.closeBehavior : undefined,
       quickSearch: normalizeQuickSearchSettings(parsed.quickSearch),
     }
+    return cachedAppSettings
   } catch {
-    return { quickSearch: DEFAULT_QUICK_SEARCH_SETTINGS }
+    cachedAppSettings = { quickSearch: DEFAULT_QUICK_SEARCH_SETTINGS }
+    return cachedAppSettings
   }
 }
 
 function writeSettings(patch: AppSettings) {
-  const next = { ...readSettings(), ...patch }
+  const current = readSettings()
+  const next = { ...current, ...patch }
   if (patch.quickSearch) {
     next.quickSearch = {
-      ...normalizeQuickSearchSettings(readSettings().quickSearch),
+      ...normalizeQuickSearchSettings(current.quickSearch),
       ...patch.quickSearch,
     }
   }
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true })
   fs.writeFileSync(settingsPath(), JSON.stringify(next, null, 2), 'utf-8')
+  cachedAppSettings = next
 }
 
 function readCloseBehavior(): CloseBehavior {
@@ -1193,8 +1204,7 @@ function readQuickSearchSettings(): QuickSearchSettings {
   return normalizeQuickSearchSettings(readSettings().quickSearch)
 }
 
-function readQuickSearchStatus(): QuickSearchStatus {
-  const settings = readQuickSearchSettings()
+function computeQuickSearchStatus(settings = readQuickSearchSettings()): QuickSearchStatus {
   const supported = quickSearchSupported()
   const registered = Boolean(
     supported &&
@@ -1217,11 +1227,24 @@ function readQuickSearchStatus(): QuickSearchStatus {
   }
 }
 
+function refreshQuickSearchStatus(settings?: QuickSearchSettings): QuickSearchStatus {
+  cachedQuickSearchStatus = computeQuickSearchStatus(settings)
+  return cachedQuickSearchStatus
+}
+
+function readQuickSearchStatus(): QuickSearchStatus {
+  return refreshQuickSearchStatus()
+}
+
+function getCachedQuickSearchStatus(): QuickSearchStatus {
+  return cachedQuickSearchStatus ?? refreshQuickSearchStatus()
+}
+
 function registerQuickSearchShortcut(): QuickSearchStatus {
   unregisterQuickSearchShortcut()
   quickSearchRegistrationError = undefined
   const settings = readQuickSearchSettings()
-  if (!quickSearchSupported() || !settings.enabled) return readQuickSearchStatus()
+  if (!quickSearchSupported() || !settings.enabled) return refreshQuickSearchStatus(settings)
 
   try {
     const ok = globalShortcut.register(settings.accelerator, () => {
@@ -1238,7 +1261,7 @@ function registerQuickSearchShortcut(): QuickSearchStatus {
     quickSearchRegistrationError = error instanceof Error ? error.message : '단축키 등록 중 알 수 없는 오류가 발생했습니다.'
   }
 
-  return readQuickSearchStatus()
+  return refreshQuickSearchStatus(settings)
 }
 
 function unregisterQuickSearchShortcut(): void {
@@ -1278,7 +1301,13 @@ function setQuickSearchSettings(payload: unknown): QuickSearchStatus {
   })
   writeSettings({ quickSearch: next })
   const status = registerQuickSearchShortcut()
-  if (status.supported && status.enabled) scheduleQuickSearchPrewarm()
+  emitQuickSearchSettings(status)
+  if (status.supported && status.enabled) {
+    scheduleQuickSearchPrewarm(80)
+  } else {
+    clearQuickSearchPrewarmTimer()
+    hideQuickSearchWindow()
+  }
   return status
 }
 
@@ -1434,17 +1463,51 @@ function installQuickSearchFocusDismissal() {
   })
 }
 
-function scheduleQuickSearchPrewarm() {
-  if (quickSearchPrewarmScheduled || isQuitting || appDataCleanupInProgress) return
-  const settings = readQuickSearchSettings()
-  if (!quickSearchSupported() || !settings.enabled) return
-  quickSearchPrewarmScheduled = true
-  setTimeout(() => {
+function clearQuickSearchPrewarmTimer() {
+  if (!quickSearchPrewarmTimer) return
+  clearTimeout(quickSearchPrewarmTimer)
+  quickSearchPrewarmTimer = null
+}
+
+function emitQuickSearchSettings(status = getCachedQuickSearchStatus()) {
+  if (!quickSearchWindow || quickSearchWindow.isDestroyed()) return
+  quickSearchWindow.webContents.send('quick-search:settings-changed', status)
+}
+
+function prepareQuickSearchWindow(status = getCachedQuickSearchStatus()) {
+  if (!quickSearchWindow || quickSearchWindow.isDestroyed()) return
+  quickSearchWindow.webContents.send('quick-search:prepare', status)
+}
+
+function scheduleQuickSearchPrewarm(delayMs = 160) {
+  if (
+    quickSearchPrewarmTimer ||
+    quickSearchWindowCreatePromise ||
+    (quickSearchWindow && !quickSearchWindow.isDestroyed()) ||
+    isQuitting ||
+    appDataCleanupInProgress
+  ) {
+    return
+  }
+  const status = getCachedQuickSearchStatus()
+  if (!status.supported || !status.enabled) return
+  quickSearchPrewarmTimer = setTimeout(() => {
+    quickSearchPrewarmTimer = null
     if (isQuitting || appDataCleanupInProgress) return
-    void createQuickSearchWindow().catch(() => {
-      quickSearchPrewarmScheduled = false
-    })
-  }, 650)
+    void createQuickSearchWindow()
+      .then((window) => {
+        if (window.isDestroyed()) return
+        if (window.isVisible()) return
+        setQuickSearchFocusable(window, false)
+        emitQuickSearchSettings()
+        setTimeout(() => {
+          if (!window.isDestroyed() && !window.isVisible()) prepareQuickSearchWindow()
+        }, 32)
+      })
+      .catch((error: unknown) => {
+        console.warn('Quick search prewarm failed', error)
+      })
+  }, delayMs)
 }
 
 async function showQuickSearchWindow() {
@@ -1454,9 +1517,7 @@ async function showQuickSearchWindow() {
   rememberQuickSearchReturnWindow(window)
   positionQuickSearchWindow(window)
   setQuickSearchFocusable(window, true)
-  window.webContents.send('quick-search:opened', {
-    displayShortcut: readQuickSearchStatus().displayShortcut,
-  })
+  window.webContents.send('quick-search:opened')
   window.setAlwaysOnTop(true, 'pop-up-menu')
   window.show()
   window.focus()
@@ -1473,6 +1534,11 @@ function hideQuickSearchWindow() {
     quickSearchWindow.blur()
     setQuickSearchFocusable(quickSearchWindow, false)
     restoreQuickSearchReturnFocus()
+    setTimeout(() => {
+      if (isQuitting || appDataCleanupInProgress) return
+      if (!quickSearchWindow || quickSearchWindow.isDestroyed() || quickSearchWindow.isVisible()) return
+      prepareQuickSearchWindow()
+    }, 0)
   }
 }
 
@@ -1485,10 +1551,12 @@ async function toggleQuickSearchWindow(forceOpen = false) {
 }
 
 function destroyQuickSearchWindow() {
+  clearQuickSearchPrewarmTimer()
   if (quickSearchWindow && !quickSearchWindow.isDestroyed()) {
     quickSearchWindow.destroy()
   }
   quickSearchWindow = null
+  quickSearchWindowCreatePromise = null
 }
 
 function showMainWindow() {

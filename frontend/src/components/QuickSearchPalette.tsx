@@ -285,6 +285,35 @@ export default function QuickSearchPalette() {
     void action.run()
   }, [])
 
+  const applyQuickSearchSettings = useCallback((nextSettings?: Partial<QuickSearchSettings>) => {
+    if (!nextSettings) return
+    setSettings((current) => ({ ...current, ...nextSettings }))
+  }, [])
+
+  const prepareHiddenPalette = useCallback(
+    (nextSettings?: Partial<QuickSearchSettings>) => {
+      applyQuickSearchSettings(nextSettings)
+      requestSeq.current += 1
+      setQuery('')
+      setDocuments([])
+      setLoading(false)
+      setSearched(false)
+      setError('')
+      setSelectedIndex(0)
+      setExpandedFileId(null)
+      setActionPanelOpen(false)
+      setSelectedActionIndex(0)
+    },
+    [applyQuickSearchSettings],
+  )
+
+  const focusPaletteInput = useCallback(() => {
+    window.setTimeout(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }, 0)
+  }, [])
+
   useEffect(() => {
     document.documentElement.dataset.window = 'quick-search'
     return () => {
@@ -294,27 +323,24 @@ export default function QuickSearchPalette() {
 
   useEffect(() => {
     void api.app.getQuickSearchSettings().then((response) => setSettings(response.data))
-    const unsubscribe = getOfficeWhereBridge()?.onQuickSearchOpened?.((payload) => {
-      const displayShortcut = payload.displayShortcut
-      if (displayShortcut) {
-        setSettings((current) => ({ ...current, displayShortcut }))
-      }
-      setQuery('')
-      setDocuments([])
-      setSearched(false)
-      setError('')
-      setSelectedIndex(0)
-      setExpandedFileId(null)
-      setActionPanelOpen(false)
-      setSelectedActionIndex(0)
-      window.setTimeout(() => {
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      }, 0)
+    const bridge = getOfficeWhereBridge()
+    const unsubscribeOpened = bridge?.onQuickSearchOpened?.((payload) => {
+      applyQuickSearchSettings(payload)
+      focusPaletteInput()
+    })
+    const unsubscribePrepare = bridge?.onQuickSearchPrepare?.((payload) => {
+      prepareHiddenPalette(payload)
+    })
+    const unsubscribeSettings = bridge?.onQuickSearchSettingsChanged?.((payload) => {
+      applyQuickSearchSettings(payload)
     })
     window.setTimeout(() => inputRef.current?.focus(), 0)
-    return () => unsubscribe?.()
-  }, [])
+    return () => {
+      unsubscribeOpened?.()
+      unsubscribePrepare?.()
+      unsubscribeSettings?.()
+    }
+  }, [applyQuickSearchSettings, focusPaletteInput, prepareHiddenPalette])
 
   useEffect(() => {
     actionPanelOpenRef.current = actionPanelOpen
