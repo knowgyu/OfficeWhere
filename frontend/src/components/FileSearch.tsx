@@ -68,6 +68,7 @@ const SEARCH_DEBOUNCE_MS = 600
 const INITIAL_SEARCH_FILE_LIMIT = 20
 const SEARCH_FILE_LIMIT_STEP = 20
 const MAX_SEARCH_FILE_LIMIT = 100
+const SEARCH_MATCHES_PER_FILE = 5
 const LANDING_DOCUMENT_PAGE_SIZE = 20
 
 type ModifiedDateFilter = 'all' | '7d' | '30d' | '90d' | 'custom'
@@ -76,12 +77,6 @@ interface SearchMeta {
   fileCount: number
   fileLimit: number
   hasMore: boolean
-}
-
-interface PrefetchedSearch {
-  key: string
-  fileLimit: number
-  data: SearchResponse
 }
 
 const MODIFIED_DATE_FILTERS: Array<{ label: string; value: ModifiedDateFilter }> = [
@@ -240,7 +235,6 @@ export default function FileSearch({
   })
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [prefetching, setPrefetching] = useState(false)
   const [initialDataLoading, setInitialDataLoading] = useState(false)
   const [initialDataLoadingMore, setInitialDataLoadingMore] = useState(false)
   const [initialFiles, setInitialFiles] = useState<FileInfo[]>([])
@@ -260,7 +254,6 @@ export default function FileSearch({
   const searchRequestSeq = useRef(0)
   const initialDataRequestSeq = useRef(0)
   const watchedFoldersRequestSeq = useRef(0)
-  const prefetchedSearchRef = useRef<PrefetchedSearch | null>(null)
   const tutorialSearchAdvanceRef = useRef<string | null>(null)
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
   const landingLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
@@ -287,25 +280,6 @@ export default function FileSearch({
     },
     [customModifiedFrom, customModifiedTo, modifiedDateFilter],
   )
-
-  const searchKey = (
-    q: string,
-    fileTypes: string[],
-    scope: SearchScope,
-    dateFilter: ModifiedDateFilter,
-    customFrom: string,
-    customTo: string,
-    excludedFolders: string[],
-  ) =>
-    JSON.stringify([
-      q.trim(),
-      [...fileTypes].sort(),
-      scope,
-      dateFilter,
-      customFrom,
-      customTo,
-      [...excludedFolders].map(normalizePathForFilter).sort(),
-    ])
 
   const applySearchResponse = (
     data: SearchResponse,
@@ -355,15 +329,10 @@ export default function FileSearch({
         contentMatchesDefaultExpandedRef.current = true
         setLoading(false)
         setLoadingMore(false)
-        setPrefetching(false)
-        prefetchedSearchRef.current = null
         return false
       }
       const nextFileLimit = Math.min(Math.max(fileLimit, INITIAL_SEARCH_FILE_LIMIT), MAX_SEARCH_FILE_LIMIT)
-      const baseKey = searchKey(q, fileTypes, scope, dateFilter, customFrom, customTo, excludedFolders)
-      const prefetched = prefetchedSearchRef.current
       if (mode === 'replace') {
-        prefetchedSearchRef.current = null
         contentMatchesDefaultExpandedRef.current = true
       }
       if (mode === 'more') {
@@ -373,52 +342,18 @@ export default function FileSearch({
       }
       try {
         const modifiedDateParams = buildModifiedDateParams(dateFilter, customFrom, customTo)
-        const response =
-          mode === 'more' && prefetched?.key === baseKey && prefetched.fileLimit === nextFileLimit
-            ? { data: prefetched.data }
-            : await api.search.query({
-                query: q,
-                limit: nextFileLimit * 4,
-                file_limit: nextFileLimit,
-                file_types: fileTypes.length > 0 ? fileTypes : undefined,
-                search_scope: scope,
-                excluded_folder_paths: excludedFolders.length > 0 ? excludedFolders : undefined,
-                ...modifiedDateParams,
-              })
+        const response = await api.search.query({
+          query: q,
+          limit: nextFileLimit * SEARCH_MATCHES_PER_FILE,
+          file_limit: nextFileLimit,
+          per_file_limit: SEARCH_MATCHES_PER_FILE,
+          file_types: fileTypes.length > 0 ? fileTypes : undefined,
+          search_scope: scope,
+          excluded_folder_paths: excludedFolders.length > 0 ? excludedFolders : undefined,
+          ...modifiedDateParams,
+        })
         if (requestId !== searchRequestSeq.current) return false
-        prefetchedSearchRef.current = null
-        const hasResults = applySearchResponse(response.data, nextFileLimit, mode === 'more')
-        const preloadFileLimit = Math.min(nextFileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
-        if (response.data.has_more && preloadFileLimit > nextFileLimit) {
-          setPrefetching(true)
-          void api.search
-            .query({
-              query: q,
-              limit: preloadFileLimit * 4,
-              file_limit: preloadFileLimit,
-              file_types: fileTypes.length > 0 ? fileTypes : undefined,
-              search_scope: scope,
-              excluded_folder_paths: excludedFolders.length > 0 ? excludedFolders : undefined,
-              ...modifiedDateParams,
-            })
-            .then((prefetchResponse) => {
-              if (requestId !== searchRequestSeq.current) return
-              prefetchedSearchRef.current = {
-                key: baseKey,
-                fileLimit: preloadFileLimit,
-                data: prefetchResponse.data,
-              }
-            })
-            .catch(() => {
-              if (requestId === searchRequestSeq.current) prefetchedSearchRef.current = null
-            })
-            .finally(() => {
-              if (requestId === searchRequestSeq.current) setPrefetching(false)
-            })
-        } else {
-          setPrefetching(false)
-        }
-        return hasResults
+        return applySearchResponse(response.data, nextFileLimit, mode === 'more')
       } catch {
         if (requestId !== searchRequestSeq.current) return false
         setResults([])
@@ -427,7 +362,6 @@ export default function FileSearch({
           fileLimit: INITIAL_SEARCH_FILE_LIMIT,
           hasMore: false,
         })
-        prefetchedSearchRef.current = null
         snackbar.error('검색에 실패했습니다.')
         return false
       } finally {
@@ -449,10 +383,19 @@ export default function FileSearch({
     ],
   )
 
+  const clearPendingSearch = () => {
+    if (!debounceRef.current) return
+    clearTimeout(debounceRef.current)
+    debounceRef.current = null
+  }
+
   const handleQueryChange = (value: string) => {
     setQuery(value)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => doSearch(value), SEARCH_DEBOUNCE_MS)
+    clearPendingSearch()
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void doSearch(value)
+    }, SEARCH_DEBOUNCE_MS)
   }
 
   const toggleFileType = (value: string) => {
@@ -461,6 +404,7 @@ export default function FileSearch({
       : [...selectedFileTypes, value]
     setSelectedFileTypes(next)
     if (query.trim()) {
+      clearPendingSearch()
       void doSearch(query, next, searchScope, modifiedDateFilter, customModifiedFrom, customModifiedTo)
     }
   }
@@ -468,6 +412,7 @@ export default function FileSearch({
   const handleSearchScopeChange = (next: SearchScope) => {
     setSearchScope(next)
     if (query.trim()) {
+      clearPendingSearch()
       void doSearch(query, selectedFileTypes, next, modifiedDateFilter, customModifiedFrom, customModifiedTo)
     }
   }
@@ -475,6 +420,7 @@ export default function FileSearch({
   const handleResetFileTypes = () => {
     setSelectedFileTypes([])
     if (query.trim()) {
+      clearPendingSearch()
       void doSearch(query, [], searchScope, modifiedDateFilter, customModifiedFrom, customModifiedTo)
     }
   }
@@ -482,6 +428,7 @@ export default function FileSearch({
   const handleModifiedDateFilterChange = (next: ModifiedDateFilter) => {
     setModifiedDateFilter(next)
     if (query.trim()) {
+      clearPendingSearch()
       void doSearch(query, selectedFileTypes, searchScope, next, customModifiedFrom, customModifiedTo)
     }
   }
@@ -489,6 +436,7 @@ export default function FileSearch({
   const handleCustomModifiedFromChange = (value: string) => {
     setCustomModifiedFrom(value)
     if (modifiedDateFilter === 'custom' && query.trim()) {
+      clearPendingSearch()
       void doSearch(query, selectedFileTypes, searchScope, 'custom', value, customModifiedTo)
     }
   }
@@ -496,6 +444,7 @@ export default function FileSearch({
   const handleCustomModifiedToChange = (value: string) => {
     setCustomModifiedTo(value)
     if (modifiedDateFilter === 'custom' && query.trim()) {
+      clearPendingSearch()
       void doSearch(query, selectedFileTypes, searchScope, 'custom', customModifiedFrom, value)
     }
   }
@@ -545,6 +494,7 @@ export default function FileSearch({
       snackbar.info(`이번 검색에서 "${shortPathLabel(folderPath)}" 폴더를 숨겼습니다.`)
     }
     if (query.trim()) {
+      clearPendingSearch()
       void doSearch(
         query,
         selectedFileTypes,
@@ -562,6 +512,7 @@ export default function FileSearch({
     const nextFolders = excludedFolderPaths.filter((path) => normalizePathForFilter(path) !== normalized)
     setExcludedFolderPaths(nextFolders)
     if (query.trim()) {
+      clearPendingSearch()
       void doSearch(
         query,
         selectedFileTypes,
@@ -751,10 +702,12 @@ export default function FileSearch({
     setExpandedContentFiles(new Set())
   }
 
-  const loadMoreFiles = () => {
+  const expandSearchFileWindow = () => {
     if (!searchMeta.hasMore || loadingMore || loading) return
     if (!query.trim()) return
-    const nextLimit = Math.min(searchMeta.fileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
+    // This is a bounded cumulative window, not cursor pagination: the backend
+    // returns the first N matching files again so grouping/order stay stable.
+    const nextCumulativeFileLimit = Math.min(searchMeta.fileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
     void doSearch(
       query,
       selectedFileTypes,
@@ -763,7 +716,7 @@ export default function FileSearch({
       customModifiedFrom,
       customModifiedTo,
       excludedFolderPaths,
-      nextLimit,
+      nextCumulativeFileLimit,
       'more',
     )
   }
@@ -782,7 +735,7 @@ export default function FileSearch({
       (entries) => {
         const [entry] = entries
         if (!entry?.isIntersecting) return
-        loadMoreFiles()
+        expandSearchFileWindow()
       },
       { rootMargin: '360px 0px' },
     )
@@ -886,8 +839,6 @@ export default function FileSearch({
                         contentMatchesDefaultExpandedRef.current = true
                         setLoading(false)
                         setLoadingMore(false)
-                        setPrefetching(false)
-                        prefetchedSearchRef.current = null
                       }}
                     />
                   ) : null
@@ -900,6 +851,7 @@ export default function FileSearch({
               variant="filled"
               leadingIcon="search"
               onClick={() => {
+                clearPendingSearch()
                 void doSearch(query, selectedFileTypes, searchScope).then((hasResults) => {
                   if (tutorialStep !== 'search') return
                   if (hasResults) {
@@ -1236,8 +1188,7 @@ export default function FileSearch({
               <Chip label={`임시 숨김 ${excludedFolderPaths.length}개`} tone="secondary" as="span" icon="visibility_off" />
             )}
             <span className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-              파일별로 묶어서 보여줍니다
-              {prefetching ? ' · 다음 결과 준비 중' : ''}
+              흔한 검색어도 먼저 찾은 파일부터 가볍게 보여줍니다
             </span>
             <div className="ml-auto flex gap-2 flex-wrap">
               {contentFileKeys.length > 0 && (
@@ -1372,10 +1323,13 @@ export default function FileSearch({
           {searchMeta.hasMore && (
             <div className="flex flex-col items-center gap-2 pt-2">
               <div ref={loadMoreSentinelRef} className="h-2 w-full" aria-hidden="true" />
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
+                결과가 더 있어요. 이전 결과를 포함한 더 넓은 파일 묶음으로 안정적으로 다시 불러옵니다.
+              </p>
               <Button
                 variant="tonal"
                 leadingIcon="expand_more"
-                onClick={loadMoreFiles}
+                onClick={expandSearchFileWindow}
                 loading={loadingMore}
                 disabled={loadingMore || loading}
               >

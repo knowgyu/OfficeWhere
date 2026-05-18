@@ -421,6 +421,7 @@ export interface SearchRequest {
   query: string
   limit?: number
   file_limit?: number
+  per_file_limit?: number
   file_types?: string[]
   search_scope?: SearchScope
   modified_from?: string

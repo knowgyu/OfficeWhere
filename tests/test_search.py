@@ -748,6 +748,82 @@ def test_search_api_caps_results_by_file_first(tmp_path):
     assert response.has_more is True
 
 
+def test_search_api_honors_per_file_limit_for_common_terms(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    for file_index in range(4):
+        file_id = register_file(
+            str(tmp_path / f'common-{file_index}.docx'),
+            f'common-{file_index}.docx',
+            'Word',
+            0,
+        )
+        save_file_chunks(
+            file_id,
+            [
+                {
+                    "location": f"문단 {chunk_index}",
+                    "content": f"프로젝트 공통키워드 반복 {file_index}-{chunk_index}",
+                }
+                for chunk_index in range(5)
+            ],
+        )
+        update_file_mtime(file_id, float(file_index))
+
+    response = search_files(
+        SearchRequest(query="공통키워드", search_scope="content", file_limit=3, per_file_limit=2)
+    )
+
+    counts_by_file: dict[int, int] = {}
+    for item in response.results:
+        counts_by_file[item.file_id] = counts_by_file.get(item.file_id, 0) + 1
+
+    assert response.file_limit == 3
+    assert response.file_count == 3
+    assert response.has_more is True
+    assert counts_by_file
+    assert all(count <= 2 for count in counts_by_file.values())
+
+
+def test_filename_content_search_allows_filename_row_plus_content_limit(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    named_id = register_file(
+        str(tmp_path / '공통키워드-title.docx'),
+        '공통키워드-title.docx',
+        'Word',
+        0,
+    )
+    save_file_chunks(
+        named_id,
+        [
+            {"location": f"문단 {index}", "content": f"본문 공통키워드 반복 {index}"}
+            for index in range(3)
+        ],
+    )
+
+    other_id = register_file(str(tmp_path / 'other.docx'), 'other.docx', 'Word', 0)
+    save_file_chunks(other_id, [{"location": "문단", "content": "본문 공통키워드 다른 파일"}])
+
+    update_file_mtime(named_id, 2.0)
+    update_file_mtime(other_id, 1.0)
+
+    response = search_files(
+        SearchRequest(query="공통키워드", search_scope="filename_content", file_limit=2, per_file_limit=1)
+    )
+
+    named_locations = [item.location for item in response.results if item.file_id == named_id]
+    named_content_locations = [location for location in named_locations if location != "파일명"]
+
+    assert response.file_count == 2
+    assert "파일명" in named_locations
+    assert len(named_content_locations) == 1
+
+
 def test_content_search_orders_files_by_recent_mtime_and_chunks_by_document_order(tmp_path):
     first_id = register_file(str(tmp_path / 'old.docx'), 'old.docx', 'Word', 0)
     second_id = register_file(str(tmp_path / 'new.docx'), 'new.docx', 'Word', 0)

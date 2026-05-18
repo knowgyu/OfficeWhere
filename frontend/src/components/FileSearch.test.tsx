@@ -299,7 +299,28 @@ describe('FileSearch', () => {
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
       await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalled())
-      expect(mockedSearchQuery.mock.calls[0]?.[0]?.query).toBe('회의')
+      expect(mockedSearchQuery.mock.calls[0]?.[0]).toMatchObject({
+        query: '회의',
+        limit: 100,
+        file_limit: 20,
+        per_file_limit: 5,
+      })
+    })
+
+    it('clicking 검색 cancels the pending debounced duplicate query', async () => {
+      vi.useFakeTimers()
+      mockedSearchQuery.mockResolvedValue({ data: emptyResponse('회의') })
+
+      renderInactiveFileSearch()
+      const input = screen.getByPlaceholderText(/파일 안의 단어를 검색/)
+      fireEvent.change(input, { target: { value: '회의' } })
+      fireEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(700)
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(1)
+
+      vi.useRealTimers()
     })
 
     it('the 검색 button is disabled when the query is empty', () => {
@@ -512,11 +533,13 @@ describe('FileSearch', () => {
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
       await waitFor(() => expect(screen.getByText('첫문서.docx')).toBeInTheDocument())
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(1)
       await waitFor(() => expect(latestObserver?.observe).toHaveBeenCalled())
       latestObserver?.trigger()
 
       await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
       expect(mockedSearchQuery.mock.calls[1]?.[0]?.file_limit).toBe(40)
+      expect(mockedSearchQuery.mock.calls[1]?.[0]?.per_file_limit).toBe(5)
 
       vi.unstubAllGlobals()
     })
@@ -573,13 +596,14 @@ describe('FileSearch', () => {
       await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
 
       await waitFor(() => expect(screen.getByText('첫문서.docx')).toBeInTheDocument())
-      await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalledTimes(2))
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(1)
       await userEvent.click(screen.getAllByRole('button', { name: '본문 위치 접기' })[0])
       expect(screen.getAllByRole('button', { name: '본문 위치 1건' })).toHaveLength(1)
 
       latestObserver?.trigger()
 
       await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(2)
       expect(screen.getAllByRole('button', { name: '본문 위치 1건' })).toHaveLength(2)
 
       vi.unstubAllGlobals()

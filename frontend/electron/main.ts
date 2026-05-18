@@ -150,6 +150,7 @@ let quickSearchPrewarmTimer: ReturnType<typeof setTimeout> | null = null
 let quickSearchFocusDismissalInstalled = false
 let cachedAppSettings: AppSettings | null = null
 let cachedQuickSearchStatus: QuickSearchStatus | null = null
+let backendReadyPromise: Promise<string> | null = null
 
 app.setName('OfficeWhere')
 
@@ -203,14 +204,24 @@ async function startApp() {
   installQuickSearchFocusDismissal()
   createSplashWindow()
   ensureTray()
-  await startBackendWithRetry()
+  // Start the backend immediately, but do not keep the renderer window hidden
+  // behind the splash while SQLite/FTS maintenance finishes after an update.
+  // Renderer API calls wait on this promise through app:get-backend-base-url.
+  backendReadyPromise = startBackendWithRetry().then(() => backendBaseUrl)
+  // Attach a handler immediately so an early backend failure is reported by the
+  // awaited startup path below, not as a transient unhandled rejection.
+  void backendReadyPromise.catch(() => undefined)
   registerQuickSearchShortcut()
   await createMainWindow()
-  scheduleQuickSearchPrewarm()
+  await backendReadyPromise
+  scheduleQuickSearchPrewarm(1_500)
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle('app:get-backend-base-url', () => backendBaseUrl)
+  ipcMain.handle('app:get-backend-base-url', async () => {
+    if (backendReadyPromise) return backendReadyPromise
+    return backendBaseUrl
+  })
   ipcMain.handle('app:get-version', () => app.getVersion())
   ipcMain.handle('app:get-log-path', () => backendLogPath)
   ipcMain.handle('app:get-data-paths', async () => getPublicAppDataCandidates())
@@ -775,6 +786,7 @@ async function createQuickSearchWindow() {
       skipTaskbar: true,
       alwaysOnTop: false,
       transparent: true,
+      hasShadow: false,
       backgroundColor: '#00000000',
       title: 'OfficeWhere 빠른 검색',
       icon: getAppIconPath(),

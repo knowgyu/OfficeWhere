@@ -69,6 +69,16 @@ beforeEach(() => {
 })
 
 describe('QuickSearchPalette', () => {
+  it('keeps the floating shell free of the old oversized drop shadow', async () => {
+    const { container } = renderWithProviders(<QuickSearchPalette />, { withLibraryRescan: false })
+    await act(async () => undefined)
+
+    const shell = container.querySelector('.quick-search-shell')
+    expect(shell).toBeInTheDocument()
+    expect(shell?.className).toContain('shadow-[0_1px_0_var(--ow-inset-highlight)_inset]')
+    expect(shell?.className).not.toContain('0_30px_80px')
+  })
+
   it('keeps the idle palette as a plain search box even when old recent-search data exists', async () => {
     mockedGetQuickSearchSettings.mockResolvedValueOnce({
       data: {

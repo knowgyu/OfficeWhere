@@ -21,6 +21,7 @@ FILE_TYPE_ALIASES = {
 DEFAULT_SEARCH_FILE_LIMIT = 20
 MAX_SEARCH_FILE_LIMIT = 100
 CONTENT_MATCHES_PER_FILE = 8
+MIN_CONTENT_MATCHES_PER_FILE = 1
 
 
 def normalize_file_type_filters(values: list[str]) -> list[str]:
@@ -56,6 +57,12 @@ def _bounded_file_limit(value: int) -> int:
     if value < 1:
         return DEFAULT_SEARCH_FILE_LIMIT
     return min(value, MAX_SEARCH_FILE_LIMIT)
+
+
+def _bounded_per_file_limit(value: int) -> int:
+    if value < MIN_CONTENT_MATCHES_PER_FILE:
+        return CONTENT_MATCHES_PER_FILE
+    return min(value, CONTENT_MATCHES_PER_FILE)
 
 
 def _unique_file_count(results: list[dict]) -> int:
@@ -119,6 +126,7 @@ def _content_matches(
     limit: int,
     file_types: list[str],
     file_limit: int,
+    per_file_limit: int,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     excluded_folder_paths: Optional[list[str]] = None,
@@ -130,7 +138,7 @@ def _content_matches(
         modified_from=modified_from,
         modified_to=modified_to,
         file_limit=file_limit,
-        per_file_limit=CONTENT_MATCHES_PER_FILE,
+        per_file_limit=per_file_limit,
         excluded_folder_paths=excluded_folder_paths,
     )
 
@@ -143,9 +151,10 @@ def search_documents(req: SearchRequest) -> SearchResponse:
     modified_to = _parse_modified_bound(req.modified_to, end_of_day=True)
     excluded_folder_paths = [path for path in req.excluded_folder_paths if path.strip()]
     file_limit = _bounded_file_limit(req.file_limit)
+    per_file_limit = _bounded_per_file_limit(req.per_file_limit)
     query_limit = min(
-        max(req.limit, file_limit * CONTENT_MATCHES_PER_FILE),
-        file_limit * (CONTENT_MATCHES_PER_FILE + 1),
+        max(req.limit, file_limit * per_file_limit),
+        file_limit * (per_file_limit + 1),
     )
     fetch_file_limit = file_limit + 1
 
@@ -165,6 +174,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
             limit=query_limit,
             file_types=file_types,
             file_limit=fetch_file_limit,
+            per_file_limit=per_file_limit,
             modified_from=modified_from,
             modified_to=modified_to,
             excluded_folder_paths=excluded_folder_paths,
@@ -186,6 +196,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
             limit=query_limit,
             file_types=file_types,
             file_limit=fetch_file_limit,
+            per_file_limit=per_file_limit,
             modified_from=modified_from,
             modified_to=modified_to,
             excluded_folder_paths=excluded_folder_paths,

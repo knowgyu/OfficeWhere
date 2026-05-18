@@ -295,6 +295,7 @@ function MainApp({ displaySettings }: { displaySettings: DisplaySettingsValue })
     const stored = window.localStorage.getItem(LS_TAB) ?? window.localStorage.getItem(LEGACY_LS_TAB)
     return stored && TABS.some((tab) => tab.id === stored) ? (stored as Tab) : 'search'
   })
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set([activeTab]))
   const [onboardingOpen, setOnboardingOpen] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(LS_ONBOARDING_DONE) !== 'true'
@@ -331,6 +332,13 @@ function MainApp({ displaySettings }: { displaySettings: DisplaySettingsValue })
 
   useEffect(() => {
     window.localStorage.setItem(LS_TAB, activeTab)
+  }, [activeTab])
+
+  useEffect(() => {
+    setMountedTabs((current) => {
+      if (current.has(activeTab)) return current
+      return new Set([...current, activeTab])
+    })
   }, [activeTab])
 
   useEffect(() => {
@@ -622,39 +630,47 @@ function MainApp({ displaySettings }: { displaySettings: DisplaySettingsValue })
         <TopAppBar title={current.label} hint={current.hint} />
         <main ref={mainScrollRef} className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1420px] px-5 md:px-7 pt-6 pb-16">
-            <section className={activeTab === 'files' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'files'}>
-              <FileManager
-                tutorialStep={tutorialStep}
-                exampleLibraryPath={exampleLibraryPath}
-                libraryDataRevision={libraryDataRevision}
-                focusFolderInputRequest={libraryFocusRequest}
-                onTutorialStep={handleTutorialStep}
-                onReplayOnboarding={handleReplayOnboarding}
-              />
-            </section>
-            <section className={activeTab === 'search' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'search'}>
-              <FileSearch
-                active={activeTab === 'search'}
-                tutorialStep={tutorialStep}
-                libraryDataRevision={libraryDataRevision}
-                launchQueryRequest={searchLaunchRequest}
-                onTutorialStep={handleTutorialStep}
-                onOpenLibrarySettings={() => {
-                  setActiveTab('files')
-                  setLibraryFocusRequest((value) => value + 1)
-                }}
-              />
-            </section>
-            <section className={activeTab === 'check' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'check'}>
-              <ConsistencyCheck
-                tutorialStep={tutorialStep}
-                libraryDataRevision={libraryDataRevision}
-                onTutorialStep={handleTutorialStep}
-              />
-            </section>
-            <section className={activeTab === 'duplicates' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'duplicates'}>
-              <DuplicateFiles libraryDataRevision={libraryDataRevision} />
-            </section>
+            {mountedTabs.has('files') && (
+              <section className={activeTab === 'files' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'files'}>
+                <FileManager
+                  tutorialStep={tutorialStep}
+                  exampleLibraryPath={exampleLibraryPath}
+                  libraryDataRevision={libraryDataRevision}
+                  focusFolderInputRequest={libraryFocusRequest}
+                  onTutorialStep={handleTutorialStep}
+                  onReplayOnboarding={handleReplayOnboarding}
+                />
+              </section>
+            )}
+            {mountedTabs.has('search') && (
+              <section className={activeTab === 'search' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'search'}>
+                <FileSearch
+                  active={activeTab === 'search'}
+                  tutorialStep={tutorialStep}
+                  libraryDataRevision={libraryDataRevision}
+                  launchQueryRequest={searchLaunchRequest}
+                  onTutorialStep={handleTutorialStep}
+                  onOpenLibrarySettings={() => {
+                    setActiveTab('files')
+                    setLibraryFocusRequest((value) => value + 1)
+                  }}
+                />
+              </section>
+            )}
+            {mountedTabs.has('check') && (
+              <section className={activeTab === 'check' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'check'}>
+                <ConsistencyCheck
+                  tutorialStep={tutorialStep}
+                  libraryDataRevision={libraryDataRevision}
+                  onTutorialStep={handleTutorialStep}
+                />
+              </section>
+            )}
+            {mountedTabs.has('duplicates') && (
+              <section className={activeTab === 'duplicates' ? 'animate-fade-in' : 'hidden'} aria-hidden={activeTab !== 'duplicates'}>
+                <DuplicateFiles libraryDataRevision={libraryDataRevision} />
+              </section>
+            )}
           </div>
         </main>
       </div>

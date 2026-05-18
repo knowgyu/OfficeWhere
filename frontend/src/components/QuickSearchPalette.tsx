@@ -535,7 +535,7 @@ export default function QuickSearchPalette() {
       }}
     >
       <section
-        className={`quick-search-shell relative flex flex-col overflow-hidden rounded-[1.25rem] border border-[color-mix(in_srgb,var(--md-sys-color-outline-variant)_80%,transparent)] bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-lowest)_94%,transparent)] shadow-[0_30px_80px_rgba(0,0,0,0.28),0_1px_0_var(--ow-inset-highlight)_inset] backdrop-blur-2xl ${
+        className={`quick-search-shell relative flex flex-col overflow-hidden rounded-[1.25rem] border border-[color-mix(in_srgb,var(--md-sys-color-outline-variant)_80%,transparent)] bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-lowest)_96%,transparent)] shadow-[0_1px_0_var(--ow-inset-highlight)_inset] backdrop-blur-2xl ${
           trimmedQuery ? 'h-full' : 'h-auto'
         }`}
       >
@@ -710,7 +710,7 @@ export default function QuickSearchPalette() {
               <div
                 role="dialog"
                 aria-label="문서 작업"
-                className="absolute bottom-[3.9rem] right-4 z-20 w-[min(25rem,calc(100%-2rem))] overflow-hidden rounded-2xl border border-[var(--md-sys-color-outline-variant)] bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-lowest)_98%,transparent)] shadow-[0_22px_70px_rgba(0,0,0,0.34),0_1px_0_var(--ow-inset-highlight)_inset] backdrop-blur-xl"
+                className="absolute bottom-[3.9rem] right-4 z-20 w-[min(25rem,calc(100%-2rem))] overflow-hidden rounded-2xl border border-[var(--md-sys-color-outline-variant)] bg-[color-mix(in_srgb,var(--md-sys-color-surface-container-lowest)_98%,transparent)] shadow-[0_10px_24px_rgba(0,0,0,0.18),0_1px_0_var(--ow-inset-highlight)_inset] backdrop-blur-xl"
               >
                 <div className="border-b border-[var(--md-sys-color-outline-variant)]/80 px-3.5 py-2.5">
                   <p className="type-label-md text-[var(--md-sys-color-primary)]">문서 작업</p>
