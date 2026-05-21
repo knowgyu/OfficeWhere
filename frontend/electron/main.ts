@@ -213,6 +213,10 @@ async function startApp() {
   void backendReadyPromise.catch(() => undefined)
   registerQuickSearchShortcut()
   await createMainWindow()
+  // The quick-search renderer does not need backend data until the user types.
+  // Prewarm it while the backend health check is still settling so the first
+  // shortcut press is less likely to pay BrowserWindow + renderer load cost.
+  scheduleQuickSearchPrewarm(300)
   await backendReadyPromise
   scheduleQuickSearchPrewarm(1_500)
 }

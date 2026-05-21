@@ -331,6 +331,7 @@ class SearchRequest(BaseModel):
     query: str
     limit: int = 100
     file_limit: int = 20
+    file_offset: int = 0
     per_file_limit: int = 8
     file_types: List[str] = Field(default_factory=list)
     search_scope: Literal["filename_content", "filename", "content"] = "filename_content"

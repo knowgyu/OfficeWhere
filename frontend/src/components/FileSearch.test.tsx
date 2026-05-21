@@ -517,13 +517,12 @@ describe('FileSearch', () => {
         .mockResolvedValueOnce({
           data: {
             query: '회의',
-            total: 2,
+            total: 1,
             results: [
-              searchHit({ file_id: 1, name: '첫문서.docx', path: '/lib/첫문서.docx' }),
               searchHit({ file_id: 2, name: '다음문서.docx', path: '/lib/다음문서.docx' }),
             ],
-            file_count: 2,
-            file_limit: 40,
+            file_count: 1,
+            file_limit: 20,
             has_more: false,
           },
         })
@@ -538,7 +537,8 @@ describe('FileSearch', () => {
       latestObserver?.trigger()
 
       await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
-      expect(mockedSearchQuery.mock.calls[1]?.[0]?.file_limit).toBe(40)
+      expect(mockedSearchQuery.mock.calls[1]?.[0]?.file_limit).toBe(20)
+      expect(mockedSearchQuery.mock.calls[1]?.[0]?.file_offset).toBe(1)
       expect(mockedSearchQuery.mock.calls[1]?.[0]?.per_file_limit).toBe(5)
 
       vi.unstubAllGlobals()

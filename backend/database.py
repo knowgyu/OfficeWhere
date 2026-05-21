@@ -2215,6 +2215,7 @@ def search_file_names(
     query: str,
     *,
     limit: int = 50,
+    offset: int = 0,
     file_types: Optional[Sequence[str]] = None,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
@@ -2240,7 +2241,7 @@ def search_file_names(
         clauses.append("file_mtime <= ?")
         params.append(modified_to)
     _extend_excluded_path_filters(clauses, params, excluded_folder_paths)
-    params.append(max(1, limit))
+    params.extend([max(1, limit), max(0, offset)])
 
     with _read_connection(row_factory=sqlite3.Row) as conn:
         cursor = conn.cursor()
@@ -2256,6 +2257,7 @@ def search_file_names(
             WHERE {' AND '.join(clauses)}
             ORDER BY rf.file_mtime DESC, rf.created_at DESC, rf.id DESC
             LIMIT ?
+            OFFSET ?
             """,
             params,
         )
@@ -2800,6 +2802,7 @@ def search_chunks(
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     file_limit: Optional[int] = None,
+    file_offset: int = 0,
     per_file_limit: int = 3,
     excluded_folder_paths: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, Any]]:
@@ -2866,6 +2869,7 @@ def search_chunks(
             return result
 
         safe_file_limit = max(1, file_limit)
+        safe_file_offset = max(0, file_offset)
         safe_per_file_limit = max(1, per_file_limit)
         cursor.execute(
             f"""
@@ -2884,6 +2888,7 @@ def search_chunks(
                          rf.created_at DESC,
                          rf.id DESC
                 LIMIT ?
+                OFFSET ?
             ),
             ranked_chunks AS (
                 SELECT fc.file_id, rf.name, rf.path, rf.file_type, fc.location, fc.content,
@@ -2909,7 +2914,7 @@ def search_chunks(
                      matched_sort_id DESC,
                      chunk_number ASC
             """,
-            [*params, safe_file_limit, fts_query, safe_per_file_limit],
+            [*params, safe_file_limit, safe_file_offset, fts_query, safe_per_file_limit],
         )
         rows = cursor.fetchall()
         result = _search_row_dicts(rows, query_text)

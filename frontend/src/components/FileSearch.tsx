@@ -251,7 +251,9 @@ export default function FileSearch({
   const contentMatchesDefaultExpandedRef = useRef(true)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const resultsRef = useRef<SearchResult[]>([])
   const searchRequestSeq = useRef(0)
+  const searchAbortRef = useRef<AbortController | null>(null)
   const initialDataRequestSeq = useRef(0)
   const watchedFoldersRequestSeq = useRef(0)
   const tutorialSearchAdvanceRef = useRef<string | null>(null)
@@ -281,15 +283,31 @@ export default function FileSearch({
     [customModifiedFrom, customModifiedTo, modifiedDateFilter],
   )
 
+  const mergeSearchResults = (current: SearchResult[], incoming: SearchResult[]) => {
+    const seen = new Set(current.map((item) => `${item.file_id}:${item.location}:${item.snippet}`))
+    const merged = [...current]
+    for (const item of incoming) {
+      const key = `${item.file_id}:${item.location}:${item.snippet}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push(item)
+    }
+    return merged
+  }
+
   const applySearchResponse = (
     data: SearchResponse,
     fallbackFileLimit: number,
     keepExpandedContentFiles = false,
+    mode: 'replace' | 'more' = 'replace',
   ) => {
-    setResults(data.results)
+    const nextResults = mode === 'more' ? mergeSearchResults(resultsRef.current, data.results) : data.results
+    resultsRef.current = nextResults
+    setResults(nextResults)
+    const nextFileCount = new Set(nextResults.map((item) => item.file_id)).size
     setSearchMeta({
-      fileCount: data.file_count ?? new Set(data.results.map((item) => item.file_id)).size,
-      fileLimit: data.file_limit ?? fallbackFileLimit,
+      fileCount: nextFileCount,
+      fileLimit: mode === 'more' ? nextFileCount : data.file_limit ?? fallbackFileLimit,
       hasMore: Boolean(data.has_more),
     })
     setExpandedContentFiles((current) => {
@@ -312,13 +330,16 @@ export default function FileSearch({
       customTo = customModifiedTo,
       excludedFolders = excludedFolderPaths,
       fileLimit = INITIAL_SEARCH_FILE_LIMIT,
+      fileOffset = 0,
       mode: 'replace' | 'more' = 'replace',
     ) => {
       const requestId = searchRequestSeq.current + 1
       searchRequestSeq.current = requestId
+      searchAbortRef.current?.abort()
 
       if (!q.trim()) {
         setResults([])
+        resultsRef.current = []
         setSearchMeta({
           fileCount: 0,
           fileLimit: INITIAL_SEARCH_FILE_LIMIT,
@@ -331,7 +352,18 @@ export default function FileSearch({
         setLoadingMore(false)
         return false
       }
-      const nextFileLimit = Math.min(Math.max(fileLimit, INITIAL_SEARCH_FILE_LIMIT), MAX_SEARCH_FILE_LIMIT)
+      const remainingFileSlots = MAX_SEARCH_FILE_LIMIT - fileOffset
+      if (mode === 'more' && remainingFileSlots <= 0) {
+        setSearchMeta((current) => ({ ...current, hasMore: false }))
+        return false
+      }
+
+      const controller = new AbortController()
+      searchAbortRef.current = controller
+      const nextFileLimit =
+        mode === 'more'
+          ? Math.min(fileLimit, remainingFileSlots)
+          : Math.min(Math.max(fileLimit, INITIAL_SEARCH_FILE_LIMIT), MAX_SEARCH_FILE_LIMIT)
       if (mode === 'replace') {
         contentMatchesDefaultExpandedRef.current = true
       }
@@ -346,17 +378,19 @@ export default function FileSearch({
           query: q,
           limit: nextFileLimit * SEARCH_MATCHES_PER_FILE,
           file_limit: nextFileLimit,
+          file_offset: fileOffset,
           per_file_limit: SEARCH_MATCHES_PER_FILE,
           file_types: fileTypes.length > 0 ? fileTypes : undefined,
           search_scope: scope,
           excluded_folder_paths: excludedFolders.length > 0 ? excludedFolders : undefined,
           ...modifiedDateParams,
-        })
-        if (requestId !== searchRequestSeq.current) return false
-        return applySearchResponse(response.data, nextFileLimit, mode === 'more')
+        }, { signal: controller.signal })
+        if (requestId !== searchRequestSeq.current || controller.signal.aborted) return false
+        return applySearchResponse(response.data, nextFileLimit, mode === 'more', mode)
       } catch {
-        if (requestId !== searchRequestSeq.current) return false
+        if (requestId !== searchRequestSeq.current || controller.signal.aborted) return false
         setResults([])
+        resultsRef.current = []
         setSearchMeta({
           fileCount: 0,
           fileLimit: INITIAL_SEARCH_FILE_LIMIT,
@@ -365,7 +399,7 @@ export default function FileSearch({
         snackbar.error('검색에 실패했습니다.')
         return false
       } finally {
-        if (requestId === searchRequestSeq.current) {
+        if (requestId === searchRequestSeq.current && !controller.signal.aborted) {
           setLoading(false)
           setLoadingMore(false)
         }
@@ -530,6 +564,7 @@ export default function FileSearch({
     if (libraryDataRevision === 0) return
     if (!query.trim()) {
       setResults([])
+      resultsRef.current = []
       setSearchMeta({
         fileCount: 0,
         fileLimit: INITIAL_SEARCH_FILE_LIMIT,
@@ -705,9 +740,8 @@ export default function FileSearch({
   const expandSearchFileWindow = () => {
     if (!searchMeta.hasMore || loadingMore || loading) return
     if (!query.trim()) return
-    // This is a bounded cumulative window, not cursor pagination: the backend
-    // returns the first N matching files again so grouping/order stay stable.
-    const nextCumulativeFileLimit = Math.min(searchMeta.fileLimit + SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT)
+    const nextFileLimit = Math.min(SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT - searchMeta.fileCount)
+    if (nextFileLimit <= 0) return
     void doSearch(
       query,
       selectedFileTypes,
@@ -716,7 +750,8 @@ export default function FileSearch({
       customModifiedFrom,
       customModifiedTo,
       excludedFolderPaths,
-      nextCumulativeFileLimit,
+      nextFileLimit,
+      searchMeta.fileCount,
       'more',
     )
   }
@@ -725,6 +760,12 @@ export default function FileSearch({
     if (!initialFilesHasMore || initialDataLoading || initialDataLoadingMore) return
     void loadLandingFiles(initialFiles.length, 'more')
   }
+
+  useEffect(() => {
+    return () => {
+      searchAbortRef.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     const node = loadMoreSentinelRef.current
@@ -749,7 +790,7 @@ export default function FileSearch({
     loadingMore,
     modifiedDateFilter,
     query,
-    searchMeta.fileLimit,
+    searchMeta.fileCount,
     searchMeta.hasMore,
     searchScope,
     selectedFileTypes,
@@ -826,8 +867,10 @@ export default function FileSearch({
                       onClick={() => {
                         if (debounceRef.current) clearTimeout(debounceRef.current)
                         searchRequestSeq.current += 1
+                        searchAbortRef.current?.abort()
                         setQuery('')
                         setResults([])
+                        resultsRef.current = []
                         setSearchMeta({
                           fileCount: 0,
                           fileLimit: INITIAL_SEARCH_FILE_LIMIT,
@@ -1324,7 +1367,7 @@ export default function FileSearch({
             <div className="flex flex-col items-center gap-2 pt-2">
               <div ref={loadMoreSentinelRef} className="h-2 w-full" aria-hidden="true" />
               <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
-                결과가 더 있어요. 이전 결과를 포함한 더 넓은 파일 묶음으로 안정적으로 다시 불러옵니다.
+                결과가 더 있어요. 다음 파일 묶음만 이어서 불러옵니다.
               </p>
               <Button
                 variant="tonal"

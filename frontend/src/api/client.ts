@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 import { libraryApi } from './library'
 import { apiPath, getOfficeWhereBridge } from './transport'
 import type {
@@ -421,6 +421,7 @@ export interface SearchRequest {
   query: string
   limit?: number
   file_limit?: number
+  file_offset?: number
   per_file_limit?: number
   file_types?: string[]
   search_scope?: SearchScope
@@ -1188,8 +1189,8 @@ export const api = {
       apiPath('/api/check/excel-grid').then((url) => axios.post<ExcelDiffGridResponse>(url, data)),
   },
   search: {
-    query: (data: SearchRequest) =>
-      apiPath('/api/search').then((url) => axios.post<SearchResponse>(url, data)),
+    query: (data: SearchRequest, config?: AxiosRequestConfig) =>
+      apiPath('/api/search').then((url) => axios.post<SearchResponse>(url, data, config)),
     reindex: async () => axios.post<ReindexResponse>(await apiPath('/api/search/reindex')),
     getSettings: async () => axios.get<SchedulerSettings>(await apiPath('/api/search/settings')),
     updateSettings: (data: SchedulerSettings) =>

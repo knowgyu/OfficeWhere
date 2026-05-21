@@ -128,7 +128,12 @@ describe('QuickSearchPalette', () => {
     fireEvent.change(screen.getByLabelText('빠른 문서 검색'), { target: { value: '예산' } })
 
     await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ query: '예산', search_scope: 'filename_content' }),
+      expect.objectContaining({ query: '예산', search_scope: 'filename' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+    await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ query: '예산', search_scope: 'content' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ))
     expect(await screen.findByText('2026_예산안.xlsx')).toBeInTheDocument()
     expect(screen.getByText(/budget/)).toBeInTheDocument()
@@ -156,6 +161,7 @@ describe('QuickSearchPalette', () => {
         file_types: ['PDF'],
         search_scope: 'content',
       }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ))
     expect(screen.getByText('PDF')).toBeInTheDocument()
     expect(screen.getByText('본문')).toBeInTheDocument()

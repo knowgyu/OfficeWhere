@@ -399,6 +399,7 @@ def search(
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     file_limit: Optional[int] = None,
+    file_offset: int = 0,
     per_file_limit: int = 3,
     excluded_folder_paths: Optional[Sequence[str]] = None,
 ) -> list:
@@ -412,6 +413,7 @@ def search(
         modified_from=modified_from,
         modified_to=modified_to,
         file_limit=file_limit,
+        file_offset=file_offset,
         per_file_limit=per_file_limit,
         excluded_folder_paths=excluded_folder_paths,
     )

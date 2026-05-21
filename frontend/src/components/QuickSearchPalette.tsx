@@ -170,11 +170,38 @@ function groupResults(results: SearchResult[]): PaletteDocument[] {
   return [...map.values()]
 }
 
+function mergeDocuments(primary: PaletteDocument[], secondary: PaletteDocument[]) {
+  const map = new Map<number, PaletteDocument>()
+  for (const document of [...primary, ...secondary]) {
+    const current = map.get(document.fileId)
+    if (!current) {
+      map.set(document.fileId, {
+        ...document,
+        locations: [...document.locations],
+        snippets: [...document.snippets],
+      })
+      continue
+    }
+    for (const location of document.locations) {
+      if (!current.locations.includes(location)) current.locations.push(location)
+    }
+    const seenSnippets = new Set(current.snippets.map((item) => `${item.location}:${item.snippet}`))
+    for (const snippet of document.snippets) {
+      const key = `${snippet.location}:${snippet.snippet}`
+      if (seenSnippets.has(key)) continue
+      seenSnippets.add(key)
+      current.snippets.push(snippet)
+    }
+  }
+  return [...map.values()]
+}
+
 export default function QuickSearchPalette() {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const selectedResultRef = useRef<HTMLLIElement | null>(null)
   const actionPanelOpenRef = useRef(false)
   const requestSeq = useRef(0)
+  const searchAbortRef = useRef<AbortController | null>(null)
   const [query, setQuery] = useState('')
   const [documents, setDocuments] = useState<PaletteDocument[]>([])
   const [loading, setLoading] = useState(false)
@@ -294,6 +321,8 @@ export default function QuickSearchPalette() {
     (nextSettings?: Partial<QuickSearchSettings>) => {
       applyQuickSearchSettings(nextSettings)
       requestSeq.current += 1
+      searchAbortRef.current?.abort()
+      searchAbortRef.current = null
       setQuery('')
       setDocuments([])
       setLoading(false)
@@ -371,6 +400,7 @@ export default function QuickSearchPalette() {
   useEffect(() => {
     const requestId = requestSeq.current + 1
     requestSeq.current = requestId
+    searchAbortRef.current?.abort()
 
     if (!trimmedQuery) {
       setDocuments([])
@@ -383,38 +413,79 @@ export default function QuickSearchPalette() {
       return undefined
     }
 
+    const controller = new AbortController()
+    searchAbortRef.current = controller
     setLoading(true)
     setError('')
     const timer = window.setTimeout(() => {
-      void api.search
-        .query({
-          query: trimmedQuery,
-          limit: SEARCH_LIMIT,
-          file_limit: SEARCH_FILE_LIMIT,
-          file_types: parsedQuery.fileTypes,
-          search_scope: parsedQuery.searchScope,
-        })
+      const search = (scope: ParsedQuickSearchQuery['searchScope']) =>
+        api.search.query(
+          {
+            query: trimmedQuery,
+            limit: SEARCH_LIMIT,
+            file_limit: SEARCH_FILE_LIMIT,
+            file_types: parsedQuery.fileTypes,
+            search_scope: scope,
+          },
+          { signal: controller.signal },
+        )
+
+      const applyDocuments = (nextDocuments: PaletteDocument[]) => {
+        if (requestSeq.current !== requestId || controller.signal.aborted) return false
+        setDocuments(nextDocuments)
+        setSelectedIndex(0)
+        setExpandedFileId(null)
+        setActionPanelOpen(false)
+        setSearched(true)
+        return true
+      }
+
+      if (parsedQuery.searchScope === 'filename_content') {
+        let filenameDocuments: PaletteDocument[] = []
+        let filenameSucceeded = false
+        void search('filename')
+          .then((response) => {
+            filenameSucceeded = true
+            filenameDocuments = groupResults(response.data.results)
+            applyDocuments(filenameDocuments)
+            return search('content')
+          })
+          .then((response) => {
+            const contentDocuments = groupResults(response.data.results)
+            applyDocuments(mergeDocuments(filenameDocuments, contentDocuments))
+          })
+          .catch(() => {
+            if (requestSeq.current !== requestId || controller.signal.aborted) return
+            if (filenameSucceeded) return
+            setDocuments([])
+            setSearched(true)
+            setError('검색 준비 데이터에 연결하지 못했습니다. OfficeWhere가 문서를 새로고침 중인지 확인해 주세요.')
+          })
+          .finally(() => {
+            if (requestSeq.current === requestId && !controller.signal.aborted) setLoading(false)
+          })
+        return
+      }
+
+      void search(parsedQuery.searchScope)
         .then((response) => {
-          if (requestSeq.current !== requestId) return
-          const grouped = groupResults(response.data.results)
-          setDocuments(grouped)
-          setSelectedIndex(0)
-          setExpandedFileId(null)
-          setActionPanelOpen(false)
-          setSearched(true)
+          applyDocuments(groupResults(response.data.results))
         })
         .catch(() => {
-          if (requestSeq.current !== requestId) return
+          if (requestSeq.current !== requestId || controller.signal.aborted) return
           setDocuments([])
           setSearched(true)
           setError('검색 준비 데이터에 연결하지 못했습니다. OfficeWhere가 문서를 새로고침 중인지 확인해 주세요.')
         })
         .finally(() => {
-          if (requestSeq.current === requestId) setLoading(false)
+          if (requestSeq.current === requestId && !controller.signal.aborted) setLoading(false)
         })
     }, SEARCH_DEBOUNCE_MS)
 
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
   }, [parsedQuery.fileTypes, parsedQuery.searchScope, trimmedQuery])
 
   useEffect(() => {

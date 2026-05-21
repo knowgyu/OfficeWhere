@@ -748,6 +748,90 @@ def test_search_api_caps_results_by_file_first(tmp_path):
     assert response.has_more is True
 
 
+def test_search_api_honors_file_offset_for_content_results(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    file_ids = []
+    for index in range(3):
+        file_id = register_file(str(tmp_path / f'offset-{index}.docx'), f'offset-{index}.docx', 'Word', 0)
+        save_file_chunks(file_id, [{"location": "문단", "content": f"프로젝트 오프셋검색 {index}"}])
+        update_file_mtime(file_id, float(index))
+        file_ids.append(file_id)
+
+    response = search_files(
+        SearchRequest(query="오프셋검색", search_scope="content", file_limit=1, file_offset=1)
+    )
+
+    assert response.file_count == 1
+    assert {item.file_id for item in response.results} == {file_ids[1]}
+    assert response.has_more is True
+
+
+def test_search_api_honors_file_offset_for_default_content_fallback(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    file_ids = []
+    for index in range(3):
+        file_id = register_file(str(tmp_path / f'fallback-{index}.docx'), f'fallback-{index}.docx', 'Word', 0)
+        save_file_chunks(file_id, [{"location": "문단", "content": f"프로젝트 기본오프셋검색 {index}"}])
+        update_file_mtime(file_id, float(index))
+        file_ids.append(file_id)
+
+    response = search_files(
+        SearchRequest(query="기본오프셋검색", search_scope="filename_content", file_limit=1, file_offset=1)
+    )
+
+    assert response.file_count == 1
+    assert {item.file_id for item in response.results} == {file_ids[1]}
+    assert response.has_more is True
+
+
+def test_search_api_stops_has_more_at_max_file_window(tmp_path):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks
+    from backend.models.schemas import SearchRequest
+
+    for index in range(105):
+        file_id = register_file(str(tmp_path / f'cap-{index}.docx'), f'cap-{index}.docx', 'Word', 0)
+        save_file_chunks(file_id, [{"location": "문단", "content": f"프로젝트 최대창검색 {index}"}])
+        update_file_mtime(file_id, float(index))
+
+    response = search_files(
+        SearchRequest(query="최대창검색", search_scope="content", file_limit=20, file_offset=80)
+    )
+
+    assert response.file_count == 20
+    assert response.has_more is False
+
+
+def test_search_api_honors_file_offset_for_filename_results(tmp_path):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    file_ids = []
+    for index in range(3):
+        file_id = register_file(
+            str(tmp_path / f'오프셋파일-{index}.docx'),
+            f'오프셋파일-{index}.docx',
+            'Word',
+            0,
+        )
+        update_file_mtime(file_id, float(index))
+        file_ids.append(file_id)
+
+    response = search_files(
+        SearchRequest(query="오프셋파일", search_scope="filename", file_limit=1, file_offset=1)
+    )
+
+    assert response.file_count == 1
+    assert {item.file_id for item in response.results} == {file_ids[1]}
+    assert response.has_more is True
+
+
 def test_search_api_honors_per_file_limit_for_common_terms(tmp_path):
     from backend.api.search import search_files
     from backend.database import save_file_chunks

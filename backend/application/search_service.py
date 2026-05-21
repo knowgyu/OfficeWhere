@@ -83,10 +83,35 @@ def _cap_unique_files(results: list[dict], file_limit: int) -> tuple[list[dict],
     return capped, has_more
 
 
+def _slice_unique_files(results: list[dict], file_offset: int, file_limit: int) -> tuple[list[dict], bool]:
+    sliced: list[dict] = []
+    seen: set[int] = set()
+    skipped: set[int] = set()
+    has_more = False
+    safe_offset = max(0, file_offset)
+    for item in results:
+        file_id = int(item["file_id"])
+        if file_id in seen:
+            if file_id not in skipped:
+                sliced.append(item)
+            continue
+        if len(seen) < safe_offset:
+            seen.add(file_id)
+            skipped.add(file_id)
+            continue
+        if len(seen) >= safe_offset + file_limit:
+            has_more = True
+            continue
+        seen.add(file_id)
+        sliced.append(item)
+    return sliced, has_more
+
+
 def _filename_matches(
     query: str,
     file_types: list[str],
     limit: int,
+    offset: int = 0,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     excluded_folder_paths: Optional[list[str]] = None,
@@ -103,6 +128,7 @@ def _filename_matches(
         modified_to=modified_to,
         excluded_folder_paths=excluded_folder_paths,
         limit=limit,
+        offset=offset,
     ):
         matches.append(
             {
@@ -126,6 +152,7 @@ def _content_matches(
     limit: int,
     file_types: list[str],
     file_limit: int,
+    file_offset: int,
     per_file_limit: int,
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
@@ -138,6 +165,7 @@ def _content_matches(
         modified_from=modified_from,
         modified_to=modified_to,
         file_limit=file_limit,
+        file_offset=file_offset,
         per_file_limit=per_file_limit,
         excluded_folder_paths=excluded_folder_paths,
     )
@@ -151,6 +179,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
     modified_to = _parse_modified_bound(req.modified_to, end_of_day=True)
     excluded_folder_paths = [path for path in req.excluded_folder_paths if path.strip()]
     file_limit = _bounded_file_limit(req.file_limit)
+    file_offset = max(0, req.file_offset)
     per_file_limit = _bounded_per_file_limit(req.per_file_limit)
     query_limit = min(
         max(req.limit, file_limit * per_file_limit),
@@ -163,6 +192,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
             req.query,
             file_types,
             fetch_file_limit,
+            file_offset,
             modified_from,
             modified_to,
             excluded_folder_paths,
@@ -174,6 +204,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
             limit=query_limit,
             file_types=file_types,
             file_limit=fetch_file_limit,
+            file_offset=file_offset,
             per_file_limit=per_file_limit,
             modified_from=modified_from,
             modified_to=modified_to,
@@ -184,29 +215,40 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         name_matches = _filename_matches(
             req.query,
             file_types,
-            fetch_file_limit,
+            file_offset + fetch_file_limit,
+            0,
             modified_from,
             modified_to,
             excluded_folder_paths,
         )
-        seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
-        content_results = []
-        for item in _content_matches(
-            req.query,
-            limit=query_limit,
-            file_types=file_types,
-            file_limit=fetch_file_limit,
-            per_file_limit=per_file_limit,
-            modified_from=modified_from,
-            modified_to=modified_to,
-            excluded_folder_paths=excluded_folder_paths,
-        ):
-            key = (item["file_id"], item["location"], item["snippet"])
-            if key in seen:
-                continue
-            seen.add(key)
-            content_results.append(item)
-        results, has_more = _cap_unique_files(name_matches + content_results, file_limit)
+        name_page, name_has_more = _slice_unique_files(name_matches, file_offset, file_limit)
+        if len(name_page) >= file_limit and name_has_more:
+            results, has_more = name_page, True
+        else:
+            name_file_ids = {int(item["file_id"]) for item in name_matches}
+            content_needed = max(1, file_offset + fetch_file_limit - _unique_file_count(name_matches))
+            content_file_limit = content_needed + len(name_file_ids)
+            content_candidates = _content_matches(
+                req.query,
+                limit=max(query_limit, content_file_limit * per_file_limit),
+                file_types=file_types,
+                file_limit=content_file_limit,
+                file_offset=0,
+                per_file_limit=per_file_limit,
+                modified_from=modified_from,
+                modified_to=modified_to,
+                excluded_folder_paths=excluded_folder_paths,
+            )
+            content_results = []
+            seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
+            for item in content_candidates:
+                key = (item["file_id"], item["location"], item["snippet"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                content_results.append(item)
+            results, combined_has_more = _slice_unique_files(name_matches + content_results, file_offset, file_limit)
+            has_more = name_has_more or combined_has_more
 
     return SearchResponse(
         query=req.query,
@@ -214,5 +256,5 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         results=[SearchResult(**result) for result in results],
         file_count=_unique_file_count(results),
         file_limit=file_limit,
-        has_more=has_more and file_limit < MAX_SEARCH_FILE_LIMIT,
+        has_more=has_more and (file_offset + file_limit) < MAX_SEARCH_FILE_LIMIT,
     )
