@@ -17,13 +17,49 @@ The provider API is intentionally separate from business-agent orchestration. Of
 
 ## Discovery
 
-When the backend base URL is known, clients should call:
+Packaged Electron uses a dynamic loopback backend port. External CLI integrations must not assume the development default port. After the Electron main process starts the backend and `/api/health` succeeds, it writes a user-scoped discovery document:
+
+```text
+<Electron userData>/provider-discovery.json
+```
+
+The document is local metadata only. It carries no API key or source document contents. Shape:
+
+```json
+{
+  "provider": "OfficeWhere",
+  "contract_version": "v1",
+  "app_version": "0.11.1",
+  "api_base_path": "/api/provider/v1",
+  "base_url": "http://127.0.0.1:<dynamic-port>",
+  "health_url": "http://127.0.0.1:<dynamic-port>/api/provider/v1/health",
+  "manifest_url": "http://127.0.0.1:<dynamic-port>/api/provider/v1/manifest",
+  "pid": 12345,
+  "discovery_id": "runtime-generated UUID",
+  "generated_at": "2026-05-22T12:00:00.000Z",
+  "updated_at": "2026-05-22T12:00:00.000Z",
+  "stale_rule": "Treat this discovery document as stale unless ..."
+}
+```
+
+Writes are atomic (`provider-discovery.json.<pid>.<discovery_id>.tmp` then rename). On clean app shutdown, Electron makes a best-effort deletion and removes only the discovery file that matches its `pid` and `discovery_id`, so a newer instance is not deleted by an older shutdown path. If cleanup is interrupted, clients must apply the stale rule below.
+
+### Consumer validation rule
+
+Treat `provider-discovery.json` as stale unless all checks pass:
+
+1. `provider === "OfficeWhere"`, `contract_version === "v1"`, and `api_base_path === "/api/provider/v1"`.
+2. `pid` is still alive for the local OS user/session.
+3. `GET health_url` returns `provider`, `contract_version`, and `app_version` values that agree with the discovery file.
+4. `GET manifest_url` returns `provider`, `contract_version`, `app_version`, and `api_base_path` values that agree with the discovery file.
+
+When the backend base URL is known and validated, clients should call:
 
 ```http
 GET /api/provider/v1/manifest
 ```
 
-The manifest returns:
+The manifest remains the authoritative capability contract and returns:
 
 - provider name and app version
 - contract version and base path
@@ -31,8 +67,6 @@ The manifest returns:
 - supported capabilities
 - provider-safe operations
 - state-changing maintenance operations that must not be called automatically
-
-Packaged Electron uses a dynamic loopback backend port. External CLI integrations should not assume the development default port. A future Electron/app-data discovery manifest may point to the active base URL, but the authoritative capability contract remains this provider API.
 
 ## Provider-safe operations
 

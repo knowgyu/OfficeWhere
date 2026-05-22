@@ -13,6 +13,13 @@ import {
 } from 'electron'
 import { execFile, spawn } from 'node:child_process'
 import { resolveBackendStartupBudget } from './backendStartup'
+import {
+  buildProviderDiscovery,
+  cleanupProviderDiscovery,
+  cleanupProviderDiscoverySync,
+  writeProviderDiscovery,
+  type ProviderDiscoveryHandle,
+} from './providerDiscovery'
 import type { ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -151,6 +158,7 @@ let quickSearchFocusDismissalInstalled = false
 let cachedAppSettings: AppSettings | null = null
 let cachedQuickSearchStatus: QuickSearchStatus | null = null
 let backendReadyPromise: Promise<string> | null = null
+let providerDiscoveryHandle: ProviderDiscoveryHandle | null = null
 
 app.setName('OfficeWhere')
 
@@ -1696,6 +1704,29 @@ async function shutdownApp(exitCode = 0) {
   app.exit(exitCode)
 }
 
+async function publishProviderDiscovery() {
+  const payload = buildProviderDiscovery({
+    appVersion: app.getVersion(),
+    baseUrl: backendBaseUrl,
+    pid: backendProcess?.pid ?? process.pid,
+  })
+  providerDiscoveryHandle = await writeProviderDiscovery(app.getPath('userData'), payload)
+}
+
+async function cleanupCurrentProviderDiscovery(): Promise<void> {
+  const handle = providerDiscoveryHandle
+  providerDiscoveryHandle = null
+  if (!handle) return
+  await cleanupProviderDiscovery(handle).catch(() => undefined)
+}
+
+function cleanupCurrentProviderDiscoverySync() {
+  const handle = providerDiscoveryHandle
+  providerDiscoveryHandle = null
+  if (!handle) return
+  cleanupProviderDiscoverySync(handle)
+}
+
 async function startBackendWithRetry() {
   let lastError: unknown
 
@@ -1704,9 +1735,11 @@ async function startBackendWithRetry() {
     backendBaseUrl = `http://${HOST}:${port}`
     try {
       await startBackend(port)
+      await publishProviderDiscovery()
       return
     } catch (error) {
       lastError = error
+      cleanupCurrentProviderDiscoverySync()
       stopBackend()
       if (attempt < STARTUP_ATTEMPTS) {
         await delay(500)
@@ -1853,6 +1886,7 @@ function getPythonExecutable(repoRoot: string): string {
 }
 
 function stopBackend() {
+  cleanupCurrentProviderDiscoverySync()
   if (!backendProcess) return
   expectedBackendExits.add(backendProcess)
   const logStream = backendLogStreams.get(backendProcess)
@@ -1862,6 +1896,7 @@ function stopBackend() {
 }
 
 async function stopBackendAndWait(timeoutMs = 5_000): Promise<boolean> {
+  await cleanupCurrentProviderDiscovery()
   const child = backendProcess
   if (!child) return true
 

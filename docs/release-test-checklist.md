@@ -10,6 +10,7 @@
 - [ ] `cd frontend && npm run build`
 - [ ] `cd frontend && npm run build:electron`
 - [ ] `cd frontend && npm run test:run`
+- [ ] `cd frontend && npm run package:win` (Linux/local smoke only when `python-runtime/win-x64` is present; official Windows asset is built on Windows/GitHub Actions)
 - [ ] `cd frontend && npx tsc -p tsconfig.e2e.json`
 - [ ] `git diff --check`
 - [ ] GitHub `Frontend tests` workflow 통과
@@ -43,6 +44,14 @@
 - [ ] 앱 데이터 초기화 문구가 원본 문서를 삭제하지 않는다고 명확히 설명한다.
 - [ ] 앱 데이터 초기화는 앱 DB, 캐시, 로그, 설정 위치만 대상으로 한다.
 - [ ] 네트워크/공유 폴더가 일시적으로 끊긴 경우 등록 파일을 즉시 삭제하지 않는다.
+
+## Provider runtime discovery
+
+- [ ] Electron 실행 후 `<userData>/provider-discovery.json`이 생성된다.
+- [ ] discovery JSON의 `base_url`은 실제 동적 loopback backend URL을 가리킨다.
+- [ ] `health_url`과 `manifest_url`이 `/api/provider/v1/health`, `/api/provider/v1/manifest`를 가리키며 응답 metadata와 일치한다.
+- [ ] 종료 후 discovery 파일은 best-effort로 삭제되거나, 남아 있더라도 `pid` + provider health/manifest 검증으로 stale 판정할 수 있다.
+- [ ] provider 경로는 source 문서를 삭제/이동/이름변경/저장하지 않고, 새 state-changing endpoint를 추가하지 않는다.
 
 ## 데스크톱/업데이트
 
