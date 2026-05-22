@@ -226,6 +226,29 @@ def test_search_matches_long_korean_substring_with_fast_path(tmp_path):
     assert "**프로젝**" in results[0]["snippet"]
 
 
+def test_search_documents_degrades_content_search_while_search_index_repairs(tmp_path):
+    from backend.application.search_service import search_documents
+    from backend.database import set_setting
+    from backend.models.schemas import SearchRequest
+
+    file_id = register_file(str(tmp_path / "meeting.docx"), "meeting.docx", "Word", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "주간 회의록"}])
+    set_setting("search_index_version", "4")
+    init_db()
+
+    content_response = search_documents(SearchRequest(query="회의", search_scope="content"))
+
+    assert content_response.results == []
+    assert content_response.search_index_stale is True
+    assert content_response.search_index_state == "repair_needed"
+
+    filename_response = search_documents(SearchRequest(query="meeting", search_scope="filename_content"))
+
+    assert filename_response.search_index_stale is True
+    assert [item.location for item in filename_response.results] == ["파일명"]
+    assert filename_response.results[0].file_id == file_id
+
+
 def test_init_db_removes_unused_base_file_search():
     from backend.database import DB_PATH
 
@@ -300,8 +323,8 @@ def test_init_db_migrates_legacy_base_file_search(tmp_path, monkeypatch):
     conn.close()
 
 
-def test_init_db_recreates_search_indexes_with_columnsize_zero(tmp_path):
-    from backend.database import DB_PATH, set_setting
+def test_init_db_defers_search_index_repair_until_background_repair(tmp_path, monkeypatch):
+    from backend.database import DB_PATH, get_search_index_status, repair_search_indexes, set_setting
 
     file_id = register_file(str(tmp_path / 'meeting.docx'), 'meeting.docx', 'Word', 0)
     save_file_chunks(file_id, [{"location": "문단", "content": "주간 회의록"}])
@@ -329,7 +352,32 @@ def test_init_db_recreates_search_indexes_with_columnsize_zero(tmp_path):
     conn.close()
     set_setting("search_index_version", "4")
 
-    init_db()
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "backend.database._rebuild_search_indexes",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("init_db must not rebuild FTS")),
+        )
+        patch.setattr(
+            "backend.database._refresh_search_text",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("init_db must not refresh all chunks")),
+        )
+        init_db()
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE name IN ('file_search_ko_docsize', 'file_search_trigram_docsize')
+        """
+    )
+    assert cursor.fetchall() == [("file_search_ko_docsize",)]
+    conn.close()
+    status = get_search_index_status()
+    assert status["state"] == "repair_needed"
+    assert status["stale"] is True
+
+    repair_search_indexes(reason="test")
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -343,6 +391,9 @@ def test_init_db_recreates_search_indexes_with_columnsize_zero(tmp_path):
     cursor.execute("SELECT rowid FROM file_search_ko WHERE file_search_ko MATCH ?", ('"회의"',))
     assert cursor.fetchone() is not None
     conn.close()
+    status = get_search_index_status()
+    assert status["state"] == "ready"
+    assert status["stale"] is False
 
 
 def test_reindex_on_file_change(tmp_path):

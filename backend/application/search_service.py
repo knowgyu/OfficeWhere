@@ -5,7 +5,7 @@ from typing import Optional
 
 from ..core.hangul_search import make_search_snippet
 from ..core.indexer import search
-from ..database import search_file_names
+from ..database import get_search_index_status, search_file_names
 from ..models.schemas import SearchRequest, SearchResponse, SearchResult
 
 FILE_TYPE_ALIASES = {
@@ -174,6 +174,8 @@ def _content_matches(
 def search_documents(req: SearchRequest) -> SearchResponse:
     """Run the provider/search use case without coupling callers to FastAPI."""
 
+    search_index_status = get_search_index_status()
+    content_index_ready = not bool(search_index_status.get("stale"))
     file_types = normalize_file_type_filters(req.file_types)
     modified_from = _parse_modified_bound(req.modified_from, end_of_day=False)
     modified_to = _parse_modified_bound(req.modified_to, end_of_day=True)
@@ -199,18 +201,21 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         )
         results, has_more = _cap_unique_files(name_matches, file_limit)
     elif req.search_scope == "content":
-        results = _content_matches(
-            req.query,
-            limit=query_limit,
-            file_types=file_types,
-            file_limit=fetch_file_limit,
-            file_offset=file_offset,
-            per_file_limit=per_file_limit,
-            modified_from=modified_from,
-            modified_to=modified_to,
-            excluded_folder_paths=excluded_folder_paths,
-        )
-        results, has_more = _cap_unique_files(results, file_limit)
+        if content_index_ready:
+            results = _content_matches(
+                req.query,
+                limit=query_limit,
+                file_types=file_types,
+                file_limit=fetch_file_limit,
+                file_offset=file_offset,
+                per_file_limit=per_file_limit,
+                modified_from=modified_from,
+                modified_to=modified_to,
+                excluded_folder_paths=excluded_folder_paths,
+            )
+            results, has_more = _cap_unique_files(results, file_limit)
+        else:
+            results, has_more = [], False
     else:
         name_matches = _filename_matches(
             req.query,
@@ -226,19 +231,21 @@ def search_documents(req: SearchRequest) -> SearchResponse:
             results, has_more = name_page, True
         else:
             name_file_ids = {int(item["file_id"]) for item in name_matches}
-            content_needed = max(1, file_offset + fetch_file_limit - _unique_file_count(name_matches))
-            content_file_limit = content_needed + len(name_file_ids)
-            content_candidates = _content_matches(
-                req.query,
-                limit=max(query_limit, content_file_limit * per_file_limit),
-                file_types=file_types,
-                file_limit=content_file_limit,
-                file_offset=0,
-                per_file_limit=per_file_limit,
-                modified_from=modified_from,
-                modified_to=modified_to,
-                excluded_folder_paths=excluded_folder_paths,
-            )
+            content_candidates = []
+            if content_index_ready:
+                content_needed = max(1, file_offset + fetch_file_limit - _unique_file_count(name_matches))
+                content_file_limit = content_needed + len(name_file_ids)
+                content_candidates = _content_matches(
+                    req.query,
+                    limit=max(query_limit, content_file_limit * per_file_limit),
+                    file_types=file_types,
+                    file_limit=content_file_limit,
+                    file_offset=0,
+                    per_file_limit=per_file_limit,
+                    modified_from=modified_from,
+                    modified_to=modified_to,
+                    excluded_folder_paths=excluded_folder_paths,
+                )
             content_results = []
             seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
             for item in content_candidates:
@@ -257,4 +264,8 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         file_count=_unique_file_count(results),
         file_limit=file_limit,
         has_more=has_more and (file_offset + file_limit) < MAX_SEARCH_FILE_LIMIT,
+        search_index_state=str(search_index_status.get("state") or "ready"),
+        search_index_stale=not content_index_ready,
+        search_index_updated_at=search_index_status.get("updated_at"),
+        search_index_error=search_index_status.get("error"),
     )

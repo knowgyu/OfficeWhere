@@ -360,6 +360,10 @@ class SearchResponse(BaseModel):
     file_count: int = 0
     file_limit: int = 20
     has_more: bool = False
+    search_index_state: str = "ready"
+    search_index_stale: bool = False
+    search_index_updated_at: Optional[str] = None
+    search_index_error: Optional[str] = None
 
 
 class SchedulerSettings(BaseModel):

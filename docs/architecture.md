@@ -52,6 +52,10 @@ PDF 텍스트 추출은 PDFium 기반 `pypdfium2`로 수행합니다. `backend/c
 
 `/api/provider/v1`은 외부 자동화가 사용할 수 있는 얇은 provider 계약입니다. `where-desk` 같은 업무형 agent는 OfficeWhere SQLite를 직접 읽지 않고 이 계약을 통해 검색, 파일 목록, 중복, 캐시된 문서 묶음, 비교 기능만 호출합니다. provider의 문서 묶음 조회는 cache-only snapshot이며, 파생 인덱스 새로고침/repair 표시나 누락된 fingerprint 생성까지 포함해 상태 변경 동작을 수행하지 않습니다. 재색인, 설정 변경, 파일 등록/삭제, OS 파일 열기 같은 작업도 명시적 사용자 의도 없이 자동 호출하지 않습니다. 자세한 규칙은 `docs/provider-contract.md`를 봅니다.
 
+## Startup and derived-index repair
+
+릴리즈 시작 경로는 앱 가용성을 먼저 보장해야 합니다. 구조적 SQLite schema 준비는 startup에서 수행하지만, FTS 검색 인덱스나 Excel 파생 인덱스처럼 재생성 가능한 대용량 derived data는 startup을 막지 않고 `repair_needed`/`refreshing` 상태로 표시한 뒤 백그라운드에서 복구합니다. 세부 정책은 `docs/startup-derived-index-repair.md`를 봅니다.
+
 ## 운영 원칙
 
 - 새 의존성보다 기존 seam과 테스트를 우선합니다.

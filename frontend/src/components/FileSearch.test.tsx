@@ -412,6 +412,23 @@ describe('FileSearch', () => {
       })
     })
 
+    it('shows a content-index repair notice when search metadata is stale', async () => {
+      mockedSearchQuery.mockResolvedValue({
+        data: {
+          ...emptyResponse('회의'),
+          search_index_state: 'refreshing',
+          search_index_stale: true,
+        },
+      })
+
+      renderInactiveFileSearch()
+      await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
+      await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      expect(await screen.findByText('본문 검색 인덱스를 업데이트하는 중입니다')).toBeInTheDocument()
+      expect(screen.getByText(/파일명 검색 결과는 먼저 표시됩니다/)).toBeInTheDocument()
+    })
+
     it('shows current watched folders directly on the search page', async () => {
       mockedLibraryGetSettings.mockResolvedValue({
         data: {

@@ -17,7 +17,11 @@ from ..database import (
     delete_files_by_extensions,
     delete_files_by_types,
     get_all_files,
+    get_excel_index_status,
+    get_search_index_status,
     get_setting,
+    repair_excel_index_version,
+    repair_search_indexes,
     save_file_chunks,
     search_chunks,
     set_setting,
@@ -35,6 +39,7 @@ from .word_analysis import extract_word_blocks, inspect_word_blocks
 logger = logging.getLogger(__name__)
 
 _scheduler_thread: threading.Thread | None = None
+_startup_repair_thread: threading.Thread | None = None
 _MAX_WORKERS = get_worker_count()
 
 
@@ -510,6 +515,44 @@ def _scheduler_loop():
         except Exception:
             diagnostic_id = uuid.uuid4().hex[:8]
             logger.exception("scheduler error diagnostic_id=%s", diagnostic_id)
+
+
+def _startup_derived_index_repair_loop():
+    try:
+        excel_status = get_excel_index_status()
+        if excel_status.get("stale"):
+            repair_excel_index_version(reason="startup_background")
+
+        search_status = get_search_index_status()
+        if search_status.get("stale"):
+            repair_search_indexes(reason="startup_background")
+    except Exception:
+        diagnostic_id = uuid.uuid4().hex[:8]
+        logger.exception("startup derived index repair failed diagnostic_id=%s", diagnostic_id)
+
+
+def start_startup_derived_index_repair():
+    """Kick off rebuildable index repair without delaying backend health."""
+
+    global _startup_repair_thread
+    if _startup_repair_thread and _startup_repair_thread.is_alive():
+        return
+
+    try:
+        needs_repair = bool(get_excel_index_status().get("stale") or get_search_index_status().get("stale"))
+    except Exception:
+        diagnostic_id = uuid.uuid4().hex[:8]
+        logger.exception("startup derived index repair status check failed diagnostic_id=%s", diagnostic_id)
+        return
+    if not needs_repair:
+        return
+
+    _startup_repair_thread = threading.Thread(
+        target=_startup_derived_index_repair_loop,
+        daemon=True,
+        name="startup-derived-index-repair",
+    )
+    _startup_repair_thread.start()
 
 
 def start_scheduler():

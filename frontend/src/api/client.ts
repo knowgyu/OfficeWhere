@@ -437,6 +437,10 @@ export interface SearchResponse {
   file_count: number
   file_limit: number
   has_more: boolean
+  search_index_state?: 'missing' | 'ready' | 'stale' | 'refreshing' | 'repair_needed' | 'error'
+  search_index_stale?: boolean
+  search_index_updated_at?: string | null
+  search_index_error?: string | null
 }
 
 export interface SchedulerSettings {

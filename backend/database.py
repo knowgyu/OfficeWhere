@@ -40,7 +40,14 @@ WORD_COMPARISON_ARTIFACT_KIND = "word_ordered_text"
 PPT_COMPARISON_ARTIFACT_KIND = "ppt_ordered_text"
 WORD_COMPARISON_PARSER_VERSION = "word-blocks-v1"
 PPT_COMPARISON_PARSER_VERSION = "ppt-slides-v1"
+SEARCH_INDEX_VERSION_KEY = "search_index_version"
+SEARCH_INDEX_STATE_KEY = "search_index_state"
+SEARCH_INDEX_UPDATED_AT_KEY = "search_index_updated_at"
+SEARCH_INDEX_ERROR_KEY = "search_index_error"
 EXCEL_INDEX_VERSION_KEY = "excel_index_version"
+EXCEL_INDEX_STATE_KEY = "excel_index_state"
+EXCEL_INDEX_UPDATED_AT_KEY = "excel_index_updated_at"
+EXCEL_INDEX_ERROR_KEY = "excel_index_error"
 LIBRARY_GROUP_INDEX_VERSION = "2"
 LIBRARY_GROUP_INDEX_VERSION_KEY = "library_group_index_version"
 LIBRARY_GROUP_INDEX_STATE_KEY = "library_group_index_state"
@@ -116,6 +123,8 @@ class InitialIndexStagingDatabase:
             trigger_started = perf_counter()
             _create_fts_triggers(cursor)
             metrics["create_triggers_ms"] = elapsed_ms(trigger_started)
+            _set_search_index_state_with_cursor(cursor, "ready", set_current_version=True)
+            _set_excel_index_state_with_cursor(cursor, "ready", set_current_version=True)
 
             quick_check_started = perf_counter()
             cursor.execute("PRAGMA quick_check")
@@ -382,6 +391,128 @@ def _set_setting_with_cursor(cursor: sqlite3.Cursor, key: str, value: str):
         """,
         (key, value),
     )
+
+
+def _set_derived_index_state_with_cursor(
+    cursor: sqlite3.Cursor,
+    *,
+    version_key: str,
+    state_key: str,
+    updated_at_key: str,
+    error_key: str,
+    current_version: str,
+    state: str,
+    error: str = "",
+    updated_at: Optional[str] = None,
+    set_current_version: bool = False,
+) -> None:
+    now = updated_at or datetime.now().isoformat()
+    if set_current_version:
+        _set_setting_with_cursor(cursor, version_key, current_version)
+    _set_setting_with_cursor(cursor, state_key, state)
+    _set_setting_with_cursor(cursor, updated_at_key, now)
+    _set_setting_with_cursor(cursor, error_key, error)
+
+
+def _set_search_index_state_with_cursor(
+    cursor: sqlite3.Cursor,
+    state: str,
+    *,
+    error: str = "",
+    updated_at: Optional[str] = None,
+    set_current_version: bool = False,
+) -> None:
+    _set_derived_index_state_with_cursor(
+        cursor,
+        version_key=SEARCH_INDEX_VERSION_KEY,
+        state_key=SEARCH_INDEX_STATE_KEY,
+        updated_at_key=SEARCH_INDEX_UPDATED_AT_KEY,
+        error_key=SEARCH_INDEX_ERROR_KEY,
+        current_version=SEARCH_INDEX_VERSION,
+        state=state,
+        error=error,
+        updated_at=updated_at,
+        set_current_version=set_current_version,
+    )
+
+
+def _set_excel_index_state_with_cursor(
+    cursor: sqlite3.Cursor,
+    state: str,
+    *,
+    error: str = "",
+    updated_at: Optional[str] = None,
+    set_current_version: bool = False,
+) -> None:
+    _set_derived_index_state_with_cursor(
+        cursor,
+        version_key=EXCEL_INDEX_VERSION_KEY,
+        state_key=EXCEL_INDEX_STATE_KEY,
+        updated_at_key=EXCEL_INDEX_UPDATED_AT_KEY,
+        error_key=EXCEL_INDEX_ERROR_KEY,
+        current_version=EXCEL_INDEX_VERSION,
+        state=state,
+        error=error,
+        updated_at=updated_at,
+        set_current_version=set_current_version,
+    )
+
+
+def _derived_index_status_with_cursor(
+    cursor: sqlite3.Cursor,
+    *,
+    version_key: str,
+    state_key: str,
+    updated_at_key: str,
+    error_key: str,
+    current_version: str,
+) -> Dict[str, Any]:
+    version = _get_setting_with_cursor(cursor, version_key, "")
+    stored_state = _get_setting_with_cursor(cursor, state_key, "")
+    if version != current_version:
+        state = "refreshing" if stored_state == "refreshing" else "repair_needed"
+    else:
+        state = stored_state or "ready"
+    return {
+        "version": version,
+        "expected_version": current_version,
+        "state": state,
+        "stale": version != current_version or state != "ready",
+        "updated_at": _get_setting_with_cursor(cursor, updated_at_key, "") or None,
+        "error": _get_setting_with_cursor(cursor, error_key, "") or None,
+    }
+
+
+def _search_index_status_with_cursor(cursor: sqlite3.Cursor) -> Dict[str, Any]:
+    return _derived_index_status_with_cursor(
+        cursor,
+        version_key=SEARCH_INDEX_VERSION_KEY,
+        state_key=SEARCH_INDEX_STATE_KEY,
+        updated_at_key=SEARCH_INDEX_UPDATED_AT_KEY,
+        error_key=SEARCH_INDEX_ERROR_KEY,
+        current_version=SEARCH_INDEX_VERSION,
+    )
+
+
+def _excel_index_status_with_cursor(cursor: sqlite3.Cursor) -> Dict[str, Any]:
+    return _derived_index_status_with_cursor(
+        cursor,
+        version_key=EXCEL_INDEX_VERSION_KEY,
+        state_key=EXCEL_INDEX_STATE_KEY,
+        updated_at_key=EXCEL_INDEX_UPDATED_AT_KEY,
+        error_key=EXCEL_INDEX_ERROR_KEY,
+        current_version=EXCEL_INDEX_VERSION,
+    )
+
+
+def get_search_index_status() -> Dict[str, Any]:
+    with _read_connection() as conn:
+        return _search_index_status_with_cursor(conn.cursor())
+
+
+def get_excel_index_status() -> Dict[str, Any]:
+    with _read_connection() as conn:
+        return _excel_index_status_with_cursor(conn.cursor())
 
 
 def _set_library_group_index_state_with_cursor(
@@ -861,7 +992,7 @@ def _rebuild_search_indexes(cursor: sqlite3.Cursor, *, optimize: bool = True) ->
             cursor.execute("INSERT INTO file_search_trigram(file_search_trigram) VALUES ('optimize')")
             metrics["fts_trigram_optimize_ms"] = elapsed_ms(trigram_optimize_started)
 
-    _set_setting_with_cursor(cursor, "search_index_version", SEARCH_INDEX_VERSION)
+    _set_setting_with_cursor(cursor, SEARCH_INDEX_VERSION_KEY, SEARCH_INDEX_VERSION)
     return metrics
 
 
@@ -1156,41 +1287,209 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
     )
 
 
+def _file_chunk_count_with_cursor(cursor: sqlite3.Cursor) -> int:
+    cursor.execute("SELECT COUNT(*) FROM file_chunks")
+    return int(cursor.fetchone()[0])
+
+
+def _excel_file_count_with_cursor(cursor: sqlite3.Cursor) -> int:
+    cursor.execute("SELECT COUNT(*) FROM registered_files WHERE file_type = 'Excel'")
+    return int(cursor.fetchone()[0])
+
+
+def _ensure_search_index_version(cursor: sqlite3.Cursor) -> None:
+    status = _search_index_status_with_cursor(cursor)
+    if status["version"] == SEARCH_INDEX_VERSION and status["state"] == "ready":
+        return
+
+    if _file_chunk_count_with_cursor(cursor) <= 0:
+        _set_search_index_state_with_cursor(cursor, "ready", set_current_version=True)
+        return
+
+    error = (
+        "incomplete_search_index_refresh_recovered_on_startup"
+        if status["state"] == "refreshing"
+        else f"search_index_version_changed:{status['version'] or 'missing'}->{SEARCH_INDEX_VERSION}"
+    )
+    _set_search_index_state_with_cursor(cursor, "repair_needed", error=error)
+    log_index_perf(
+        "search_index_repair_deferred",
+        previous_version=status["version"],
+        next_version=SEARCH_INDEX_VERSION,
+        previous_state=status["state"],
+        file_chunk_count=_file_chunk_count_with_cursor(cursor),
+    )
+
+
+def repair_search_indexes(reason: str = "background") -> Dict[str, Any]:
+    """Rebuild search-text and FTS indexes outside the backend startup path."""
+
+    metrics: Dict[str, Any] = {"reason": reason}
+    repair_started = perf_counter()
+    try:
+        with _write_connection() as conn:
+            cursor = conn.cursor()
+            status = _search_index_status_with_cursor(cursor)
+            metrics.update(
+                previous_version=status["version"],
+                previous_state=status["state"],
+                file_chunk_count=_file_chunk_count_with_cursor(cursor),
+            )
+            if status["version"] == SEARCH_INDEX_VERSION and status["state"] == "ready":
+                metrics.update(success=True, skipped=True, total_ms=elapsed_ms(repair_started))
+                log_index_perf("search_index_repair_done", **metrics)
+                return metrics
+
+            _set_search_index_state_with_cursor(cursor, "refreshing", error=reason)
+            conn.commit()
+            log_index_perf("search_index_repair_start", **metrics)
+
+            try:
+                drop_started = perf_counter()
+                _drop_current_search_indexes(cursor)
+                metrics["drop_fts_ms"] = elapsed_ms(drop_started)
+
+                refresh_started = perf_counter()
+                _refresh_search_text(cursor)
+                metrics["refresh_search_text_ms"] = elapsed_ms(refresh_started)
+
+                create_started = perf_counter()
+                _create_fts_tables(cursor)
+                metrics["create_fts_tables_ms"] = elapsed_ms(create_started)
+
+                metrics.update(_rebuild_search_indexes(cursor, optimize=True))
+
+                trigger_started = perf_counter()
+                _create_fts_triggers(cursor)
+                metrics["create_fts_triggers_ms"] = elapsed_ms(trigger_started)
+
+                _set_search_index_state_with_cursor(cursor, "ready", set_current_version=True)
+                conn.commit()
+                metrics.update(success=True, skipped=False, total_ms=elapsed_ms(repair_started))
+                log_index_perf("search_index_repair_done", **metrics)
+                return metrics
+            except Exception as exc:
+                conn.rollback()
+                _set_search_index_state_with_cursor(cursor, "error", error=str(exc))
+                conn.commit()
+                metrics.update(
+                    success=False,
+                    error_type=exc.__class__.__name__,
+                    error=str(exc),
+                    total_ms=elapsed_ms(repair_started),
+                )
+                log_index_perf("search_index_repair_done", **metrics)
+                return metrics
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(repair_started),
+        )
+        log_index_perf("search_index_repair_done", **metrics)
+        return metrics
+
+
 def _ensure_excel_index_version(cursor: sqlite3.Cursor) -> None:
     current = _get_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, "")
-    if current == EXCEL_INDEX_VERSION:
+    status = _excel_index_status_with_cursor(cursor)
+    if current == EXCEL_INDEX_VERSION and status["state"] == "ready":
         return
 
-    cursor.execute("SELECT COUNT(*) FROM registered_files WHERE file_type = 'Excel'")
-    excel_file_count = int(cursor.fetchone()[0])
+    excel_file_count = _excel_file_count_with_cursor(cursor)
     if excel_file_count <= 0:
         _set_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, EXCEL_INDEX_VERSION)
+        _set_excel_index_state_with_cursor(cursor, "ready", set_current_version=True)
         return
 
-    cursor.execute("DELETE FROM excel_cell_index")
-    cursor.execute("DELETE FROM excel_sheet_index")
-    cursor.execute(
-        """
-        DELETE FROM file_chunks
-        WHERE file_id IN (SELECT id FROM registered_files WHERE file_type = 'Excel')
-        """
+    error = (
+        "incomplete_excel_index_refresh_recovered_on_startup"
+        if status["state"] == "refreshing"
+        else f"excel_index_version_changed:{current or 'missing'}->{EXCEL_INDEX_VERSION}"
     )
-    cursor.execute(
-        """
-        DELETE FROM document_fingerprints
-        WHERE file_id IN (SELECT id FROM registered_files WHERE file_type = 'Excel')
-        """
-    )
-    cursor.execute("UPDATE registered_files SET file_mtime = NULL WHERE file_type = 'Excel'")
-    cursor.execute("DELETE FROM comparison_cache")
-    _set_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, EXCEL_INDEX_VERSION)
-    _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="excel_index_version_changed")
+    _set_excel_index_state_with_cursor(cursor, "repair_needed", error=error)
     log_index_perf(
-        "db_excel_index_reset",
+        "db_excel_index_repair_deferred",
         previous_version=current,
         next_version=EXCEL_INDEX_VERSION,
+        previous_state=status["state"],
         excel_file_count=excel_file_count,
     )
+
+
+def repair_excel_index_version(reason: str = "background") -> Dict[str, Any]:
+    """Reset stale Excel-derived rows outside the backend startup path."""
+
+    metrics: Dict[str, Any] = {"reason": reason}
+    repair_started = perf_counter()
+    try:
+        with _write_connection() as conn:
+            cursor = conn.cursor()
+            current = _get_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, "")
+            status = _excel_index_status_with_cursor(cursor)
+            excel_file_count = _excel_file_count_with_cursor(cursor)
+            metrics.update(
+                previous_version=current,
+                next_version=EXCEL_INDEX_VERSION,
+                previous_state=status["state"],
+                excel_file_count=excel_file_count,
+            )
+            if current == EXCEL_INDEX_VERSION and status["state"] == "ready":
+                metrics.update(success=True, skipped=True, total_ms=elapsed_ms(repair_started))
+                log_index_perf("db_excel_index_repair_done", **metrics)
+                return metrics
+
+            _set_excel_index_state_with_cursor(cursor, "refreshing", error=reason)
+            conn.commit()
+            log_index_perf("db_excel_index_repair_start", **metrics)
+
+            try:
+                if excel_file_count > 0:
+                    cursor.execute("DELETE FROM excel_cell_index")
+                    cursor.execute("DELETE FROM excel_sheet_index")
+                    cursor.execute(
+                        """
+                        DELETE FROM file_chunks
+                        WHERE file_id IN (SELECT id FROM registered_files WHERE file_type = 'Excel')
+                        """
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM document_fingerprints
+                        WHERE file_id IN (SELECT id FROM registered_files WHERE file_type = 'Excel')
+                        """
+                    )
+                    cursor.execute("UPDATE registered_files SET file_mtime = NULL WHERE file_type = 'Excel'")
+                    cursor.execute("DELETE FROM comparison_cache")
+                    _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="excel_index_version_changed")
+
+                _set_excel_index_state_with_cursor(cursor, "ready", set_current_version=True)
+                conn.commit()
+                metrics.update(success=True, skipped=False, total_ms=elapsed_ms(repair_started))
+                log_index_perf("db_excel_index_repair_done", **metrics)
+                return metrics
+            except Exception as exc:
+                conn.rollback()
+                _set_excel_index_state_with_cursor(cursor, "error", error=str(exc))
+                conn.commit()
+                metrics.update(
+                    success=False,
+                    error_type=exc.__class__.__name__,
+                    error=str(exc),
+                    total_ms=elapsed_ms(repair_started),
+                )
+                log_index_perf("db_excel_index_repair_done", **metrics)
+                return metrics
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(repair_started),
+        )
+        log_index_perf("db_excel_index_repair_done", **metrics)
+        return metrics
 
 
 def _prune_unsupported_file_extensions(cursor: sqlite3.Cursor) -> int:
@@ -1246,19 +1545,21 @@ def init_db():
             metrics["unsupported_pruned"] = _prune_unsupported_file_extensions(cursor)
             metrics["unsupported_prune_ms"] = elapsed_ms(prune_started)
 
-            search_index_version = _get_setting_with_cursor(cursor, "search_index_version")
-            metrics["previous_search_index_version"] = search_index_version
-            if search_index_version != SEARCH_INDEX_VERSION:
-                search_started = perf_counter()
-                _refresh_search_text(cursor)
-                _drop_current_search_indexes(cursor)
-                _create_fts_tables(cursor)
-                _create_fts_triggers(cursor)
-                metrics.update(_rebuild_search_indexes(cursor, optimize=True))
-                metrics["search_rebuild_ms"] = elapsed_ms(search_started)
+            search_started = perf_counter()
+            search_status = _search_index_status_with_cursor(cursor)
+            metrics["previous_search_index_version"] = search_status["version"]
+            metrics["previous_search_index_state"] = search_status["state"]
+            _ensure_search_index_version(cursor)
+            next_search_status = _search_index_status_with_cursor(cursor)
+            metrics["search_index_state"] = next_search_status["state"]
+            metrics["search_index_deferred"] = bool(next_search_status["stale"])
+            metrics["search_index_check_ms"] = elapsed_ms(search_started)
 
             excel_started = perf_counter()
             _ensure_excel_index_version(cursor)
+            excel_status = _excel_index_status_with_cursor(cursor)
+            metrics["excel_index_state"] = excel_status["state"]
+            metrics["excel_index_deferred"] = bool(excel_status["stale"])
             metrics["excel_index_check_ms"] = elapsed_ms(excel_started)
 
             commit_started = perf_counter()

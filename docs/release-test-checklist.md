@@ -52,3 +52,10 @@
 - [ ] macOS dmg/zip app bundle에는 `Contents/Resources/python-runtime/bin/python3`와 backend source가 있다.
 - [ ] GitHub Release에는 Windows x64 zip, macOS arm64 dmg/zip, 각 SHA256 파일이 있다.
 - [ ] Windows 업데이트 다운로드는 SHA256 검증 실패 시 기존 앱을 건드리지 않고 명확한 오류를 보여준다.
+
+## Startup derived-index regression
+
+- 기존 app DB의 `search_index_version` 또는 `excel_index_version`이 오래된 값이어도 앱 창과 backend health가 먼저 열리는지 확인합니다.
+- 검색 화면에서 본문 검색 인덱스 업데이트 안내가 표시되고 파일명 검색이 계속 가능한지 확인합니다.
+- `index-performance.log`에 `search_index_repair_start` / `search_index_repair_done` 또는 `db_excel_index_repair_*` 이벤트가 남는지 확인합니다.
+- 원본 Office 문서가 삭제/수정되지 않았는지 확인합니다.

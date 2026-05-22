@@ -11,13 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .database import get_db_path, init_db, pop_setting
+from .database import get_db_path, get_excel_index_status, get_search_index_status, init_db, pop_setting
 from .api.files import router as files_router
 from .api.check import router as check_router
 from .api.search import router as search_router
 from .api.library import router as library_router
 from .api.provider import router as provider_router
-from .core.indexer import start_scheduler
+from .core.indexer import start_scheduler, start_startup_derived_index_repair
 from .core.tutorial_examples import cleanup_tutorial_library, create_tutorial_library
 
 
@@ -48,10 +48,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("failed to clean stale tutorial library", exc_info=True)
     start_scheduler()
+    start_startup_derived_index_repair()
     yield
 
 
-app = FastAPI(title="officewhere", version="0.10.7", lifespan=lifespan)
+app = FastAPI(title="officewhere", version="0.11.0", lifespan=lifespan)
 
 # CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(
@@ -77,6 +78,8 @@ async def health():
         "status": "ok",
         "version": app.version,
         "db_path": get_db_path(),
+        "search_index": get_search_index_status(),
+        "excel_index": get_excel_index_status(),
     }
 
 

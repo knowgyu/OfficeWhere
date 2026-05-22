@@ -77,6 +77,20 @@ interface SearchMeta {
   fileCount: number
   fileLimit: number
   hasMore: boolean
+  searchIndexState?: SearchResponse['search_index_state']
+  searchIndexStale: boolean
+  searchIndexError?: string | null
+}
+
+function emptySearchMeta(fileLimit = INITIAL_SEARCH_FILE_LIMIT): SearchMeta {
+  return {
+    fileCount: 0,
+    fileLimit,
+    hasMore: false,
+    searchIndexState: 'ready',
+    searchIndexStale: false,
+    searchIndexError: null,
+  }
 }
 
 const MODIFIED_DATE_FILTERS: Array<{ label: string; value: ModifiedDateFilter }> = [
@@ -228,11 +242,7 @@ export default function FileSearch({
   const snackbar = useSnackbar()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
-  const [searchMeta, setSearchMeta] = useState<SearchMeta>({
-    fileCount: 0,
-    fileLimit: INITIAL_SEARCH_FILE_LIMIT,
-    hasMore: false,
-  })
+  const [searchMeta, setSearchMeta] = useState<SearchMeta>(() => emptySearchMeta())
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [initialDataLoading, setInitialDataLoading] = useState(false)
@@ -309,6 +319,9 @@ export default function FileSearch({
       fileCount: nextFileCount,
       fileLimit: mode === 'more' ? nextFileCount : data.file_limit ?? fallbackFileLimit,
       hasMore: Boolean(data.has_more),
+      searchIndexState: data.search_index_state ?? 'ready',
+      searchIndexStale: Boolean(data.search_index_stale),
+      searchIndexError: data.search_index_error ?? null,
     })
     setExpandedContentFiles((current) => {
       const nextContentFileKeys = getContentFileKeys(data.results)
@@ -340,11 +353,7 @@ export default function FileSearch({
       if (!q.trim()) {
         setResults([])
         resultsRef.current = []
-        setSearchMeta({
-          fileCount: 0,
-          fileLimit: INITIAL_SEARCH_FILE_LIMIT,
-          hasMore: false,
-        })
+        setSearchMeta(emptySearchMeta())
         setSearched(false)
         setExpandedContentFiles(new Set())
         contentMatchesDefaultExpandedRef.current = true
@@ -391,11 +400,7 @@ export default function FileSearch({
         if (requestId !== searchRequestSeq.current || controller.signal.aborted) return false
         setResults([])
         resultsRef.current = []
-        setSearchMeta({
-          fileCount: 0,
-          fileLimit: INITIAL_SEARCH_FILE_LIMIT,
-          hasMore: false,
-        })
+        setSearchMeta(emptySearchMeta())
         snackbar.error('검색에 실패했습니다.')
         return false
       } finally {
@@ -565,11 +570,7 @@ export default function FileSearch({
     if (!query.trim()) {
       setResults([])
       resultsRef.current = []
-      setSearchMeta({
-        fileCount: 0,
-        fileLimit: INITIAL_SEARCH_FILE_LIMIT,
-        hasMore: false,
-      })
+      setSearchMeta(emptySearchMeta())
       setSearched(false)
       setExpandedContentFiles(new Set())
       contentMatchesDefaultExpandedRef.current = true
@@ -843,6 +844,20 @@ export default function FileSearch({
     return () => window.clearTimeout(timer)
   }, [contentFileKeys.length, loading, onTutorialStep, query, results.length, searched, tutorialStep])
 
+  const searchIndexNotice =
+    searchMeta.searchIndexStale && searchScope !== 'filename'
+      ? {
+          title:
+            searchMeta.searchIndexState === 'error'
+              ? '본문 검색 인덱스 확인이 필요합니다'
+              : '본문 검색 인덱스를 업데이트하는 중입니다',
+          description:
+            searchMeta.searchIndexState === 'error'
+              ? `파일명 검색은 계속 사용할 수 있습니다. ${searchMeta.searchIndexError ? `진단: ${searchMeta.searchIndexError}` : '앱을 다시 열거나 문서 새로고침을 실행해 주세요.'}`
+              : '앱은 그대로 사용할 수 있고 파일명 검색 결과는 먼저 표시됩니다. 문서 내용 검색은 업데이트가 끝나면 다시 완전해집니다.',
+        }
+      : null
+
   return (
     <div className="space-y-6">
       <Card variant="elevated" className="console-panel p-4 md:p-5 space-y-4">
@@ -871,11 +886,7 @@ export default function FileSearch({
                         setQuery('')
                         setResults([])
                         resultsRef.current = []
-                        setSearchMeta({
-                          fileCount: 0,
-                          fileLimit: INITIAL_SEARCH_FILE_LIMIT,
-                          hasMore: false,
-                        })
+                        setSearchMeta(emptySearchMeta())
                         setSearched(false)
                         setExcludedFolderPaths([])
                         setExpandedContentFiles(new Set())
@@ -1093,6 +1104,20 @@ export default function FileSearch({
           </div>
         </div>
       </Card>
+
+      {searchIndexNotice && (
+        <Card variant="outlined" className="p-4 shadow-none border-[var(--md-sys-color-outline-variant)]">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--md-sys-color-secondary-container)] text-[var(--md-sys-color-on-secondary-container)]">
+              <Icon name={searchMeta.searchIndexState === 'error' ? 'error' : 'sync'} size={18} />
+            </span>
+            <div className="space-y-1">
+              <p className="type-title-sm text-[var(--md-sys-color-on-surface)]">{searchIndexNotice.title}</p>
+              <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">{searchIndexNotice.description}</p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {loading && (
         <div className="flex items-center justify-center gap-3 py-16 type-body-md text-[var(--md-sys-color-on-surface-variant)]">
