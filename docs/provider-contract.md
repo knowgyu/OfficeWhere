@@ -23,13 +23,17 @@ Packaged Electron uses a dynamic loopback backend port. External CLI integration
 <Electron userData>/provider-discovery.json
 ```
 
+On Windows v0.12.0 and later, packaged normal launches resolve this to
+`%LOCALAPPDATA%\OfficeWhere\provider-discovery.json`. The previous
+`%APPDATA%\OfficeWhere` / `AppData\Roaming\OfficeWhere` profile is legacy.
+
 The document is local metadata only. It carries no API key or source document contents. Shape:
 
 ```json
 {
   "provider": "OfficeWhere",
   "contract_version": "v1",
-  "app_version": "0.11.1",
+  "app_version": "0.12.0",
   "api_base_path": "/api/provider/v1",
   "base_url": "http://127.0.0.1:<dynamic-port>",
   "health_url": "http://127.0.0.1:<dynamic-port>/api/provider/v1/health",

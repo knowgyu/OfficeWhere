@@ -43,10 +43,13 @@ def _guard_e2e() -> None:
     data_dir = os.environ.get("OW_DATA_DIR", "").strip()
     # Markers identifying the user's real OfficeWhere data directory across OS.
     # macOS:   ~/Library/Application Support/OfficeWhere
-    # Windows: %APPDATA%\OfficeWhere = C:\Users\<user>\AppData\Roaming\OfficeWhere
+    # Windows: %LOCALAPPDATA%\OfficeWhere is current; legacy builds used
+    # %APPDATA%\OfficeWhere = C:\Users\<user>\AppData\Roaming\OfficeWhere.
     # Linux:   ~/.config/OfficeWhere
     real_markers = (
         "Application Support/OfficeWhere",
+        "AppData\\Local\\OfficeWhere",
+        "AppData/Local/OfficeWhere",
         "AppData\\Roaming\\OfficeWhere",
         "AppData/Roaming/OfficeWhere",
         ".config/OfficeWhere",

@@ -47,6 +47,8 @@ def test_guard_refuses_empty_data_dir(monkeypatch, capsys):
     "real_path",
     [
         "/Users/me/Library/Application Support/OfficeWhere/backend-data",
+        "C:\\Users\\me\\AppData\\Local\\OfficeWhere\\backend-data",
+        "C:/Users/me/AppData/Local/OfficeWhere/backend-data",
         "C:\\Users\\me\\AppData\\Roaming\\OfficeWhere\\backend-data",
         "/home/me/.config/OfficeWhere/backend-data",
     ],

@@ -20,6 +20,7 @@ import {
   writeProviderDiscovery,
   type ProviderDiscoveryHandle,
 } from './providerDiscovery'
+import { resolveWindowsLocalAppDataPaths } from './appPaths'
 import type { ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -161,6 +162,23 @@ let backendReadyPromise: Promise<string> | null = null
 let providerDiscoveryHandle: ProviderDiscoveryHandle | null = null
 
 app.setName('OfficeWhere')
+
+// Windows packages should keep app-owned data out of the roaming profile.
+// Explicit --user-data-dir launches (notably Playwright E2E fixtures) are
+// intentionally left untouched so isolated profiles remain isolated.
+const windowsLocalAppDataPaths = resolveWindowsLocalAppDataPaths({
+  platform: process.platform,
+  argv: process.argv,
+  env: process.env,
+  currentAppDataPath: app.getPath('appData'),
+  explicitUserDataDir: app.commandLine.hasSwitch('user-data-dir'),
+})
+if (windowsLocalAppDataPaths) {
+  fs.mkdirSync(windowsLocalAppDataPaths.appData, { recursive: true })
+  fs.mkdirSync(windowsLocalAppDataPaths.userData, { recursive: true })
+  app.setPath('appData', windowsLocalAppDataPaths.appData)
+  app.setPath('userData', windowsLocalAppDataPaths.userData)
+}
 
 // In E2E mode we bypass the single-instance lock so multiple test workers can
 // run side-by-side and a developer's regular OfficeWhere instance does not
