@@ -22,6 +22,7 @@ from .library_scan_cache import (
     save_entry,
     should_force_full_scan,
 )
+from .everything_scanner import discover_supported_paths
 
 
 @dataclass
@@ -35,6 +36,9 @@ class ScanCollection:
     unsupported_file_count: int = 0
     unsupported_extensions_by_suffix: Dict[str, int] | None = None
     discovery_source: str = "filesystem"
+    discovery_hint: str = ""
+    discovery_help_url: str = ""
+    discovery_fallback_reason: str = ""
     cache_hit: bool = False
     cache_fallback_reason: str = ""
     cache_hit_dir_count: int = 0
@@ -66,7 +70,14 @@ class _ScanState:
         else:
             self.unsupported_extensions["<none>"] += 1
 
-    def to_collection(self, *, cache_fallback_reason: str = "") -> ScanCollection:
+    def to_collection(
+        self,
+        *,
+        cache_fallback_reason: str = "",
+        discovery_hint: str = "",
+        discovery_help_url: str = "",
+        discovery_fallback_reason: str = "",
+    ) -> ScanCollection:
         return ScanCollection(
             paths=sorted(self.paths),
             visited_dir_count=self.visited_dir_count,
@@ -76,6 +87,9 @@ class _ScanState:
             inaccessible_dirs_by_name=sorted_counter_map(self.inaccessible_dirs),
             unsupported_file_count=sum(self.unsupported_extensions.values()),
             unsupported_extensions_by_suffix=sorted_counter_map(self.unsupported_extensions),
+            discovery_hint=discovery_hint,
+            discovery_help_url=discovery_help_url,
+            discovery_fallback_reason=discovery_fallback_reason,
             cache_fallback_reason=cache_fallback_reason,
         )
 
@@ -222,6 +236,33 @@ def _scan_directory(folder: Path, recursive: bool, supported: set[str], excluded
     return state
 
 
+def _collection_from_everything(
+    folder: Path,
+    recursive: bool,
+    supported: set[str],
+    excluded_keys: set[str],
+) -> tuple[ScanCollection | None, str, str, str]:
+    discovery = discover_supported_paths(str(folder), recursive, supported, excluded_keys)
+    if discovery.available:
+        if not discovery.paths:
+            return None, "", "", "everything_empty_result"
+        return (
+            ScanCollection(
+                paths=discovery.paths,
+                discovery_source="everything_sdk",
+                discovery_hint="",
+                discovery_help_url="",
+                discovery_fallback_reason="",
+            ),
+            "",
+            "",
+            "",
+        )
+    if discovery.unavailable_reason in {"non_windows", "disabled"}:
+        return None, "", "", discovery.unavailable_reason
+    return None, discovery.hint, discovery.help_url, discovery.unavailable_reason
+
+
 def collect_supported_paths_with_stats(
     folder_path: str,
     recursive: bool,
@@ -252,8 +293,25 @@ def collect_supported_paths_with_stats(
         if cached is not None:
             return cached
 
+    everything_hint = ""
+    everything_help_url = ""
+    everything_fallback_reason = ""
+    everything_collection, everything_hint, everything_help_url, everything_fallback_reason = _collection_from_everything(
+        folder,
+        recursive,
+        supported,
+        excluded_keys,
+    )
+    if everything_collection is not None:
+        return everything_collection
+
     state = _scan_directory(folder, recursive, supported, excluded_keys)
-    collection = state.to_collection(cache_fallback_reason=cache_fallback_reason)
+    collection = state.to_collection(
+        cache_fallback_reason=cache_fallback_reason,
+        discovery_hint=everything_hint,
+        discovery_help_url=everything_help_url,
+        discovery_fallback_reason=everything_fallback_reason,
+    )
 
     if use_cache and is_high_confidence_root(os.path.normpath(str(folder))) and state.directory_signatures:
         try:

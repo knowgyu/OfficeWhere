@@ -192,6 +192,34 @@ describe('FileManager', () => {
       expect(screen.getAllByText('하위 폴더 포함').length).toBeGreaterThanOrEqual(2)
     })
 
+    it('shows Everything discovery setup hints during refresh', async () => {
+      mocked.rescanStatus.mockResolvedValueOnce({
+        data: {
+          ...idleStatus,
+          running: true,
+          stage: 'scanning',
+          mode: 'fast',
+          folders_total: 1,
+          folders_processed: 1,
+          discovery_source: 'filesystem',
+          discovery_hint: 'Everything SDK DLL이 없어 기본 폴더 스캔으로 진행했습니다.',
+          discovery_help_url: 'https://www.voidtools.com/support/everything/sdk/',
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: {} as never,
+      })
+
+      renderWithProviders(<FileManager />)
+
+      expect(await screen.findByText('Everything SDK DLL이 없어 기본 폴더 스캔으로 진행했습니다.')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: '설치/SDK 안내' })).toHaveAttribute(
+        'href',
+        'https://www.voidtools.com/support/everything/sdk/',
+      )
+    })
+
     it('shows registered files in the page list', async () => {
       mocked.filesPage.mockResolvedValueOnce({
         data: {
@@ -232,7 +260,7 @@ describe('FileManager', () => {
       expect(mocked.updateSettings).not.toHaveBeenCalled()
     })
 
-    it('saves a new watched folder, clears the draft, and triggers rescan', async () => {
+    it('saves a new watched folder, clears the draft, and leaves refresh manual', async () => {
       mocked.updateSettings.mockResolvedValueOnce({
         data: {
           ...baseSettings,
@@ -243,14 +271,6 @@ describe('FileManager', () => {
         headers: {},
         config: {} as never,
       })
-      mocked.startRescan.mockResolvedValueOnce({
-        data: { ...idleStatus, running: true, stage: 'queued', mode: 'fast' },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config: {} as never,
-      })
-
       renderWithProviders(<FileManager />)
       await waitFor(() => expect(mocked.getSettings).toHaveBeenCalled())
 
@@ -262,8 +282,9 @@ describe('FileManager', () => {
       const [savedPayload] = mocked.updateSettings.mock.lastCall ?? []
       expect(savedPayload?.watched_folders).toEqual([{ path: '/Users/me/lib', recursive: true }])
 
-      await waitFor(() => expect(mocked.startRescan).toHaveBeenCalledWith('fast'))
+      expect(mocked.startRescan).not.toHaveBeenCalled()
       expect((input as HTMLInputElement).value).toBe('')
+      expect(screen.getByText('대상 폴더를 추가했습니다. 문서 새로고침을 눌러 새 문서를 확인하세요.')).toBeInTheDocument()
     })
 
     it('updates recursive flag of an existing folder rather than duplicating it', async () => {

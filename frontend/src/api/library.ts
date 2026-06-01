@@ -42,6 +42,9 @@ export interface LibraryRescanResponse {
   missing: number
   recovered: number
   purged_missing: number
+  discovery_source?: string
+  discovery_hint?: string | null
+  discovery_help_url?: string | null
 }
 
 export type LibraryRescanMode = 'normal' | 'fast'
@@ -74,6 +77,9 @@ export interface LibraryRescanStatus {
   current_file?: string | null
   summary?: LibraryRescanResponse | null
   error?: string | null
+  discovery_source?: string
+  discovery_hint?: string | null
+  discovery_help_url?: string | null
 }
 
 export type LibraryGroupKind = 'exact_name_conflict' | 'version_family'

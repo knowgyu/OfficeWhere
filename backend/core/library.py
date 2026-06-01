@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -464,11 +465,37 @@ def _rescan_library_impl(
     scan_skipped_dirs_by_name: Counter[str] = Counter()
     scan_inaccessible_dirs_by_name: Counter[str] = Counter()
     scan_unsupported_extensions_by_suffix: Counter[str] = Counter()
+    scan_discovery_sources: Counter[str] = Counter()
+    scan_discovery_hints: List[str] = []
+    scan_discovery_help_urls: List[str] = []
     registered_chunk_count = 0
     flush_count = 0
     flush_total_ms = 0
     flush_max_ms = 0
     large_file_flush_count = 0
+
+    def _remember_discovery(scan: _ScanCollection) -> None:
+        source = getattr(scan, "discovery_source", "filesystem") or "filesystem"
+        scan_discovery_sources[source] += 1
+        hint = getattr(scan, "discovery_hint", "") or ""
+        if hint and hint not in scan_discovery_hints:
+            scan_discovery_hints.append(hint)
+        help_url = getattr(scan, "discovery_help_url", "") or ""
+        if help_url and help_url not in scan_discovery_help_urls:
+            scan_discovery_help_urls.append(help_url)
+
+    def _discovery_source_summary() -> str:
+        if not scan_discovery_sources:
+            return "filesystem"
+        if len(scan_discovery_sources) == 1:
+            return next(iter(scan_discovery_sources))
+        return "mixed"
+
+    def _discovery_hint_summary() -> Optional[str]:
+        return scan_discovery_hints[0] if scan_discovery_hints else None
+
+    def _discovery_help_url_summary() -> Optional[str]:
+        return scan_discovery_help_urls[0] if scan_discovery_help_urls else None
     log_index_perf(
         "rescan_start",
         operation="library_rescan",
@@ -492,6 +519,9 @@ def _rescan_library_impl(
                 "percent": 0.0,
                 "eta_seconds": None,
                 "cancel_requested": False,
+                "discovery_source": "filesystem",
+                "discovery_hint": None,
+                "discovery_help_url": None,
             }
         )
 
@@ -517,11 +547,13 @@ def _rescan_library_impl(
             scan_skipped_dirs_by_name.update(scan_result.skipped_dirs_by_name or {})
             scan_inaccessible_dirs_by_name.update(scan_result.inaccessible_dirs_by_name or {})
             scan_unsupported_extensions_by_suffix.update(scan_result.unsupported_extensions_by_suffix or {})
+            _remember_discovery(scan_result)
             for path in scan_result.paths:
                 if _cancel_event.is_set():
                     break
                 found_paths[path] = Path(path).name
-            successfully_scanned_roots.append(_normalized_resolved_path(folder.path))
+            if getattr(scan_result, "discovery_source", "filesystem") != "everything_sdk":
+                successfully_scanned_roots.append(_normalized_resolved_path(folder.path))
         except Exception as exc:
             scan_success = False
             scan_error_type = exc.__class__.__name__
@@ -555,6 +587,9 @@ def _rescan_library_impl(
                 unsupported_file_count=scan_result.unsupported_file_count,
                 unsupported_extensions_by_suffix=scan_result.unsupported_extensions_by_suffix or {},
                 discovery_source=getattr(scan_result, "discovery_source", "filesystem"),
+                discovery_hint=getattr(scan_result, "discovery_hint", ""),
+                discovery_help_url=getattr(scan_result, "discovery_help_url", ""),
+                discovery_fallback_reason=getattr(scan_result, "discovery_fallback_reason", ""),
                 cache_hit=getattr(scan_result, "cache_hit", False),
                 cache_hit_dir_count=getattr(scan_result, "cache_hit_dir_count", 0),
                 cache_fallback_reason=getattr(scan_result, "cache_fallback_reason", ""),
@@ -578,6 +613,9 @@ def _rescan_library_impl(
                     "percent": 0.0,
                     "eta_seconds": None,
                     "cancel_requested": _cancel_event.is_set(),
+                    "discovery_source": _discovery_source_summary(),
+                    "discovery_hint": _discovery_hint_summary(),
+                    "discovery_help_url": _discovery_help_url_summary(),
                 }
             )
 
@@ -770,6 +808,9 @@ def _rescan_library_impl(
                 "current_file": current_file,
                 "cancel_requested": _cancel_event.is_set(),
                 "pruned_unsupported": pruned_unsupported,
+                "discovery_source": _discovery_source_summary(),
+                "discovery_hint": _discovery_hint_summary(),
+                "discovery_help_url": _discovery_help_url_summary(),
                 **counts,
             }
         )
@@ -859,6 +900,9 @@ def _rescan_library_impl(
                     "current_file": batch[-1].name if batch else None,
                     "cancel_requested": _cancel_event.is_set(),
                     "pruned_unsupported": pruned_unsupported,
+                    "discovery_source": _discovery_source_summary(),
+                    "discovery_hint": _discovery_hint_summary(),
+                    "discovery_help_url": _discovery_help_url_summary(),
                     **counts,
                 }
             )
@@ -984,13 +1028,23 @@ def _rescan_library_impl(
                 "eta_seconds": None,
                 "cancel_requested": _cancel_event.is_set(),
                 "pruned_unsupported": pruned_unsupported,
+                "discovery_source": _discovery_source_summary(),
+                "discovery_hint": _discovery_hint_summary(),
+                "discovery_help_url": _discovery_help_url_summary(),
                 **_result_counts(scan_errors),
             }
         )
 
     if _cancel_event.is_set():
         results.extend(scan_errors)
-        response = LibraryRescanResponse(results=results, pruned_unsupported=pruned_unsupported, **_result_counts(results))
+        response = LibraryRescanResponse(
+            results=results,
+            pruned_unsupported=pruned_unsupported,
+            discovery_source=_discovery_source_summary(),
+            discovery_hint=_discovery_hint_summary(),
+            discovery_help_url=_discovery_help_url_summary(),
+            **_result_counts(results),
+        )
         if progress_callback:
             progress_callback(
                 {
@@ -1006,6 +1060,9 @@ def _rescan_library_impl(
                     "summary": response,
                     "cancel_requested": True,
                     "pruned_unsupported": pruned_unsupported,
+                    "discovery_source": _discovery_source_summary(),
+                    "discovery_hint": _discovery_hint_summary(),
+                    "discovery_help_url": _discovery_help_url_summary(),
                     **_result_counts(results),
                 }
             )
@@ -1121,6 +1178,9 @@ def _rescan_library_impl(
                         "current_file": None,
                         "cancel_requested": _cancel_event.is_set(),
                         "pruned_unsupported": pruned_unsupported,
+                        "discovery_source": _discovery_source_summary(),
+                        "discovery_hint": _discovery_hint_summary(),
+                        "discovery_help_url": _discovery_help_url_summary(),
                         **counts,
                     }
                 )
@@ -1143,7 +1203,14 @@ def _rescan_library_impl(
     results.extend(scan_errors)
     set_setting(LAST_RESCAN_KEY, datetime.now().isoformat())
     counts = _result_counts(results)
-    response = LibraryRescanResponse(results=results, pruned_unsupported=pruned_unsupported, **counts)
+    response = LibraryRescanResponse(
+        results=results,
+        pruned_unsupported=pruned_unsupported,
+        discovery_source=_discovery_source_summary(),
+        discovery_hint=_discovery_hint_summary(),
+        discovery_help_url=_discovery_help_url_summary(),
+        **counts,
+    )
     cancelled = _cancel_event.is_set()
     log_index_perf(
         "rescan_end",
@@ -1162,6 +1229,9 @@ def _rescan_library_impl(
         inaccessible_dirs_by_name=sorted_counter_map(scan_inaccessible_dirs_by_name),
         unsupported_file_count=scan_unsupported_file_count,
         unsupported_extensions_by_suffix=sorted_counter_map(scan_unsupported_extensions_by_suffix),
+        discovery_source=_discovery_source_summary(),
+        discovery_hint=_discovery_hint_summary() or "",
+        discovery_help_url=_discovery_help_url_summary() or "",
         flush_count=flush_count,
         flush_total_ms=round(flush_total_ms, 3),
         flush_avg_ms=round(flush_total_ms / flush_count, 3) if flush_count else 0,
@@ -1187,6 +1257,9 @@ def _rescan_library_impl(
                 "summary": response,
                 "cancel_requested": cancelled,
                 "pruned_unsupported": pruned_unsupported,
+                "discovery_source": _discovery_source_summary(),
+                "discovery_hint": _discovery_hint_summary(),
+                "discovery_help_url": _discovery_help_url_summary(),
                 **counts,
             }
         )
@@ -1209,6 +1282,9 @@ def _run_rescan_job(mode: str, owns_execution_lock: bool = False) -> None:
                 "eta_seconds": None,
                 "summary": summary,
                 "pruned_unsupported": summary.pruned_unsupported,
+                "discovery_source": summary.discovery_source,
+                "discovery_hint": summary.discovery_hint,
+                "discovery_help_url": summary.discovery_help_url,
                 "cancel_requested": cancelled,
                 "error": None,
             }
@@ -1722,6 +1798,15 @@ _group_refresh_thread_db_path: Optional[str] = None
 _group_refresh_pending_full = False
 
 
+def _is_group_refresh_schema_not_ready(exc: sqlite3.OperationalError) -> bool:
+    message = str(exc).lower()
+    return (
+        "no such table: registered_files" in message
+        or "no such column: availability_status" in message
+        or "no such table: settings" in message
+    )
+
+
 def _is_library_rescan_active() -> bool:
     return _rescan_status_coordinator.is_active()
 
@@ -1852,6 +1937,16 @@ def refresh_group_index_now(
                 dirty_count=len(list_library_group_dirty_keys()),
                 duration_ms=elapsed_ms(started),
             )
+    except sqlite3.OperationalError as exc:
+        if _is_group_refresh_schema_not_ready(exc):
+            # Background refresh workers can outlive tests/app-data transitions,
+            # and app startup owns the real schema migration.  Avoid logging a
+            # scary traceback for a derived index refresh that cannot safely
+            # prove anything until the app schema is initialized.
+            logger.debug("library group index refresh skipped before app schema is ready", exc_info=True)
+            return {"state": "missing", "error": "app_schema_not_ready"}
+        logger.exception("library group index refresh failed")
+        set_library_group_index_state("error", error=f"{reason}: {exc}")
     except Exception as exc:
         logger.exception("library group index refresh failed")
         set_library_group_index_state("error", error=f"{reason}: {exc}")
@@ -1951,18 +2046,24 @@ def _changed_file_ids_from_rescan_response(response: LibraryRescanResponse) -> L
 
 
 def _schedule_group_refresh_after_rescan(response: LibraryRescanResponse, *, reason: str) -> None:
-    if _cancel_event.is_set():
-        return
-    if any(result.success and result.action in {"missing", "purged_missing"} for result in response.results):
-        schedule_group_index_refresh(reason=reason, full=True)
-        return
-    changed_ids = _changed_file_ids_from_rescan_response(response)
-    if changed_ids:
-        schedule_group_index_refresh(reason=reason, changed_file_ids=changed_ids)
-        return
-    status = get_library_group_index_status()
-    if status.get("state") in {"missing", "repair_needed", "stale", "error"}:
-        schedule_group_index_refresh(reason=reason, full=_group_index_needs_repair(status))
+    try:
+        if _cancel_event.is_set():
+            return
+        if any(result.success and result.action in {"missing", "purged_missing"} for result in response.results):
+            schedule_group_index_refresh(reason=reason, full=True)
+            return
+        changed_ids = _changed_file_ids_from_rescan_response(response)
+        if changed_ids:
+            schedule_group_index_refresh(reason=reason, changed_file_ids=changed_ids)
+            return
+        status = get_library_group_index_status()
+        if status.get("state") in {"missing", "repair_needed", "stale", "error"}:
+            schedule_group_index_refresh(reason=reason, full=_group_index_needs_repair(status))
+    except sqlite3.OperationalError as exc:
+        if _is_group_refresh_schema_not_ready(exc):
+            logger.debug("library group index refresh not scheduled before app schema is ready", exc_info=True)
+            return
+        raise
 
 
 def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:

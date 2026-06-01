@@ -29,6 +29,9 @@ function statusToSummary(status: LibraryRescanStatus): LibraryRescanResponse {
     missing: status.missing,
     recovered: status.recovered,
     purged_missing: status.purged_missing,
+    discovery_source: status.discovery_source,
+    discovery_hint: status.discovery_hint,
+    discovery_help_url: status.discovery_help_url,
     results: [],
   }
 }

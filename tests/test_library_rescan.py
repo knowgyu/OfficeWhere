@@ -331,6 +331,73 @@ def test_collect_supported_paths_uses_snapshot_for_unchanged_folder(tmp_path, mo
     assert {Path(path) for path in second.paths} == {target}
 
 
+def test_collect_supported_paths_uses_everything_provider_when_available(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    target = scan_root / "report.xlsx"
+    target.write_text("x")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setattr(
+        library_scanner,
+        "discover_supported_paths",
+        lambda _folder, _recursive, _supported, _excluded: EverythingDiscovery(paths=[str(target)]),
+    )
+
+    def fail_scandir(_path):
+        raise AssertionError("Everything provider should avoid recursive filesystem discovery")
+
+    monkeypatch.setattr(library_scanner.os, "scandir", fail_scandir)
+
+    result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert result.discovery_source == "everything_sdk"
+    assert result.discovery_hint == ""
+    assert {Path(path) for path in result.paths} == {target}
+
+
+def test_collect_supported_paths_falls_back_with_everything_hint(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from backend.core import library_scanner
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.core.library import _collect_supported_paths_with_stats
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    target = scan_root / "report.xlsx"
+    target.write_text("x")
+    appdata = tmp_path / "appdata"
+    appdata.mkdir()
+
+    monkeypatch.setattr("backend.database.DB_DIR", appdata)
+    monkeypatch.setattr(
+        library_scanner,
+        "discover_supported_paths",
+        lambda _folder, _recursive, _supported, _excluded: EverythingDiscovery(
+            unavailable_reason="sdk_dll_missing",
+            hint="Everything SDK DLL이 없어 기본 폴더 스캔으로 진행했습니다.",
+            help_url="https://www.voidtools.com/support/everything/sdk/",
+        ),
+    )
+
+    result = _collect_supported_paths_with_stats(str(scan_root), recursive=True)
+
+    assert result.discovery_source == "filesystem"
+    assert result.discovery_fallback_reason == "sdk_dll_missing"
+    assert result.discovery_hint == "Everything SDK DLL이 없어 기본 폴더 스캔으로 진행했습니다."
+    assert result.discovery_help_url == "https://www.voidtools.com/support/everything/sdk/"
+    assert {Path(path) for path in result.paths} == {target}
+
+
 def test_collect_supported_paths_cache_reuse_write_failure_is_nonfatal(tmp_path, monkeypatch):
     from pathlib import Path
 
@@ -521,6 +588,41 @@ def test_rescan_failure_result_includes_diagnostic_fields(tmp_path, monkeypatch,
     assert result.error_code == "unsupported_or_corrupt_file"
     assert result.error_hint
     assert result.diagnostic_id in caplog.text
+
+
+def test_rescan_response_exposes_discovery_hint(tmp_path, monkeypatch):
+    from backend.core import library
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+    target = tmp_path / "report.xlsx"
+    _write_excel(target, {"name": ["alpha"]})
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    hint = "Everything SDK DLL이 없어 기본 폴더 스캔으로 진행했습니다."
+    help_url = "https://www.voidtools.com/support/everything/sdk/"
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(
+            paths=[str(target)],
+            discovery_source="filesystem",
+            discovery_hint=hint,
+            discovery_help_url=help_url,
+            discovery_fallback_reason="sdk_dll_missing",
+        ),
+    )
+
+    progress = []
+    response = library.rescan_library(mode="fast", progress_callback=progress.append)
+
+    assert response.discovery_source == "filesystem"
+    assert response.discovery_hint == hint
+    assert response.discovery_help_url == help_url
+    assert any(item.get("discovery_hint") == hint for item in progress)
 
 
 def test_rescan_excel_indexes_used_range(tmp_path, monkeypatch):
@@ -941,6 +1043,40 @@ def test_rescan_marks_missing_source_under_successful_scan_without_deleting_reco
     assert row["availability_status"] == "missing"
     assert row["missing_since"]
     assert not source.exists()
+
+
+def test_rescan_does_not_mark_missing_from_everything_only_absence(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import get_file_by_id, save_file_chunks
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    source = tmp_path / "not-yet-indexed-by-everything.docx"
+    source.write_text("temporary source", encoding="utf-8")
+    file_id = register_file(str(source), source.name, "Word", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "Everything 누락 확인"}])
+    source.unlink()
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(
+            paths=[],
+            discovery_source="everything_sdk",
+        ),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert response.missing == 0
+    assert response.discovery_source == "everything_sdk"
+    row = get_file_by_id(file_id)
+    assert row is not None
+    assert row["availability_status"] == "available"
+    assert row["missing_since"] is None
 
 
 def test_rescan_does_not_mark_missing_when_scan_root_fails(tmp_path, monkeypatch):

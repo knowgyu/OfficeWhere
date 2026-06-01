@@ -67,6 +67,14 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
   if (rescanning && status) {
     const foundText = `발견 ${status.found}개`
     const modeText = status.mode === 'fast' ? `빠르게 확인 중` : ''
+    const discoveryText =
+      status.discovery_source === 'everything_sdk'
+        ? 'Everything 빠른 발견'
+        : status.discovery_source === 'snapshot_cache'
+          ? '스냅샷으로 빠르게 확인'
+          : status.discovery_source === 'mixed'
+            ? '혼합 방식으로 확인'
+            : ''
     const progressText =
       status.total > 0
         ? `처리 ${status.processed}/${status.total} · ${Math.round(status.percent)}%`
@@ -78,19 +86,37 @@ function rescanDetail(status: LibraryRescanStatus | null, summary: LibraryRescan
     const missingText = status.missing > 0 ? `누락 표시 ${status.missing}개` : ''
     const recoveredText = status.recovered > 0 ? `복구 ${status.recovered}개` : ''
     const purgedText = status.purged_missing > 0 ? `자동 정리 ${status.purged_missing}개` : ''
-    return [foundText, modeText, progressText, cleanupText, missingText, recoveredText, purgedText].filter(Boolean).join(' · ') + current
+    return [foundText, modeText, discoveryText, progressText, cleanupText, missingText, recoveredText, purgedText].filter(Boolean).join(' · ') + current
   }
 
   const source = summary ?? status?.summary
   if (!source) return '아직 실행 결과가 없습니다.'
   const checked = source.registered + source.updated + source.skipped
+  const discovery =
+    source.discovery_source === 'everything_sdk'
+      ? ' · Everything 빠른 발견 사용'
+      : source.discovery_source === 'snapshot_cache'
+        ? ' · 스냅샷 사용'
+        : source.discovery_source === 'mixed'
+          ? ' · 혼합 발견 방식'
+          : ''
   const unchanged = source.skipped > 0 ? ` · 변경 없음 ${source.skipped}` : ''
   const cancelled = source.cancelled > 0 ? ` · 정지 ${source.cancelled}` : ''
   const cleanup = source.pruned_unsupported > 0 ? ` · 이전 미지원 항목 정리 ${source.pruned_unsupported}` : ''
   const missing = source.missing > 0 ? ` · 누락 표시 ${source.missing}` : ''
   const recovered = source.recovered > 0 ? ` · 다시 확인됨 ${source.recovered}` : ''
   const purged = source.purged_missing > 0 ? ` · 7일 경과 자동 정리 ${source.purged_missing}` : ''
-  return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${unchanged}${missing}${recovered}${purged}${cancelled}${cleanup} · 실패 ${source.failed}`
+  return `등록/확인 ${checked} · 신규 ${source.registered} · 갱신 ${source.updated}${discovery}${unchanged}${missing}${recovered}${purged}${cancelled}${cleanup} · 실패 ${source.failed}`
+}
+
+function rescanDiscoveryHint(status: LibraryRescanStatus | null, summary: LibraryRescanResponse | null) {
+  const source = summary ?? status?.summary
+  const message = status?.discovery_hint || source?.discovery_hint
+  if (!message) return null
+  return {
+    message,
+    url: status?.discovery_help_url || source?.discovery_help_url || null,
+  }
 }
 
 const REGISTERED_FILE_PAGE_SIZE = 50
@@ -616,7 +642,12 @@ export default function FileManager({
           )
         : [...librarySettings.watched_folders, { path, recursive: folderRecursive }],
     }
-    const saved = await saveLibrarySettings(next)
+    const saved = await saveLibrarySettings(
+      next,
+      exists
+        ? '대상 폴더 설정을 저장했습니다. 문서 새로고침을 눌러 변경된 문서를 확인하세요.'
+        : '대상 폴더를 추가했습니다. 문서 새로고침을 눌러 새 문서를 확인하세요.',
+    )
     if (!saved) return
 
     setFolderPathDraft('')
@@ -625,7 +656,6 @@ export default function FileManager({
       snackbar.success('임시 예제 폴더를 추가했습니다. 문서 새로고침을 한 번 눌러 확인해 보세요.')
       return
     }
-    await startRescan('added', 'fast')
   }
 
   const handleRemoveWatchedFolder = async (path: string) => {
@@ -1026,6 +1056,8 @@ export default function FileManager({
     }
   }
 
+  const discoveryHint = rescanDiscoveryHint(rescanStatus, rescanSummary)
+
   return (
     <div className="space-y-5">
       <Card variant="elevated" className="console-panel overflow-hidden">
@@ -1213,6 +1245,22 @@ export default function FileManager({
                 <p className="type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                   {rescanDetail(rescanStatus, rescanSummary, rescanning)}
                 </p>
+                {discoveryHint && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-sm border border-[var(--md-sys-color-outline-variant)] bg-[var(--md-sys-color-surface-container-low)] px-3 py-2 text-[var(--md-sys-color-on-surface-variant)]">
+                    <Icon name="tips_and_updates" size={16} />
+                    <p className="type-body-sm min-w-0 flex-1">{discoveryHint.message}</p>
+                    {discoveryHint.url && (
+                      <a
+                        href={discoveryHint.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="type-label-lg whitespace-nowrap text-[var(--md-sys-color-primary)] underline-offset-2 hover:underline"
+                      >
+                        설치/SDK 안내
+                      </a>
+                    )}
+                  </div>
+                )}
                 {rescanning && rescanStatus && (
                   <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--md-sys-color-surface-container-high)]">
                     <div

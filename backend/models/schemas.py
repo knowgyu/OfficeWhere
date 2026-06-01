@@ -448,6 +448,9 @@ class LibraryRescanResponse(BaseModel):
     missing: int = 0
     recovered: int = 0
     purged_missing: int = 0
+    discovery_source: str = "filesystem"
+    discovery_hint: Optional[str] = None
+    discovery_help_url: Optional[str] = None
 
 
 class LibraryRescanRequest(BaseModel):
@@ -482,6 +485,9 @@ class LibraryRescanStatus(BaseModel):
     current_file: Optional[str] = None
     summary: Optional[LibraryRescanResponse] = None
     error: Optional[str] = None
+    discovery_source: str = "filesystem"
+    discovery_hint: Optional[str] = None
+    discovery_help_url: Optional[str] = None
 
 
 class LibraryFileGroup(BaseModel):
