@@ -75,6 +75,7 @@ type ModifiedDateFilter = 'all' | '7d' | '30d' | '90d' | 'custom'
 
 interface SearchMeta {
   fileCount: number
+  fetchedFileCount: number
   fileLimit: number
   hasMore: boolean
   searchIndexState?: SearchResponse['search_index_state']
@@ -85,6 +86,7 @@ interface SearchMeta {
 function emptySearchMeta(fileLimit = INITIAL_SEARCH_FILE_LIMIT): SearchMeta {
   return {
     fileCount: 0,
+    fetchedFileCount: 0,
     fileLimit,
     hasMore: false,
     searchIndexState: 'ready',
@@ -181,6 +183,17 @@ function getContentFileKeys(results: SearchResult[]) {
     }
   }
   return keys
+}
+
+function isResultInFolder(result: SearchResult, folderPath: string) {
+  const normalizedFolder = normalizePathForFilter(folderPath)
+  const normalizedParent = normalizePathForFilter(getParentFolderPath(result.path))
+  return normalizedParent === normalizedFolder || normalizedParent.startsWith(`${normalizedFolder}/`)
+}
+
+function filterResultsByExcludedFolders(results: SearchResult[], folderPaths: string[]) {
+  if (folderPaths.length === 0) return results
+  return results.filter((result) => !folderPaths.some((folderPath) => isResultInFolder(result, folderPath)))
 }
 
 function SearchResultListItem({
@@ -315,9 +328,13 @@ export default function FileSearch({
     resultsRef.current = nextResults
     setResults(nextResults)
     const nextFileCount = new Set(nextResults.map((item) => item.file_id)).size
+    const incomingFileCount = new Set(data.results.map((item) => item.file_id)).size
+    const nextFetchedFileCount =
+      mode === 'more' ? searchMeta.fetchedFileCount + incomingFileCount : data.file_count ?? nextFileCount
     setSearchMeta({
       fileCount: nextFileCount,
-      fileLimit: mode === 'more' ? nextFileCount : data.file_limit ?? fallbackFileLimit,
+      fetchedFileCount: nextFetchedFileCount,
+      fileLimit: mode === 'more' ? nextFetchedFileCount : data.file_limit ?? fallbackFileLimit,
       hasMore: Boolean(data.has_more),
       searchIndexState: data.search_index_state ?? 'ready',
       searchIndexStale: Boolean(data.search_index_stale),
@@ -417,6 +434,7 @@ export default function FileSearch({
       modifiedDateFilter,
       excludedFolderPaths,
       selectedFileTypes,
+      searchMeta.fetchedFileCount,
       searchScope,
       snackbar,
     ],
@@ -532,18 +550,18 @@ export default function FileSearch({
       setExcludedFolderPaths(nextFolders)
       snackbar.info(`이번 검색에서 "${shortPathLabel(folderPath)}" 폴더를 숨겼습니다.`)
     }
-    if (query.trim()) {
-      clearPendingSearch()
-      void doSearch(
-        query,
-        selectedFileTypes,
-        searchScope,
-        modifiedDateFilter,
-        customModifiedFrom,
-        customModifiedTo,
-        nextFolders,
-      )
-    }
+
+    const nextResults = filterResultsByExcludedFolders(resultsRef.current, nextFolders)
+    resultsRef.current = nextResults
+    setResults(nextResults)
+    setSearchMeta((current) => ({
+      ...current,
+      fileCount: new Set(nextResults.map((item) => item.file_id)).size,
+    }))
+    setExpandedContentFiles((current) => {
+      const nextContentFileKeys = getContentFileKeys(nextResults)
+      return new Set([...current].filter((fileKey) => nextContentFileKeys.has(fileKey)))
+    })
   }
 
   const removeTemporaryExcludedFolder = (folderPath: string) => {
@@ -741,7 +759,7 @@ export default function FileSearch({
   const expandSearchFileWindow = () => {
     if (!searchMeta.hasMore || loadingMore || loading) return
     if (!query.trim()) return
-    const nextFileLimit = Math.min(SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT - searchMeta.fileCount)
+    const nextFileLimit = Math.min(SEARCH_FILE_LIMIT_STEP, MAX_SEARCH_FILE_LIMIT - searchMeta.fetchedFileCount)
     if (nextFileLimit <= 0) return
     void doSearch(
       query,
@@ -752,7 +770,7 @@ export default function FileSearch({
       customModifiedTo,
       excludedFolderPaths,
       nextFileLimit,
-      searchMeta.fileCount,
+      searchMeta.fetchedFileCount,
       'more',
     )
   }
@@ -791,7 +809,7 @@ export default function FileSearch({
     loadingMore,
     modifiedDateFilter,
     query,
-    searchMeta.fileCount,
+    searchMeta.fetchedFileCount,
     searchMeta.hasMore,
     searchScope,
     selectedFileTypes,

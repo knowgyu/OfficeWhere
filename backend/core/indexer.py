@@ -20,12 +20,15 @@ from ..database import (
     get_excel_index_status,
     get_search_index_status,
     get_setting,
+    prune_unsupported_file_extensions,
     repair_excel_index_version,
     repair_search_indexes,
     save_file_chunks,
     search_chunks,
     set_setting,
     update_file_mtime,
+    UNSUPPORTED_EXTENSION_PRUNE_VERSION,
+    UNSUPPORTED_EXTENSION_PRUNE_VERSION_KEY,
 )
 from .excel_analysis import extract_excel_used_ranges
 from .file_scope import SUPPORTED_EXTENSIONS
@@ -519,6 +522,8 @@ def _scheduler_loop():
 
 def _startup_derived_index_repair_loop():
     try:
+        prune_unsupported_file_extensions(reason="startup_background")
+
         excel_status = get_excel_index_status()
         if excel_status.get("stale"):
             repair_excel_index_version(reason="startup_background")
@@ -539,7 +544,12 @@ def start_startup_derived_index_repair():
         return
 
     try:
-        needs_repair = bool(get_excel_index_status().get("stale") or get_search_index_status().get("stale"))
+        needs_prune = get_setting(
+            UNSUPPORTED_EXTENSION_PRUNE_VERSION_KEY, ""
+        ) != UNSUPPORTED_EXTENSION_PRUNE_VERSION
+        needs_repair = bool(
+            needs_prune or get_excel_index_status().get("stale") or get_search_index_status().get("stale")
+        )
     except Exception:
         diagnostic_id = uuid.uuid4().hex[:8]
         logger.exception("startup derived index repair status check failed diagnostic_id=%s", diagnostic_id)

@@ -52,8 +52,11 @@ def test_electron_builder_runtime_resources_are_platform_scoped():
     assert build["publish"] is None
     top_level_sources = {item["from"] for item in build["extraResources"]}
     assert "../python-runtime/win-x64" not in top_level_sources
+    backend_resource = next(item for item in build["extraResources"] if item["from"] == "../backend")
+    assert "!**/vendor/everything/**" in backend_resource["filter"]
     assert build["win"]["extraResources"] == [
-        {"from": "../python-runtime/win-x64", "to": "python-runtime"}
+        {"from": "../python-runtime/win-x64", "to": "python-runtime"},
+        {"from": "../backend/vendor/everything", "to": "backend-source/vendor/everything"},
     ]
     assert build["mac"]["extraResources"] == [
         {"from": "../python-runtime/mac-arm64", "to": "python-runtime"}

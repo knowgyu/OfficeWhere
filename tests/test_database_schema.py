@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime, timedelta
 
-from backend.database import get_all_files, init_db, prune_comparison_cache, register_file, save_file_chunks
+from backend.database import get_all_files, init_db, prune_comparison_cache, prune_unsupported_file_extensions, register_file, save_file_chunks
 
 
 def test_init_db_resets_legacy_excel_table_metadata_schema(tmp_path, monkeypatch):
@@ -57,7 +57,7 @@ def test_init_db_resets_legacy_excel_table_metadata_schema(tmp_path, monkeypatch
     assert "last_schema_reset" in settings
 
 
-def test_init_db_prunes_legacy_xls_records_without_touching_source(tmp_path, monkeypatch):
+def test_init_db_defers_legacy_xls_prune_until_background_maintenance(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setattr("backend.database.DB_PATH", db_path)
     monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
@@ -68,11 +68,47 @@ def test_init_db_prunes_legacy_xls_records_without_touching_source(tmp_path, mon
     file_id = register_file(str(source), "legacy.xls", "Excel", 1)
     save_file_chunks(file_id, [{"location": "Sheet1 시트 | 1행 A열", "content": "legacy"}])
 
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM settings WHERE key = 'unsupported_extension_prune_version'")
+    conn.commit()
+    conn.close()
+
     init_db()
 
+    assert len(get_all_files()) == 1
+
+    result = prune_unsupported_file_extensions(reason="test")
+
+    assert result["success"] is True
+    assert result["pruned"] == 1
     assert get_all_files() == []
     assert source.exists()
     assert source.read_text(encoding="utf-8") == "legacy binary placeholder"
+
+
+def test_init_db_defers_large_startup_maintenance_scans(tmp_path, monkeypatch):
+    from backend.database import get_excel_index_status, get_search_index_status, set_setting
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setattr("backend.database.DB_PATH", db_path)
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    set_setting("search_index_version", "old")
+    set_setting("excel_index_version", "old")
+    set_setting("unsupported_extension_prune_version", "old")
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("large startup maintenance scan should be deferred")
+
+    monkeypatch.setattr("backend.database._file_chunk_count_with_cursor", fail_if_called)
+    monkeypatch.setattr("backend.database._excel_file_count_with_cursor", fail_if_called)
+    monkeypatch.setattr("backend.database._prune_unsupported_file_extensions", fail_if_called)
+
+    init_db()
+
+    assert get_search_index_status()["state"] == "repair_needed"
+    assert get_excel_index_status()["state"] == "repair_needed"
 
 
 def test_init_db_defers_excel_index_version_reset(tmp_path, monkeypatch):

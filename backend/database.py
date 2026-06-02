@@ -48,6 +48,8 @@ EXCEL_INDEX_VERSION_KEY = "excel_index_version"
 EXCEL_INDEX_STATE_KEY = "excel_index_state"
 EXCEL_INDEX_UPDATED_AT_KEY = "excel_index_updated_at"
 EXCEL_INDEX_ERROR_KEY = "excel_index_error"
+UNSUPPORTED_EXTENSION_PRUNE_VERSION = "remove_xls_v1"
+UNSUPPORTED_EXTENSION_PRUNE_VERSION_KEY = "unsupported_extension_prune_version"
 LIBRARY_GROUP_INDEX_VERSION = "2"
 LIBRARY_GROUP_INDEX_VERSION_KEY = "library_group_index_version"
 LIBRARY_GROUP_INDEX_STATE_KEY = "library_group_index_state"
@@ -1492,7 +1494,7 @@ def repair_excel_index_version(reason: str = "background") -> Dict[str, Any]:
         return metrics
 
 
-def _prune_unsupported_file_extensions(cursor: sqlite3.Cursor) -> int:
+def _prune_unsupported_file_extensions(cursor: sqlite3.Cursor, *, operation: str = "maintenance") -> int:
     """Remove app-owned records for formats no longer supported; never touches source files."""
     cursor.execute("SELECT id FROM registered_files WHERE lower(path) LIKE '%.xls'")
     file_ids = [int(row[0]) for row in cursor.fetchall()]
@@ -1504,11 +1506,43 @@ def _prune_unsupported_file_extensions(cursor: sqlite3.Cursor) -> int:
     if pruned:
         log_index_perf(
             "unsupported_records_pruned",
-            operation="db_init",
+            operation=operation,
             reason="remove_xls_support",
             file_count=pruned,
         )
     return pruned
+
+
+def prune_unsupported_file_extensions(reason: str = "background") -> Dict[str, Any]:
+    """Prune unsupported app-owned records outside the backend startup health path."""
+
+    metrics: Dict[str, Any] = {"reason": reason}
+    started = perf_counter()
+    try:
+        with _write_connection() as conn:
+            cursor = conn.cursor()
+            current = _get_setting_with_cursor(cursor, UNSUPPORTED_EXTENSION_PRUNE_VERSION_KEY, "")
+            metrics["previous_version"] = current
+            if current == UNSUPPORTED_EXTENSION_PRUNE_VERSION:
+                metrics.update(success=True, skipped=True, pruned=0, total_ms=elapsed_ms(started))
+                log_index_perf("unsupported_records_prune_done", **metrics)
+                return metrics
+
+            pruned = _prune_unsupported_file_extensions(cursor, operation="startup_background")
+            _set_setting_with_cursor(cursor, UNSUPPORTED_EXTENSION_PRUNE_VERSION_KEY, UNSUPPORTED_EXTENSION_PRUNE_VERSION)
+            conn.commit()
+            metrics.update(success=True, skipped=False, pruned=pruned, total_ms=elapsed_ms(started))
+            log_index_perf("unsupported_records_prune_done", **metrics)
+            return metrics
+    except Exception as exc:
+        metrics.update(
+            success=False,
+            error_type=exc.__class__.__name__,
+            error=str(exc),
+            total_ms=elapsed_ms(started),
+        )
+        log_index_perf("unsupported_records_prune_done", **metrics)
+        return metrics
 
 
 def init_db():
@@ -1525,9 +1559,11 @@ def init_db():
 
             schema_started = perf_counter()
             legacy_reset = _reset_legacy_excel_table_schema_if_needed(cursor)
+            registered_files_existed = bool(_registered_files_columns(cursor))
             _create_schema(cursor, create_search_triggers=True)
             metrics["schema_ms"] = elapsed_ms(schema_started)
             metrics["legacy_reset"] = legacy_reset
+            metrics["registered_files_existed"] = registered_files_existed
             if legacy_reset:
                 _set_setting_with_cursor(
                     cursor,
@@ -1541,22 +1577,24 @@ def init_db():
                     ),
                 )
 
-            prune_started = perf_counter()
-            metrics["unsupported_pruned"] = _prune_unsupported_file_extensions(cursor)
-            metrics["unsupported_prune_ms"] = elapsed_ms(prune_started)
+            if not registered_files_existed:
+                _set_search_index_state_with_cursor(cursor, "ready", set_current_version=True)
+                _set_excel_index_state_with_cursor(cursor, "ready", set_current_version=True)
+                _set_setting_with_cursor(cursor, UNSUPPORTED_EXTENSION_PRUNE_VERSION_KEY, UNSUPPORTED_EXTENSION_PRUNE_VERSION)
+
+            metrics["unsupported_prune_deferred"] = _get_setting_with_cursor(
+                cursor, UNSUPPORTED_EXTENSION_PRUNE_VERSION_KEY, ""
+            ) != UNSUPPORTED_EXTENSION_PRUNE_VERSION
 
             search_started = perf_counter()
             search_status = _search_index_status_with_cursor(cursor)
             metrics["previous_search_index_version"] = search_status["version"]
             metrics["previous_search_index_state"] = search_status["state"]
-            _ensure_search_index_version(cursor)
-            next_search_status = _search_index_status_with_cursor(cursor)
-            metrics["search_index_state"] = next_search_status["state"]
-            metrics["search_index_deferred"] = bool(next_search_status["stale"])
+            metrics["search_index_state"] = search_status["state"]
+            metrics["search_index_deferred"] = bool(search_status["stale"])
             metrics["search_index_check_ms"] = elapsed_ms(search_started)
 
             excel_started = perf_counter()
-            _ensure_excel_index_version(cursor)
             excel_status = _excel_index_status_with_cursor(cursor)
             metrics["excel_index_state"] = excel_status["state"]
             metrics["excel_index_deferred"] = bool(excel_status["stale"])

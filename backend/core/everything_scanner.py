@@ -94,6 +94,8 @@ def candidate_dll_paths() -> list[str]:
 
     for base in base_dirs:
         for name in names:
+            add(base / "vendor" / "everything" / name)
+            add(base / "backend" / "vendor" / "everything" / name)
             add(base / name)
 
     for env_name in ("ProgramFiles", "ProgramFiles(x86)"):

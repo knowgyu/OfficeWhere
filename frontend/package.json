@@ -1,7 +1,7 @@
 {
   "name": "officewhere",
   "productName": "OfficeWhere",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -67,7 +67,8 @@
         "filter": [
           "**/*",
           "!**/__pycache__/**",
-          "!**/*.pyc"
+          "!**/*.pyc",
+          "!**/vendor/everything/**"
         ]
       },
       {
@@ -90,6 +91,10 @@
         {
           "from": "../python-runtime/win-x64",
           "to": "python-runtime"
+        },
+        {
+          "from": "../backend/vendor/everything",
+          "to": "backend-source/vendor/everything"
         }
       ]
     },

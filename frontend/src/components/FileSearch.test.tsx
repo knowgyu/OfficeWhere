@@ -443,45 +443,28 @@ describe('FileSearch', () => {
       expect(screen.getByText('/work/finance')).toBeInTheDocument()
     })
 
-    it('can temporarily hide the clicked result folder for the current search', async () => {
-      mockedSearchQuery
-        .mockResolvedValueOnce({
-          data: {
-            query: '회의',
-            total: 2,
-            results: [
-              searchHit({
-                file_id: 1,
-                name: '숨길문서.docx',
-                path: '/lib/archive/숨길문서.docx',
-              }),
-              searchHit({
-                file_id: 2,
-                name: '남길문서.docx',
-                path: '/lib/current/남길문서.docx',
-              }),
-            ],
-            file_count: 2,
-            file_limit: 20,
-            has_more: false,
-          },
-        })
-        .mockResolvedValueOnce({
-          data: {
-            query: '회의',
-            total: 1,
-            results: [
-              searchHit({
-                file_id: 2,
-                name: '남길문서.docx',
-                path: '/lib/current/남길문서.docx',
-              }),
-            ],
-            file_count: 1,
-            file_limit: 20,
-            has_more: false,
-          },
-        })
+    it('can temporarily hide the clicked result folder locally without rerunning the search', async () => {
+      mockedSearchQuery.mockResolvedValueOnce({
+        data: {
+          query: '회의',
+          total: 2,
+          results: [
+            searchHit({
+              file_id: 1,
+              name: '숨길문서.docx',
+              path: '/lib/archive/숨길문서.docx',
+            }),
+            searchHit({
+              file_id: 2,
+              name: '남길문서.docx',
+              path: '/lib/current/남길문서.docx',
+            }),
+          ],
+          file_count: 2,
+          file_limit: 20,
+          has_more: false,
+        },
+      })
 
       renderInactiveFileSearch()
       await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
@@ -490,10 +473,8 @@ describe('FileSearch', () => {
       await waitFor(() => expect(screen.getByText('숨길문서.docx')).toBeInTheDocument())
       await userEvent.click(screen.getAllByRole('button', { name: '이번 검색 제외' })[0])
 
-      await waitFor(() => {
-        expect(mockedSearchQuery.mock.lastCall?.[0]?.excluded_folder_paths).toEqual(['/lib/archive'])
-      })
       await waitFor(() => expect(screen.queryByText('숨길문서.docx')).not.toBeInTheDocument())
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(1)
       expect(screen.getByText('남길문서.docx')).toBeInTheDocument()
       expect(screen.getByText('숨김: archive')).toBeInTheDocument()
     })
