@@ -36,6 +36,10 @@ export type ProviderDiscoveryHandle = {
   pid: number
 }
 
+export type ProviderDiscoveryPublishResult =
+  | { ok: true; handle: ProviderDiscoveryHandle }
+  | { ok: false; error: string }
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '')
 }
@@ -85,6 +89,17 @@ export async function writeProviderDiscovery(
   }
 
   return { path: finalPath, discoveryId: payload.discovery_id, pid: payload.pid }
+}
+
+export async function tryWriteProviderDiscovery(
+  userDataPath: string,
+  payload: ProviderDiscoveryPayload,
+): Promise<ProviderDiscoveryPublishResult> {
+  try {
+    return { ok: true, handle: await writeProviderDiscovery(userDataPath, payload) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 function ownsDiscovery(payload: unknown, handle: ProviderDiscoveryHandle): boolean {

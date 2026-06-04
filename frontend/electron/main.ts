@@ -17,7 +17,7 @@ import {
   buildProviderDiscovery,
   cleanupProviderDiscovery,
   cleanupProviderDiscoverySync,
-  writeProviderDiscovery,
+  tryWriteProviderDiscovery,
   type ProviderDiscoveryHandle,
 } from './providerDiscovery'
 import { resolveWindowsLocalAppDataPaths } from './appPaths'
@@ -31,6 +31,7 @@ import path from 'node:path'
 
 const HOST = '127.0.0.1'
 const STARTUP_ATTEMPTS = 2
+const HEALTH_PROBE_TIMEOUT_MS = 10_000
 const RELEASE_API_URL = 'https://api.github.com/repos/knowgyu/OfficeWhere/releases/latest'
 const RELEASE_PAGE_URL = 'https://github.com/knowgyu/OfficeWhere/releases/latest'
 const UPDATE_DOWNLOAD_HOSTS = new Set([
@@ -134,6 +135,14 @@ type UpdateInstallResult = {
   message: string
 }
 
+type HealthProbeResult = {
+  ok: boolean
+  durationMs: number
+  statusCode?: number
+  timedOut?: boolean
+  error?: string
+}
+
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let quickSearchWindow: BrowserWindow | null = null
@@ -196,7 +205,7 @@ if (!hasSingleInstanceLock) {
 
   app.on('before-quit', () => {
     isQuitting = true
-    stopBackend()
+    stopBackend('before-quit')
     destroyTray()
     unregisterQuickSearchShortcut()
     destroyQuickSearchWindow()
@@ -1711,8 +1720,9 @@ async function shutdownApp(exitCode = 0) {
   destroyTray()
   destroyAppWindows()
 
-  const stopped = await stopBackendAndWait(2_500).catch(() => false)
+  const stopped = await stopBackendAndWait(2_500, 'app-shutdown').catch(() => false)
   if (!stopped && backendProcess) {
+    appendBackendDiagnostic('[officewhere] backend stop fallback: app-shutdown force-kill requested\n')
     await forceKillProcessTree(backendProcess).catch(() => undefined)
     await waitForProcessExit(backendProcess, 1_000).catch(() => false)
   }
@@ -1728,7 +1738,12 @@ async function publishProviderDiscovery() {
     baseUrl: backendBaseUrl,
     pid: backendProcess?.pid ?? process.pid,
   })
-  providerDiscoveryHandle = await writeProviderDiscovery(app.getPath('userData'), payload)
+  const result = await tryWriteProviderDiscovery(app.getPath('userData'), payload)
+  if (result.ok) {
+    providerDiscoveryHandle = result.handle
+    return
+  }
+  appendBackendDiagnostic(`[officewhere] provider discovery publish skipped: ${result.error}\n`)
 }
 
 async function cleanupCurrentProviderDiscovery(): Promise<void> {
@@ -1745,6 +1760,15 @@ function cleanupCurrentProviderDiscoverySync() {
   cleanupProviderDiscoverySync(handle)
 }
 
+function appendBackendDiagnostic(message: string) {
+  if (!backendLogPath) return
+  try {
+    fs.appendFileSync(backendLogPath, message, 'utf8')
+  } catch {
+    // Diagnostics must never affect startup or shutdown.
+  }
+}
+
 async function startBackendWithRetry() {
   let lastError: unknown
 
@@ -1754,12 +1778,21 @@ async function startBackendWithRetry() {
     try {
       await startBackend(port)
       await publishProviderDiscovery()
+      appendBackendDiagnostic(
+        `[officewhere] backend startup completed: attempt=${attempt}/${STARTUP_ATTEMPTS} base_url=${backendBaseUrl}\n`,
+      )
       return
     } catch (error) {
       lastError = error
+      appendBackendDiagnostic(
+        `[officewhere] backend startup attempt failed: attempt=${attempt}/${STARTUP_ATTEMPTS} error=${errorToMessage(error)}\n`,
+      )
       cleanupCurrentProviderDiscoverySync()
-      stopBackend()
+      stopBackend(`startup-attempt-${attempt}-failed`)
       if (attempt < STARTUP_ATTEMPTS) {
+        appendBackendDiagnostic(
+          `[officewhere] backend startup retry scheduled: next_attempt=${attempt + 1}/${STARTUP_ATTEMPTS}\n`,
+        )
         await delay(500)
       }
     }
@@ -1793,8 +1826,13 @@ async function startBackend(port: number) {
     `[officewhere] backend data footprint: ${startupBudget.footprintBytes} bytes; ` +
       `startup timeout: ${startupBudget.timeoutMs} ms (${startupBudget.reason})\n`,
   )
+  logStream.write(
+    `[officewhere] backend startup attempt started: port=${port} base_url=${backendBaseUrl} ` +
+      `health_url=${backendBaseUrl}/api/health?startup=1 health_probe_timeout_ms=${HEALTH_PROBE_TIMEOUT_MS} ` +
+      `startup_timeout_ms=${startupBudget.timeoutMs} startup_budget_reason=${startupBudget.reason}\n`,
+  )
 
-  let spawnError: Error | null = null
+  const spawnErrorState: { error: Error | null } = { error: null }
   let exited = false
   const backendEnv: NodeJS.ProcessEnv = {
     ...process.env,
@@ -1828,19 +1866,22 @@ async function startBackend(port: number) {
   backendLogStreams.set(child, logStream)
 
   child.once('error', (error) => {
-    spawnError = error
+    spawnErrorState.error = error
     logStream.write(`[officewhere] spawn error: ${error.message}\n`)
   })
 
   child.once('exit', (code, signal) => {
     exited = true
+    const expectedExit = isQuitting || expectedBackendExits.has(child)
     child.stdout?.unpipe(logStream)
     child.stderr?.unpipe(logStream)
-    logStream.write(`[officewhere] backend exited code=${code ?? ''} signal=${signal ?? ''}\n`)
+    logStream.write(
+      `[officewhere] backend exited code=${code ?? ''} signal=${signal ?? ''} ` +
+        `expected=${expectedExit ? 'true' : 'false'} pid=${child.pid ?? ''}\n`,
+    )
     logStream.end()
     backendLogStreams.delete(child)
 
-    const expectedExit = isQuitting || expectedBackendExits.has(child)
     if (backendProcess === child) {
       backendProcess = null
     }
@@ -1854,14 +1895,53 @@ async function startBackend(port: number) {
     }
   })
 
-  const deadline = Date.now() + startupBudget.timeoutMs
+  const startupStartedAt = Date.now()
+  const deadline = startupStartedAt + startupBudget.timeoutMs
+  let probeCount = 0
+  let lastProbe: HealthProbeResult | null = null
+  let nextPendingLogAt = startupStartedAt
   while (Date.now() < deadline) {
-    if (spawnError) throw spawnError
-    if (exited) throw new Error(`backend process exited before health check: ${backendLogPath}`)
-    if (await pingHealth(backendBaseUrl)) return
+    const spawnError = spawnErrorState.error
+    if (spawnError) {
+      logStream.write(`[officewhere] backend startup aborted: spawn_error=${spawnError.message}\n`)
+      throw spawnError
+    }
+    if (exited) {
+      logStream.write('[officewhere] backend startup aborted: process exited before health became ready\n')
+      throw new Error(`backend process exited before health check: ${backendLogPath}`)
+    }
+
+    probeCount += 1
+    const probe = await pingHealth(backendBaseUrl)
+    lastProbe = probe
+    if (probe.ok) {
+      logStream.write(
+        `[officewhere] backend health ready: attempts=${probeCount} ` +
+          `elapsed_ms=${Date.now() - startupStartedAt} probe_ms=${probe.durationMs} ` +
+          `status=${probe.statusCode ?? ''} url=${backendBaseUrl}/api/health?startup=1\n`,
+      )
+      return
+    }
+
+    const now = Date.now()
+    if (probeCount === 1 || probe.timedOut || now >= nextPendingLogAt) {
+      logStream.write(
+        `[officewhere] backend health pending: attempts=${probeCount} ` +
+          `elapsed_ms=${now - startupStartedAt} probe_ms=${probe.durationMs} ` +
+          `reason=${formatHealthProbeReason(probe)} url=${backendBaseUrl}/api/health?startup=1\n`,
+      )
+      nextPendingLogAt = now + 10_000
+    }
+
     await delay(400)
   }
 
+  logStream.write(
+    `[officewhere] backend health startup timed out: elapsed_ms=${Date.now() - startupStartedAt} ` +
+      `attempts=${probeCount} timeout_ms=${startupBudget.timeoutMs} ` +
+      `last_probe_reason=${lastProbe ? formatHealthProbeReason(lastProbe) : 'not-started'} ` +
+      `url=${backendBaseUrl}/api/health?startup=1 log=${backendLogPath}\n`,
+  )
   throw new Error(`backend health check timed out after ${startupBudget.timeoutMs}ms: ${backendBaseUrl}`)
 }
 
@@ -1903,19 +1983,27 @@ function getPythonExecutable(repoRoot: string): string {
   return process.platform === 'win32' ? 'python' : 'python3'
 }
 
-function stopBackend() {
+function stopBackend(reason = 'unspecified') {
   cleanupCurrentProviderDiscoverySync()
-  if (!backendProcess) return
-  expectedBackendExits.add(backendProcess)
-  const logStream = backendLogStreams.get(backendProcess)
-  backendProcess.stdout?.unpipe(logStream)
-  backendProcess.stderr?.unpipe(logStream)
-  if (!backendProcess.killed) backendProcess.kill()
+  const child = backendProcess
+  appendBackendDiagnostic(
+    `[officewhere] backend stop requested: reason=${reason} active=${child ? 'true' : 'false'} pid=${child?.pid ?? ''}\n`,
+  )
+  if (!child) return
+  expectedBackendExits.add(child)
+  const logStream = backendLogStreams.get(child)
+  child.stdout?.unpipe(logStream)
+  child.stderr?.unpipe(logStream)
+  if (!child.killed) child.kill()
 }
 
-async function stopBackendAndWait(timeoutMs = 5_000): Promise<boolean> {
+async function stopBackendAndWait(timeoutMs = 5_000, reason = 'unspecified'): Promise<boolean> {
   await cleanupCurrentProviderDiscovery()
   const child = backendProcess
+  appendBackendDiagnostic(
+    `[officewhere] backend stop requested: reason=${reason} active=${child ? 'true' : 'false'} ` +
+      `timeout_ms=${timeoutMs} pid=${child?.pid ?? ''}\n`,
+  )
   if (!child) return true
 
   expectedBackendExits.add(child)
@@ -1923,6 +2011,9 @@ async function stopBackendAndWait(timeoutMs = 5_000): Promise<boolean> {
   if (!child.killed) child.kill()
   if (await exitPromise) return true
 
+  appendBackendDiagnostic(
+    `[officewhere] backend stop timeout: reason=${reason} timeout_ms=${timeoutMs} force_kill=true pid=${child.pid ?? ''}\n`,
+  )
   await forceKillProcessTree(child)
   return waitForProcessExit(child, 2_000)
 }
@@ -2241,7 +2332,7 @@ async function clearAppData(payload: unknown): Promise<ClearAppDataResult> {
     destroyTray()
   }
   try {
-    result.backendStopped = await stopBackendAndWait()
+    result.backendStopped = await stopBackendAndWait(5_000, 'app-data-cleanup')
     await closeRendererForAppDataCleanup(selected)
 
     for (const candidate of selected) {
@@ -2300,25 +2391,37 @@ async function pickAvailablePort(): Promise<number> {
   })
 }
 
-async function pingHealth(baseUrl: string): Promise<boolean> {
+function formatHealthProbeReason(result: HealthProbeResult): string {
+  if (result.timedOut) return `startup health probe timed out after ${HEALTH_PROBE_TIMEOUT_MS} ms`
+  if (result.statusCode !== undefined) return `http_status_${result.statusCode}`
+  if (result.error) return result.error.replace(/\s+/g, ' ')
+  return 'unknown'
+}
+
+async function pingHealth(baseUrl: string): Promise<HealthProbeResult> {
+  const startedAt = Date.now()
   return new Promise((resolve) => {
     let settled = false
-    const finish = (value: boolean) => {
+    const finish = (result: Omit<HealthProbeResult, 'durationMs'>) => {
       if (settled) return
       settled = true
-      resolve(value)
+      resolve({ ...result, durationMs: Date.now() - startedAt })
     }
 
-    const request = http.get(`${baseUrl}/api/health`, (response) => {
+    const request = http.get(`${baseUrl}/api/health?startup=1`, (response) => {
       response.resume()
-      finish(response.statusCode === 200)
+      finish({ ok: response.statusCode === 200, statusCode: response.statusCode })
     })
 
-    request.setTimeout(1_000, () => {
+    request.setTimeout(HEALTH_PROBE_TIMEOUT_MS, () => {
       request.destroy()
-      finish(false)
+      finish({
+        ok: false,
+        timedOut: true,
+        error: `startup health probe timed out after ${HEALTH_PROBE_TIMEOUT_MS} ms`,
+      })
     })
-    request.on('error', () => finish(false))
+    request.on('error', (error) => finish({ ok: false, error: error.message }))
   })
 }
 

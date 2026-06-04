@@ -19,6 +19,20 @@ def test_electron_packaged_python_dispatches_by_platform():
     assert "PYTHONNOUSERSITE" in main_ts
 
 
+def test_electron_startup_uses_lightweight_health_probe():
+    main_ts = (REPO_ROOT / "frontend" / "electron" / "main.ts").read_text(encoding="utf-8")
+
+    assert "/api/health?startup=1" in main_ts
+    assert "const HEALTH_PROBE_TIMEOUT_MS = 10_000" in main_ts
+    assert "backend startup attempt started" in main_ts
+    assert "backend health ready" in main_ts
+    assert "backend health pending" in main_ts
+    assert "backend health startup timed out" in main_ts
+    assert "startup health probe timed out" in main_ts
+    assert "expected=${expectedExit ? 'true' : 'false'}" in main_ts
+    assert "backend stop requested" in main_ts
+
+
 def test_pdf_runtime_dependency_is_declared_and_vendored_for_windows():
     requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
     win_runtime = REPO_ROOT / "python-runtime" / "win-x64" / "site-packages"

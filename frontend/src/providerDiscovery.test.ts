@@ -9,6 +9,7 @@ import {
   cleanupProviderDiscovery,
   cleanupProviderDiscoverySync,
   getProviderDiscoveryPath,
+  tryWriteProviderDiscovery,
   writeProviderDiscovery,
 } from '../electron/providerDiscovery'
 
@@ -150,6 +151,29 @@ describe('provider discovery', () => {
       expect(parsed.pid).toBe(777)
       expect(parsed.health_url).toBe('http://127.0.0.1:50006/api/provider/v1/health')
       expect(parsed.manifest_url).toBe('http://127.0.0.1:50006/api/provider/v1/manifest')
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports discovery publish failures without throwing', async () => {
+    const dir = makeTempDir()
+    try {
+      const fileInsteadOfDirectory = path.join(dir, 'not-a-directory')
+      fs.writeFileSync(fileInsteadOfDirectory, 'occupied')
+      const payload = buildProviderDiscovery({
+        appVersion: '0.11.1',
+        baseUrl: 'http://127.0.0.1:50007',
+        pid: 888,
+        discoveryId: 'publish-failure',
+      })
+
+      const result = await tryWriteProviderDiscovery(fileInsteadOfDirectory, payload)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error).not.toEqual('')
+      }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="officewhere", version="0.14.0", lifespan=lifespan)
+app = FastAPI(title="officewhere", version="0.14.1", lifespan=lifespan)
 
 # CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(
@@ -73,11 +73,16 @@ app.include_router(provider_router)
 
 
 @app.get("/api/health")
-async def health():
-    return {
+async def health(startup: bool = False):
+    payload = {
         "status": "ok",
         "version": app.version,
         "db_path": get_db_path(),
+    }
+    if startup:
+        return payload
+    return {
+        **payload,
         "search_index": get_search_index_status(),
         "excel_index": get_excel_index_status(),
     }
