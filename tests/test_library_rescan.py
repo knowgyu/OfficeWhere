@@ -349,7 +349,10 @@ def test_collect_supported_paths_uses_everything_provider_when_available(tmp_pat
     monkeypatch.setattr(
         library_scanner,
         "discover_supported_paths",
-        lambda _folder, _recursive, _supported, _excluded: EverythingDiscovery(paths=[str(target)]),
+        lambda _folder, _recursive, _supported, _excluded: EverythingDiscovery(
+            paths=[str(target)],
+            modified_time_by_path={str(target): 1_700_000_000.0},
+        ),
     )
 
     def fail_scandir(_path):
@@ -362,6 +365,8 @@ def test_collect_supported_paths_uses_everything_provider_when_available(tmp_pat
     assert result.discovery_source == "everything_sdk"
     assert result.discovery_hint == ""
     assert {Path(path) for path in result.paths} == {target}
+    assert result.modified_time_by_path[str(target)] == 1_700_000_000.0
+    assert result.mtime_metadata_trusted is True
 
 
 def test_collect_supported_paths_falls_back_with_everything_hint(tmp_path, monkeypatch):
@@ -1181,6 +1186,144 @@ def test_rescan_recovers_missing_source_without_reindex_when_mtime_matches(tmp_p
     assert row["availability_status"] == "available"
     assert row["missing_since"] is None
 
+
+
+def test_rescan_uses_trusted_discovery_mtime_to_skip_without_rescan_stat(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import get_file_by_id, save_file_chunks, update_file_mtime
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    source = tmp_path / "unchanged.docx"
+    source.write_text("same content", encoding="utf-8")
+    file_id = register_file(str(source), source.name, "Word", 0)
+    source_mtime = source.stat().st_mtime
+    update_file_mtime(file_id, source_mtime)
+    save_file_chunks(file_id, [{"location": "문단", "content": "변경 없음"}])
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(
+            paths=[str(source)],
+            discovery_source="everything_sdk",
+            modified_time_by_path={str(source): source_mtime},
+            mtime_metadata_trusted=True,
+        ),
+    )
+    monkeypatch.setattr(
+        library.os,
+        "stat",
+        lambda _path: (_ for _ in ()).throw(AssertionError("trusted Everything mtime should skip rescan-stage os.stat")),
+    )
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda _path: (_ for _ in ()).throw(AssertionError("unchanged files should not be reindexed")),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert response.skipped == 1
+    row = get_file_by_id(file_id)
+    assert row is not None
+    assert row["availability_status"] == "available"
+
+
+def test_rescan_falls_back_to_stat_for_partial_or_invalid_discovery_mtime(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import save_file_chunks, update_file_mtime
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    with_metadata = tmp_path / "with-metadata.docx"
+    without_metadata = tmp_path / "without-metadata.docx"
+    invalid_metadata = tmp_path / "invalid-metadata.docx"
+    for source in (with_metadata, without_metadata, invalid_metadata):
+        source.write_text("same content", encoding="utf-8")
+        file_id = register_file(str(source), source.name, "Word", 0)
+        update_file_mtime(file_id, source.stat().st_mtime)
+        save_file_chunks(file_id, [{"location": "문단", "content": source.name}])
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+
+    trusted_mtime = with_metadata.stat().st_mtime
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(
+            paths=[str(with_metadata), str(without_metadata), str(invalid_metadata)],
+            discovery_source="everything_sdk",
+            modified_time_by_path={
+                str(with_metadata): trusted_mtime,
+                str(invalid_metadata): 0.0,
+            },
+            mtime_metadata_trusted=True,
+        ),
+    )
+    real_stat = library.os.stat
+    stat_paths: list[str] = []
+
+    def tracked_stat(path):
+        text = str(path)
+        if text == str(with_metadata):
+            raise AssertionError("valid Everything mtime should avoid rescan-stage os.stat")
+        stat_paths.append(text)
+        return real_stat(path)
+
+    monkeypatch.setattr(library.os, "stat", tracked_stat)
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda _path: (_ for _ in ()).throw(AssertionError("unchanged files should not be reindexed")),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert response.skipped == 3
+    assert str(without_metadata) in stat_paths
+    assert str(invalid_metadata) in stat_paths
+    assert str(with_metadata) not in stat_paths
+
+
+def test_rescan_does_not_trust_unverified_discovery_mtime_for_skip(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import save_file_chunks, update_file_mtime
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    source = tmp_path / "stale.docx"
+    source.write_text("temporary", encoding="utf-8")
+    source_mtime = source.stat().st_mtime
+    file_id = register_file(str(source), source.name, "Word", 0)
+    update_file_mtime(file_id, source_mtime)
+    save_file_chunks(file_id, [{"location": "문단", "content": "stale candidate"}])
+    source.unlink()
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(
+            paths=[str(source)],
+            discovery_source="everything_sdk",
+            modified_time_by_path={str(source): source_mtime},
+            mtime_metadata_trusted=False,
+        ),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.skipped == 0
+    assert response.failed == 1
 
 def test_rescan_purges_missing_records_after_retention_and_cascades_indexes(tmp_path, monkeypatch):
     import sqlite3

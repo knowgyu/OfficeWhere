@@ -154,6 +154,13 @@ function formatInitialDocumentDate(file: FileInfo) {
   return '최근 문서'
 }
 
+function formatSearchResultModifiedDate(item: SearchResult) {
+  if (item.file_mtime == null) {
+    return null
+  }
+  return `수정 ${new Date(item.file_mtime * 1000).toLocaleDateString('ko-KR', { dateStyle: 'medium' })}`
+}
+
 function normalizePathForFilter(path: string) {
   return path.trim().replace(/\\/g, '/').replace(/\/+$/g, '').toLocaleLowerCase('ko-KR')
 }
@@ -1310,6 +1317,7 @@ export default function FileSearch({
               const contentExpanded = expandedContentFiles.has(fileKey)
               const firstContentItem = contentItems[0]
               const titleSnippet = filenameItems[0]?.snippet ?? fileName
+              const modifiedLabel = formatSearchResultModifiedDate(items[0])
 
               return (
                 <Card key={group.fileKey} variant="outlined" className="overflow-hidden console-panel shadow-none ring-1 ring-[var(--ow-inset-highlight)]">
@@ -1329,6 +1337,11 @@ export default function FileSearch({
                         <div className="mt-1 flex items-center gap-2 truncate type-body-sm text-[var(--md-sys-color-on-surface-variant)]">
                           <Icon name="description" size={15} />
                           <span className="truncate" title={items[0].path}>{items[0].path}</span>
+                          {modifiedLabel && (
+                            <span className="shrink-0 whitespace-nowrap type-label-md text-[var(--md-sys-color-on-surface-variant)]">
+                              · {modifiedLabel}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center justify-end gap-2 flex-wrap">

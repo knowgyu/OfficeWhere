@@ -454,6 +454,7 @@ def _rescan_library_impl(
 
     started_monotonic = time.monotonic()
     found_paths: Dict[str, str] = {}
+    found_modified_times: Dict[str, float] = {}
     successfully_scanned_roots: List[Path] = []
     scan_errors: List[LibraryRescanResult] = []
     lifecycle_results: List[LibraryRescanResult] = []
@@ -548,10 +549,17 @@ def _rescan_library_impl(
             scan_inaccessible_dirs_by_name.update(scan_result.inaccessible_dirs_by_name or {})
             scan_unsupported_extensions_by_suffix.update(scan_result.unsupported_extensions_by_suffix or {})
             _remember_discovery(scan_result)
+            scan_mtimes = getattr(scan_result, "modified_time_by_path", {}) or {}
+            trust_scan_mtimes = bool(getattr(scan_result, "mtime_metadata_trusted", False))
             for path in scan_result.paths:
                 if _cancel_event.is_set():
                     break
                 found_paths[path] = Path(path).name
+                if trust_scan_mtimes and path in scan_mtimes:
+                    try:
+                        found_modified_times[path] = float(scan_mtimes[path])
+                    except (TypeError, ValueError):
+                        pass
             if getattr(scan_result, "discovery_source", "filesystem") != "everything_sdk":
                 successfully_scanned_roots.append(_normalized_resolved_path(folder.path))
         except Exception as exc:
@@ -593,6 +601,8 @@ def _rescan_library_impl(
                 cache_hit=getattr(scan_result, "cache_hit", False),
                 cache_hit_dir_count=getattr(scan_result, "cache_hit_dir_count", 0),
                 cache_fallback_reason=getattr(scan_result, "cache_fallback_reason", ""),
+                mtime_metadata_count=len(getattr(scan_result, "modified_time_by_path", {}) or {}),
+                mtime_metadata_trusted=bool(getattr(scan_result, "mtime_metadata_trusted", False)),
                 duration_ms=elapsed_ms(folder_started),
                 error_type=scan_error_type,
                 error=scan_error,
@@ -648,7 +658,14 @@ def _rescan_library_impl(
         worker_count=worker_count,
         total=len(found_paths),
         existing=len(existing_by_path),
+        discovery_mtime_count=len(found_modified_times),
     )
+
+    def _discovery_mtime_for_path(path: str) -> float | None:
+        value = found_modified_times.get(path)
+        if value is None or value <= 0:
+            return None
+        return value
 
     def _register_or_update(path: str) -> LibraryRescanResult | _PreparedLibraryWrite:
         file_started = time.perf_counter()
@@ -679,9 +696,15 @@ def _rescan_library_impl(
             "file_id_before": existing["id"] if existing else None,
         }
         try:
-            stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
-            current_mtime = stat_result.st_mtime
-            metrics["size_bytes"] = stat_result.st_size
+            discovery_mtime = _discovery_mtime_for_path(path)
+            if discovery_mtime is not None:
+                current_mtime = discovery_mtime
+                metrics["mtime_source"] = "everything_sdk"
+            else:
+                stat_result = timed_ms(metrics, "stat_ms", lambda: os.stat(path))
+                current_mtime = stat_result.st_mtime
+                metrics["size_bytes"] = stat_result.st_size
+                metrics["mtime_source"] = "stat"
             was_missing = bool(existing and existing.get("availability_status") == "missing")
             if existing and existing.get("file_mtime") is not None:
                 if abs(float(existing["file_mtime"]) - current_mtime) < 1.0:

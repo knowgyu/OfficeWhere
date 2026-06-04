@@ -16,6 +16,7 @@ EVERYTHING_SDK_HELP_URL = "https://www.voidtools.com/support/everything/sdk/"
 
 _EVERYTHING_REQUEST_FILE_NAME = 0x00000001
 _EVERYTHING_REQUEST_PATH = 0x00000002
+_EVERYTHING_REQUEST_DATE_MODIFIED = 0x00000040
 _EVERYTHING_ERROR_IPC = 2
 _MAX_PATH_CHARS = 32768
 _SDK_LOCK = threading.Lock()
@@ -30,6 +31,7 @@ class EverythingDiscovery:
     help_url: str = ""
     dll_path: str = ""
     queried_count: int = 0
+    modified_time_by_path: dict[str, float] = field(default_factory=dict)
 
     @property
     def available(self) -> bool:
@@ -176,6 +178,37 @@ def _configure_dll(dll: ctypes.CDLL) -> None:
     dll.Everything_IsFileResult.restype = wintypes.BOOL
     dll.Everything_GetResultFullPathNameW.argtypes = [wintypes.DWORD, wintypes.LPWSTR, wintypes.DWORD]
     dll.Everything_GetResultFullPathNameW.restype = wintypes.DWORD
+    try:
+        dll.Everything_GetResultDateModified.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.FILETIME)]
+        dll.Everything_GetResultDateModified.restype = wintypes.BOOL
+    except AttributeError:
+        # Date-modified metadata is an optimization. Older or incompatible DLLs
+        # can still provide fast path discovery and fall back to os.stat later.
+        pass
+
+
+def filetime_to_unix_seconds(filetime: ctypes.wintypes.FILETIME) -> float | None:
+    """Convert a Windows FILETIME value to Unix seconds.
+
+    Everything returns date-modified metadata as FILETIME: 100 ns ticks
+    since 1601-01-01 UTC. Return None for missing/zero values.
+    """
+
+    ticks = (int(filetime.dwHighDateTime) << 32) + int(filetime.dwLowDateTime)
+    if ticks <= 0:
+        return None
+    return ticks / 10_000_000 - 11_644_473_600
+
+
+def _result_modified_time(dll: ctypes.CDLL, index: int) -> float | None:
+    filetime = ctypes.wintypes.FILETIME()
+    try:
+        ok = bool(dll.Everything_GetResultDateModified(index, ctypes.byref(filetime)))
+    except (AttributeError, OSError, ValueError):
+        return None
+    if not ok:
+        return None
+    return filetime_to_unix_seconds(filetime)
 
 
 def _load_dll(path: str) -> ctypes.CDLL:
@@ -247,16 +280,19 @@ def _query_everything(
     recursive: bool,
     supported_extensions: set[str],
     excluded_keys: set[str],
-) -> tuple[list[str], int]:
+) -> tuple[list[str], int, dict[str, float]]:
     query = _build_query(folder_path, sorted(supported_extensions))
     buffer = ctypes.create_unicode_buffer(_MAX_PATH_CHARS)
     paths: list[str] = []
+    modified_time_by_path: dict[str, float] = {}
     seen: set[str] = set()
 
     dll.Everything_Reset()
     dll.Everything_SetSearchW(query)
     dll.Everything_SetMatchPath(True)
-    dll.Everything_SetRequestFlags(_EVERYTHING_REQUEST_FILE_NAME | _EVERYTHING_REQUEST_PATH)
+    dll.Everything_SetRequestFlags(
+        _EVERYTHING_REQUEST_FILE_NAME | _EVERYTHING_REQUEST_PATH | _EVERYTHING_REQUEST_DATE_MODIFIED
+    )
     if not dll.Everything_QueryW(True):
         error_code = int(dll.Everything_GetLastError())
         raise RuntimeError(f"Everything IPC query failed: {error_code}")
@@ -282,7 +318,10 @@ def _query_everything(
             continue
         seen.add(key)
         paths.append(candidate)
-    return sorted(paths), total
+        modified_time = _result_modified_time(dll, index)
+        if modified_time is not None:
+            modified_time_by_path[candidate] = modified_time
+    return sorted(paths), total, modified_time_by_path
 
 
 def discover_supported_paths(
@@ -310,7 +349,7 @@ def discover_supported_paths(
     try:
         with _SDK_LOCK:
             dll = _load_dll(dll_path)
-            paths, queried_count = _query_everything(
+            paths, queried_count, modified_time_by_path = _query_everything(
                 dll,
                 folder_path=os.path.normpath(folder_path),
                 recursive=recursive,
@@ -344,4 +383,9 @@ def discover_supported_paths(
             dll_path=dll_path,
         )
 
-    return EverythingDiscovery(paths=paths, dll_path=dll_path, queried_count=queried_count)
+    return EverythingDiscovery(
+        paths=paths,
+        dll_path=dll_path,
+        queried_count=queried_count,
+        modified_time_by_path=modified_time_by_path,
+    )

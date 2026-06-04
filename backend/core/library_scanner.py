@@ -42,6 +42,8 @@ class ScanCollection:
     cache_hit: bool = False
     cache_fallback_reason: str = ""
     cache_hit_dir_count: int = 0
+    modified_time_by_path: Dict[str, float] = field(default_factory=dict)
+    mtime_metadata_trusted: bool = False
 
 
 @dataclass
@@ -253,6 +255,8 @@ def _collection_from_everything(
                 discovery_hint="",
                 discovery_help_url="",
                 discovery_fallback_reason="",
+                modified_time_by_path=discovery.modified_time_by_path,
+                mtime_metadata_trusted=bool(discovery.modified_time_by_path),
             ),
             "",
             "",

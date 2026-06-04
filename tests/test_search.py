@@ -959,7 +959,7 @@ def test_filename_content_search_allows_filename_row_plus_content_limit(tmp_path
     assert len(named_content_locations) == 1
 
 
-def test_content_search_orders_files_by_recent_mtime_and_chunks_by_document_order(tmp_path):
+def test_content_search_does_not_order_files_by_recent_mtime_and_keeps_document_order(tmp_path):
     first_id = register_file(str(tmp_path / 'old.docx'), 'old.docx', 'Word', 0)
     second_id = register_file(str(tmp_path / 'new.docx'), 'new.docx', 'Word', 0)
     third_id = register_file(str(tmp_path / 'middle.docx'), 'middle.docx', 'Word', 0)
@@ -983,12 +983,13 @@ def test_content_search_orders_files_by_recent_mtime_and_chunks_by_document_orde
     for item in results:
         if item["file_id"] not in ordered_file_ids:
             ordered_file_ids.append(item["file_id"])
-    assert ordered_file_ids == [second_id, third_id, first_id]
+    assert ordered_file_ids == [first_id, second_id, third_id]
     assert [item["location"] for item in results if item["file_id"] == second_id] == [
         "슬라이드 1",
         "슬라이드 2",
         "슬라이드 5",
     ]
+    assert {item["file_mtime"] for item in results if item["file_id"] == second_id} == {3_000}
 
 
 def test_search_api_allows_more_files_up_to_max(tmp_path):
@@ -1015,6 +1016,7 @@ def test_search_api_content_results_include_optional_fingerprint_metadata(tmp_pa
     from backend.models.schemas import SearchRequest
 
     file_id = register_file(str(tmp_path / 'fingerprint.docx'), 'fingerprint.docx', 'Word', 0)
+    update_file_mtime(file_id, 1_700_000_000)
     save_file_chunks(file_id, [{"location": "문단", "content": "fingerprint body match"}])
 
     response = search_files(SearchRequest(query="fingerprint", search_scope="content"))
@@ -1026,6 +1028,7 @@ def test_search_api_content_results_include_optional_fingerprint_metadata(tmp_pa
     assert result.content_hash
     assert result.content_chars == len("fingerprint body match")
     assert result.chunk_count == 1
+    assert result.file_mtime == 1_700_000_000
 
 
 def test_search_api_filename_results_include_optional_fingerprint_metadata(tmp_path):

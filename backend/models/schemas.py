@@ -351,6 +351,7 @@ class SearchResult(BaseModel):
     content_hash: Optional[str] = None
     content_chars: Optional[int] = None
     chunk_count: Optional[int] = None
+    file_mtime: Optional[float] = None
 
 
 class SearchResponse(BaseModel):

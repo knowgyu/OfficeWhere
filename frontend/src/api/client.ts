@@ -413,6 +413,7 @@ export interface SearchResult {
   content_hash?: string | null
   content_chars?: number | null
   chunk_count?: number | null
+  file_mtime?: number | null
 }
 
 export type SearchScope = 'filename_content' | 'filename' | 'content'

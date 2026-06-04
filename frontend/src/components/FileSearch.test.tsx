@@ -412,6 +412,26 @@ describe('FileSearch', () => {
       })
     })
 
+    it('renders the last modified date for search result files when provided', async () => {
+      mockedSearchQuery.mockResolvedValue({
+        data: {
+          query: '회의',
+          total: 1,
+          results: [searchHit({ name: '수정일문서.docx', file_mtime: 1_700_000_000 })],
+          file_count: 1,
+          file_limit: 20,
+          has_more: false,
+        },
+      })
+
+      renderInactiveFileSearch()
+      await userEvent.type(screen.getByPlaceholderText(/파일 안의 단어를 검색/), '회의')
+      await userEvent.click(screen.getByRole('button', { name: /^검색$/ }))
+
+      expect(await screen.findByText('수정일문서.docx')).toBeInTheDocument()
+      expect(screen.getByText(/수정 2023/)).toBeInTheDocument()
+    })
+
     it('shows a content-index repair notice when search metadata is stale', async () => {
       mockedSearchQuery.mockResolvedValue({
         data: {

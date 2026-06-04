@@ -142,6 +142,7 @@ def _filename_matches(
                 "content_hash": file_info.get("content_hash"),
                 "content_chars": file_info.get("content_chars"),
                 "chunk_count": file_info.get("chunk_count"),
+                "file_mtime": file_info.get("file_mtime"),
             }
         )
     return matches
