@@ -37,33 +37,29 @@ export function Badge({
 
 export function FileTypeBadge({ fileType }: { fileType: string }) {
   const raw = fileType.toLowerCase()
-  let label = fileType || 'Unknown'
+  let label = 'FILE'
   let tone: Tone = 'neutral'
-  let icon = 'description'
-  if (raw.includes('excel') || raw === 'xlsx') {
+  if (raw.includes('excel') || raw === 'xlsx' || raw === 'xls') {
     tone = 'success'
-    label = 'Excel'
-    icon = 'table_chart'
-  } else if (raw.includes('word') || raw === 'docx') {
+    label = 'XLSX'
+  } else if (raw.includes('word') || raw === 'docx' || raw === 'doc') {
     tone = 'primary'
-    label = 'Word'
-    icon = 'article'
+    label = 'DOCX'
   } else if (raw.includes('power') || raw === 'pptx' || raw === 'ppt') {
     tone = 'warning'
-    label = 'PowerPoint'
-    icon = 'slideshow'
+    label = 'PPTX'
   } else if (raw.includes('pdf')) {
     tone = 'danger'
     label = 'PDF'
-    icon = 'picture_as_pdf'
+  } else if (raw.includes('markdown') || raw === 'md') {
+    label = 'MD'
+  } else if (raw.includes('text') || raw === 'txt') {
+    label = 'TXT'
   }
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full pl-1.5 pr-2 py-0.5 type-label-sm ${TONE[tone]}`}
+      className={`inline-flex w-12 items-center justify-center rounded-full px-0 py-0.5 text-center type-label-sm tabular-nums ${TONE[tone]}`}
     >
-      <span className="material-symbol" style={{ fontSize: '14px' }}>
-        {icon}
-      </span>
       {label}
     </span>
   )

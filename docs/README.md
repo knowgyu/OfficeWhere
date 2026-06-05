@@ -18,7 +18,7 @@
 | 전체 구조와 주요 데이터 흐름 | [`architecture.md`](architecture.md) |
 | 테스트를 어디에 추가할지 | [`test-guidelines.md`](test-guidelines.md) |
 | 릴리스 전 자동/수동 확인 | [`release-test-checklist.md`](release-test-checklist.md) |
-| 최근 릴리스 노트 | [`releases/v0.14.2.md`](releases/v0.14.2.md) |
+| 최근 릴리스 노트 | [`releases/v0.14.3.md`](releases/v0.14.3.md) |
 | Electron 패키징/업데이트/bridge | [`electron-migration.md`](electron-migration.md) |
 
 ## 문서 관리 원칙
