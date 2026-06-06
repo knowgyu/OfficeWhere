@@ -77,6 +77,7 @@ from .rescan import (
     RescanStatusCoordinator,
     RescanWritePolicy,
 )
+from .search_cache import bump_search_cache_epoch
 from ..config import get_library_rescan_config
 from ..runtime import get_fast_worker_count, get_worker_count
 
@@ -1235,6 +1236,8 @@ def _rescan_library_impl(
         **counts,
     )
     cancelled = _cancel_event.is_set()
+    if not cancelled:
+        bump_search_cache_epoch("library_rescan_done")
     log_index_perf(
         "rescan_end",
         operation="library_rescan",

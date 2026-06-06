@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .core.hangul_search import build_search_text, build_trigram_search_text, make_search_snippet
 from .core.index_perf import elapsed_ms, log_index_perf
+from .core.search_cache import bump_search_cache_epoch
 from .storage import comparison_artifacts as artifact_storage
 from .storage import duplicate_content as duplicate_content_storage
 from .storage import library_groups as library_group_storage
@@ -61,6 +62,14 @@ COMPARISON_CACHE_MIN_KEEP_ROWS = 50
 MISSING_FILE_RETENTION_DAYS = 7
 _DB_WRITE_LOCK = threading.RLock()
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
+
+
+def _invalidate_search_cache(reason: str) -> None:
+    try:
+        bump_search_cache_epoch(reason)
+    except Exception:
+        # Search-result cache invalidation must never break durable DB writes.
+        logger.debug("search cache invalidation failed", exc_info=True, extra={"reason": reason})
 
 
 @dataclass(frozen=True)
@@ -158,6 +167,7 @@ class InitialIndexStagingDatabase:
             metrics["total_ms"] = elapsed_ms(finalize_started)
             metrics["success"] = True
             log_index_perf("initial_index_staging_finalized", **metrics)
+            _invalidate_search_cache("initial_index_staging_finalized")
             _remove_sqlite_sidecar_files(self.path)
             return metrics
         except Exception as exc:
@@ -1369,6 +1379,7 @@ def repair_search_indexes(reason: str = "background") -> Dict[str, Any]:
                 conn.commit()
                 metrics.update(success=True, skipped=False, total_ms=elapsed_ms(repair_started))
                 log_index_perf("search_index_repair_done", **metrics)
+                _invalidate_search_cache("search_index_repair_done")
                 return metrics
             except Exception as exc:
                 conn.rollback()
@@ -1470,6 +1481,8 @@ def repair_excel_index_version(reason: str = "background") -> Dict[str, Any]:
                 conn.commit()
                 metrics.update(success=True, skipped=False, total_ms=elapsed_ms(repair_started))
                 log_index_perf("db_excel_index_repair_done", **metrics)
+                if excel_file_count > 0:
+                    _invalidate_search_cache("db_excel_index_repair_done")
                 return metrics
             except Exception as exc:
                 conn.rollback()
@@ -1533,6 +1546,8 @@ def prune_unsupported_file_extensions(reason: str = "background") -> Dict[str, A
             conn.commit()
             metrics.update(success=True, skipped=False, pruned=pruned, total_ms=elapsed_ms(started))
             log_index_perf("unsupported_records_prune_done", **metrics)
+            if pruned:
+                _invalidate_search_cache("unsupported_records_prune_done")
             return metrics
     except Exception as exc:
         metrics.update(
@@ -2067,7 +2082,9 @@ def register_file(
             )
             conn.commit()
             _mark_group_index_repair_needed_for_legacy_write("register_file")
-            return cursor.lastrowid
+            file_id = int(cursor.lastrowid)
+            _invalidate_search_cache("register_file")
+            return file_id
         except sqlite3.IntegrityError:
             cursor.execute(
                 """
@@ -2086,6 +2103,7 @@ def register_file(
             cursor.execute("SELECT id FROM registered_files WHERE path=?", (path,))
             row = cursor.fetchone()
             _mark_group_index_repair_needed_for_legacy_write("register_file")
+            _invalidate_search_cache("register_file")
             return row[0] if row else -1
 
 
@@ -2123,6 +2141,7 @@ def save_prepared_indexed_file(payload: PreparedIndexedFile) -> int:
             file_id = _save_prepared_indexed_file(cursor, payload, datetime.now().isoformat())
             _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="save_prepared_indexed_file")
             conn.commit()
+            _invalidate_search_cache("save_prepared_indexed_file")
             return file_id
         except Exception:
             conn.rollback()
@@ -2157,6 +2176,7 @@ def _save_indexed_files_batch_on_connection(
         metrics["commit_ms"] = elapsed_ms(commit_started)
         metrics["transaction_ms"] = elapsed_ms(transaction_started)
         log_index_perf("db_batch_save_done", **metrics)
+        _invalidate_search_cache(f"save_indexed_files_batch:{db_target}")
         return file_ids
     except Exception as exc:
         rollback_started = perf_counter()
@@ -2360,6 +2380,7 @@ def mark_registered_file_available(file_id: int, *, seen_at: Optional[str] = Non
         )
         _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="missing_file_recovered")
         conn.commit()
+    _invalidate_search_cache("mark_registered_file_available")
     return dict(row)
 
 
@@ -2401,6 +2422,8 @@ def mark_registered_files_missing(
         if affected_rows:
             _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="missing_file_marked")
         conn.commit()
+    if affected_rows:
+        _invalidate_search_cache("mark_registered_files_missing")
     return affected_rows
 
 
@@ -2432,6 +2455,8 @@ def purge_expired_missing_files(
                 repair_reason="purge_expired_missing_files",
             )
         conn.commit()
+    if rows:
+        _invalidate_search_cache("purge_expired_missing_files")
     return rows
 
 
@@ -2604,6 +2629,88 @@ def search_file_names(
     return [dict(row) for row in rows]
 
 
+def search_file_names_by_paths(
+    query: str,
+    candidate_paths: Sequence[str],
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    file_types: Optional[Sequence[str]] = None,
+    modified_from: Optional[float] = None,
+    modified_to: Optional[float] = None,
+    excluded_folder_paths: Optional[Sequence[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Search registered filenames constrained to Everything candidate paths.
+
+    Everything is only a candidate generator.  Registered DB rows, existing DB
+    filters, and current pagination/order remain authoritative.
+    """
+
+    normalized_query = query.strip()
+    if not normalized_query:
+        return []
+
+    path_values: List[str] = []
+    seen_paths: set[str] = set()
+    for path in candidate_paths:
+        text = os.path.normpath(str(path or "").strip())
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        path_values.append(text.casefold())
+    if not path_values:
+        return []
+
+    clauses = ["name LIKE ?", "availability_status != 'missing'"]
+    params: List[Any] = [f"%{normalized_query}%"]
+    path_clauses: List[str] = []
+    for batch in _batched_values(path_values):
+        placeholders = ",".join("?" for _ in batch)
+        path_clauses.append(f"lower(path) IN ({placeholders})")
+        params.extend(batch)
+    clauses.append(f"({' OR '.join(path_clauses)})")
+
+    filters = [file_type for file_type in (file_types or []) if file_type]
+    if filters:
+        placeholders = ",".join("?" for _ in filters)
+        clauses.append(f"file_type IN ({placeholders})")
+        params.extend(filters)
+    if modified_from is not None or modified_to is not None:
+        clauses.append("file_mtime IS NOT NULL")
+    if modified_from is not None:
+        clauses.append("file_mtime >= ?")
+        params.append(modified_from)
+    if modified_to is not None:
+        clauses.append("file_mtime <= ?")
+        params.append(modified_to)
+    _extend_excluded_path_filters(clauses, params, excluded_folder_paths)
+    params.extend([max(1, limit), max(0, offset)])
+
+    with _read_connection(row_factory=sqlite3.Row) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT rf.*,
+                   df.normalized_hash,
+                   df.content_hash,
+                   df.content_chars,
+                   df.chunk_count
+            FROM registered_files rf
+            LEFT JOIN document_fingerprints df ON df.file_id = rf.id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY rf.id DESC
+            LIMIT ?
+            OFFSET ?
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+    return [dict(row) for row in rows]
+
+
 def _delete_registered_file_ids_with_cursor(
     cursor: sqlite3.Cursor,
     file_ids: Sequence[int],
@@ -2635,7 +2742,10 @@ def delete_file(file_id: int) -> bool:
         cursor = conn.cursor()
         affected = _delete_registered_file_ids_with_cursor(cursor, [file_id], repair_reason="delete_file")
         conn.commit()
-        return affected > 0
+        deleted = affected > 0
+    if deleted:
+        _invalidate_search_cache("delete_file")
+    return deleted
 
 
 def delete_files_by_types(file_types: Sequence[str]) -> int:
@@ -2654,7 +2764,8 @@ def delete_files_by_types(file_types: Sequence[str]) -> int:
 
         _delete_registered_file_ids_with_cursor(cursor, file_ids, repair_reason="delete_files_by_types")
         conn.commit()
-        return len(file_ids)
+    _invalidate_search_cache("delete_files_by_types")
+    return len(file_ids)
 
 
 def delete_files_by_extensions(extensions: Sequence[str]) -> int:
@@ -2679,7 +2790,8 @@ def delete_files_by_extensions(extensions: Sequence[str]) -> int:
 
         _delete_registered_file_ids_with_cursor(cursor, file_ids, repair_reason="delete_files_by_extensions")
         conn.commit()
-        return len(file_ids)
+    _invalidate_search_cache("delete_files_by_extensions")
+    return len(file_ids)
 
 
 def _path_is_under(candidate: Path, root: Path) -> bool:
@@ -2718,7 +2830,8 @@ def delete_files_under_paths(paths: Sequence[str | os.PathLike[str]]) -> int:
 
         _delete_registered_file_ids_with_cursor(cursor, file_ids, repair_reason="delete_files_under_paths")
         conn.commit()
-        return len(file_ids)
+    _invalidate_search_cache("delete_files_under_paths")
+    return len(file_ids)
 
 
 def delete_all_files() -> int:
@@ -2740,7 +2853,9 @@ def delete_all_files() -> int:
         cursor.execute("DELETE FROM library_group_dirty_keys")
         _set_library_group_index_state_with_cursor(cursor, "ready")
         conn.commit()
-        return count
+    if count:
+        _invalidate_search_cache("delete_all_files")
+    return count
 
 
 def save_file_chunks(
@@ -2790,6 +2905,7 @@ def save_file_chunks(
         )
         _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="save_file_chunks")
         conn.commit()
+    _invalidate_search_cache("save_file_chunks")
 
 
 def update_file_mtime(file_id: int, mtime: float):
@@ -2812,6 +2928,7 @@ def update_file_mtime(file_id: int, mtime: float):
         cursor.execute("UPDATE document_fingerprints SET source_mtime = ? WHERE file_id = ?", (mtime, file_id))
         _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="update_file_mtime")
         conn.commit()
+    _invalidate_search_cache("update_file_mtime")
 
 
 def get_cached_comparison_result(cache_key: str) -> Optional[Dict[str, Any]]:

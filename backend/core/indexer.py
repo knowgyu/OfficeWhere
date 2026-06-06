@@ -37,6 +37,7 @@ from .pdf_analysis import extract_pdf_pages, inspect_pdf_pages
 from .parser import get_file_type
 from .ppt_analysis import extract_ppt_slides, inspect_ppt_slides
 from ..runtime import get_worker_count
+from .search_cache import bump_search_cache_epoch
 from .word_analysis import extract_word_blocks, inspect_word_blocks
 
 logger = logging.getLogger(__name__)
@@ -451,6 +452,7 @@ def reindex_all() -> Dict[str, int]:
         outcomes = list(executor.map(_reindex_one, files))
 
     set_setting("last_reindex_at", datetime.now().isoformat())
+    bump_search_cache_epoch("reindex_all_done")
     return {
         "success": outcomes.count("success"),
         "failed": outcomes.count("failed"),
@@ -475,6 +477,7 @@ def _do_reindex_incremental():
             logger.exception("incremental index failed diagnostic_id=%s path=%s", diagnostic_id, path)
 
     set_setting("last_reindex_at", datetime.now().isoformat())
+    bump_search_cache_epoch("incremental_reindex_done")
 
 
 def _scheduler_loop():

@@ -7,6 +7,7 @@ from datetime import datetime
 import pytest
 from openpyxl import Workbook
 
+from backend.core.search_cache import reset_search_cache_for_tests
 from backend.core.indexer import index_file, inspect_and_chunk, reindex_all, search, _sanitize_fts_query
 from backend.database import (
     init_db,
@@ -25,6 +26,7 @@ def setup_db(tmp_path, monkeypatch):
     monkeypatch.setattr("backend.database.DB_PATH", db_path)
     monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
     init_db()
+    reset_search_cache_for_tests()
 
 
 def _make_excel(path: str, data: dict):
@@ -113,6 +115,16 @@ def test_reindex_all_prunes_legacy_text_rows(tmp_path):
     assert stats == {"success": 0, "failed": 0, "skipped": 1}
     assert get_all_files() == []
     assert txt.exists()
+
+
+def test_reindex_all_invalidates_search_response_cache_epoch(tmp_path):
+    from backend.core.search_cache import current_epoch
+
+    before = current_epoch()
+
+    reindex_all()
+
+    assert current_epoch() > before
 
 
 def test_search_returns_location(tmp_path):
@@ -562,6 +574,105 @@ def test_search_api_filename_scope_respects_file_type_filter(tmp_path):
     assert response.total == 1
     assert response.results[0].file_id == ppt_id
     assert response.results[0].file_type == "PowerPoint"
+
+
+def test_search_request_logs_request_level_timings_and_fallback_reason(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    file_id = register_file(str(tmp_path / "log-target.docx"), "log-target.docx", "Word", 0)
+    update_file_mtime(file_id, 1_700_000_000.0)
+
+    response = search_files(SearchRequest(query="log-target", search_scope="filename"))
+
+    assert response.results[0].file_id == file_id
+    event, fields = events[-1]
+    assert event == "search_request_done"
+    assert fields["success"] is True
+    assert fields["request_id"]
+    assert fields["search_scope"] == "filename"
+    assert fields["cache_status"] == "miss"
+    assert fields["filename_source"] == "db_like"
+    assert fields["filename_fallback_reason"] in {"non_windows", "disabled", "sdk_dll_missing"}
+    assert fields["filename_ms"] >= 0
+    assert fields["content_ms"] == 0
+    assert fields["merge_ms"] >= 0
+    assert fields["row_count"] == 1
+
+
+def test_search_response_cache_hits_then_invalidates_on_mtime_update(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    file_id = register_file(str(tmp_path / "cache-target.docx"), "cache-target.docx", "Word", 0)
+    update_file_mtime(file_id, 1_700_000_000.0)
+    req = SearchRequest(query="cache-target", search_scope="filename")
+
+    first = search_files(req)
+    second = search_files(req)
+    update_file_mtime(file_id, 1_700_000_111.0)
+    third = search_files(req)
+
+    assert first.results[0].file_mtime == 1_700_000_000.0
+    assert second.results[0].file_mtime == 1_700_000_000.0
+    assert third.results[0].file_mtime == 1_700_000_111.0
+    statuses = [fields["cache_status"] for event, fields in events if event == "search_request_done"]
+    assert statuses == ["miss", "hit", "miss"]
+
+
+def test_everything_filename_candidates_preserve_db_authority_order_and_pagination(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.models.schemas import SearchRequest
+
+    older_id = register_file(str(tmp_path / "report-a.docx"), "report-a.docx", "Word", 0)
+    newer_id = register_file(str(tmp_path / "report-b.pptx"), "report-b.pptx", "PowerPoint", 0)
+    register_file(str(tmp_path / "report-c.xlsx"), "report-c.xlsx", "Excel", 0)
+    unregistered = tmp_path / "report-unregistered.pdf"
+    monkeypatch.setattr(
+        "backend.application.search_service.discover_filename_candidates",
+        lambda _query: EverythingDiscovery(
+            paths=[
+                str(tmp_path / "report-a.docx"),
+                str(tmp_path / "report-b.pptx"),
+                str(unregistered),
+            ],
+            queried_count=3,
+        ),
+    )
+
+    response = search_files(SearchRequest(query="report", search_scope="filename", file_limit=1))
+
+    assert [item.file_id for item in response.results] == [newer_id]
+    assert response.has_more is True
+    assert older_id != newer_id
+    assert all("unregistered" not in item.path for item in response.results)
+
+
+def test_everything_filename_candidate_fallback_keeps_db_results(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.models.schemas import SearchRequest
+
+    file_id = register_file(str(tmp_path / "fallback-report.docx"), "fallback-report.docx", "Word", 0)
+    monkeypatch.setattr(
+        "backend.application.search_service.discover_filename_candidates",
+        lambda _query: EverythingDiscovery(unavailable_reason="candidate_limit_exceeded", queried_count=999),
+    )
+
+    response = search_files(SearchRequest(query="fallback-report", search_scope="filename"))
+
+    assert [item.file_id for item in response.results] == [file_id]
 
 
 def test_search_api_content_scope_supports_excel_filter(tmp_path):

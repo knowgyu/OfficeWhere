@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, time
-from typing import Optional
+from time import perf_counter
+from typing import Any, Optional
 
+from ..core.everything_scanner import discover_filename_candidates
 from ..core.hangul_search import make_search_snippet
+from ..core.index_perf import elapsed_ms, log_index_perf
 from ..core.indexer import search
-from ..database import get_search_index_status, search_file_names
+from ..core.search_cache import current_epoch, enabled as search_cache_enabled
+from ..core.search_cache import get_search_cache, set_search_cache
+from ..database import get_search_index_status, search_file_names, search_file_names_by_paths
 from ..models.schemas import SearchRequest, SearchResponse, SearchResult
 
 FILE_TYPE_ALIASES = {
@@ -22,6 +31,14 @@ DEFAULT_SEARCH_FILE_LIMIT = 20
 MAX_SEARCH_FILE_LIMIT = 100
 CONTENT_MATCHES_PER_FILE = 8
 MIN_CONTENT_MATCHES_PER_FILE = 1
+
+
+@dataclass
+class FilenameSearchTelemetry:
+    source: str = "db_like"
+    fallback_reason: str = ""
+    everything_queried_count: int = 0
+    everything_candidate_count: int = 0
 
 
 def normalize_file_type_filters(values: list[str]) -> list[str]:
@@ -107,6 +124,74 @@ def _slice_unique_files(results: list[dict], file_offset: int, file_limit: int) 
     return sliced, has_more
 
 
+def _filename_rows(
+    query: str,
+    file_types: list[str],
+    limit: int,
+    offset: int = 0,
+    modified_from: Optional[float] = None,
+    modified_to: Optional[float] = None,
+    excluded_folder_paths: Optional[list[str]] = None,
+    *,
+    prefer_everything: bool = True,
+) -> tuple[list[dict], FilenameSearchTelemetry]:
+    normalized_query = query.strip()
+    telemetry = FilenameSearchTelemetry()
+    if not normalized_query:
+        telemetry.source = "empty"
+        return [], telemetry
+
+    if prefer_everything:
+        discovery = discover_filename_candidates(normalized_query)
+        telemetry.everything_queried_count = int(discovery.queried_count or 0)
+        telemetry.everything_candidate_count = len(discovery.paths)
+        if discovery.available and discovery.paths:
+            rows = search_file_names_by_paths(
+                normalized_query,
+                discovery.paths,
+                file_types=file_types,
+                modified_from=modified_from,
+                modified_to=modified_to,
+                excluded_folder_paths=excluded_folder_paths,
+                limit=limit,
+                offset=offset,
+            )
+            if rows:
+                telemetry.source = discovery.source or "everything_sdk"
+                return rows, telemetry
+            telemetry.fallback_reason = "no_registered_candidates"
+        else:
+            telemetry.fallback_reason = discovery.unavailable_reason or "empty_candidates"
+
+    telemetry.source = "db_like"
+    rows = search_file_names(
+        normalized_query,
+        file_types=file_types,
+        modified_from=modified_from,
+        modified_to=modified_to,
+        excluded_folder_paths=excluded_folder_paths,
+        limit=limit,
+        offset=offset,
+    )
+    return rows, telemetry
+
+
+def _file_info_to_filename_match(file_info: dict, normalized_query: str) -> dict:
+    return {
+        "file_id": file_info["id"],
+        "name": file_info["name"],
+        "path": file_info["path"],
+        "file_type": file_info["file_type"],
+        "location": "파일명",
+        "snippet": make_search_snippet(file_info["name"], normalized_query, context=80),
+        "normalized_hash": file_info.get("normalized_hash"),
+        "content_hash": file_info.get("content_hash"),
+        "content_chars": file_info.get("content_chars"),
+        "chunk_count": file_info.get("chunk_count"),
+        "file_mtime": file_info.get("file_mtime"),
+    }
+
+
 def _filename_matches(
     query: str,
     file_types: list[str],
@@ -115,37 +200,21 @@ def _filename_matches(
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     excluded_folder_paths: Optional[list[str]] = None,
-) -> list[dict]:
+    *,
+    prefer_everything: bool = True,
+) -> tuple[list[dict], FilenameSearchTelemetry]:
     normalized_query = query.strip()
-    if not normalized_query:
-        return []
-
-    matches: list[dict] = []
-    for file_info in search_file_names(
+    rows, telemetry = _filename_rows(
         normalized_query,
-        file_types=file_types,
-        modified_from=modified_from,
-        modified_to=modified_to,
-        excluded_folder_paths=excluded_folder_paths,
-        limit=limit,
-        offset=offset,
-    ):
-        matches.append(
-            {
-                "file_id": file_info["id"],
-                "name": file_info["name"],
-                "path": file_info["path"],
-                "file_type": file_info["file_type"],
-                "location": "파일명",
-                "snippet": make_search_snippet(file_info["name"], normalized_query, context=80),
-                "normalized_hash": file_info.get("normalized_hash"),
-                "content_hash": file_info.get("content_hash"),
-                "content_chars": file_info.get("content_chars"),
-                "chunk_count": file_info.get("chunk_count"),
-                "file_mtime": file_info.get("file_mtime"),
-            }
-        )
-    return matches
+        file_types,
+        limit,
+        offset,
+        modified_from,
+        modified_to,
+        excluded_folder_paths,
+        prefer_everything=prefer_everything,
+    )
+    return [_file_info_to_filename_match(file_info, normalized_query) for file_info in rows], telemetry
 
 
 def _content_matches(
@@ -172,101 +241,302 @@ def _content_matches(
     )
 
 
+def _cache_key(
+    req: SearchRequest,
+    *,
+    file_types: list[str],
+    modified_from: Optional[float],
+    modified_to: Optional[float],
+    excluded_folder_paths: list[str],
+    file_limit: int,
+    file_offset: int,
+    per_file_limit: int,
+    query_limit: int,
+    search_index_status: dict[str, Any],
+    content_index_ready: bool,
+    epoch: int,
+) -> str:
+    payload = {
+        "version": 1,
+        "epoch": epoch,
+        "query": req.query,
+        "limit": int(req.limit),
+        "query_limit": int(query_limit),
+        "file_limit": int(file_limit),
+        "file_offset": int(file_offset),
+        "per_file_limit": int(per_file_limit),
+        "file_types": list(file_types),
+        "search_scope": req.search_scope,
+        "modified_from": modified_from,
+        "modified_to": modified_to,
+        "excluded_folder_paths": sorted(excluded_folder_paths),
+        "search_index_state": str(search_index_status.get("state") or "ready"),
+        "search_index_stale": not content_index_ready,
+        "search_index_updated_at": search_index_status.get("updated_at"),
+        "search_index_error": search_index_status.get("error"),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _log_search_request_done(
+    *,
+    started: float,
+    request_id: str,
+    req: SearchRequest,
+    metrics: dict[str, Any],
+    file_types: Optional[list[str]] = None,
+    modified_from: Optional[float] = None,
+    modified_to: Optional[float] = None,
+    excluded_folder_paths: Optional[list[str]] = None,
+    file_limit: Optional[int] = None,
+    file_offset: Optional[int] = None,
+    per_file_limit: Optional[int] = None,
+    response: Optional[SearchResponse] = None,
+    error: Optional[Exception] = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "request_id": request_id,
+        "search_scope": req.search_scope,
+        "raw_query_length": len(req.query),
+        "file_type_count": len(file_types or []),
+        "file_limit": file_limit,
+        "file_offset": file_offset,
+        "per_file_limit": per_file_limit,
+        "excluded_folder_count": len(excluded_folder_paths or []),
+        "has_modified_filter": modified_from is not None or modified_to is not None,
+        "total_ms": elapsed_ms(started),
+        "success": error is None,
+        **metrics,
+    }
+    if response is not None:
+        payload.update(
+            {
+                "row_count": response.total,
+                "file_count": response.file_count,
+                "has_more": response.has_more,
+                "search_index_state": response.search_index_state,
+                "search_index_stale": response.search_index_stale,
+            }
+        )
+    if error is not None:
+        payload.update({"error_type": error.__class__.__name__})
+    log_index_perf("search_request_done", **payload)
+
+
 def search_documents(req: SearchRequest) -> SearchResponse:
     """Run the provider/search use case without coupling callers to FastAPI."""
 
-    search_index_status = get_search_index_status()
-    content_index_ready = not bool(search_index_status.get("stale"))
-    file_types = normalize_file_type_filters(req.file_types)
-    modified_from = _parse_modified_bound(req.modified_from, end_of_day=False)
-    modified_to = _parse_modified_bound(req.modified_to, end_of_day=True)
-    excluded_folder_paths = [path for path in req.excluded_folder_paths if path.strip()]
-    file_limit = _bounded_file_limit(req.file_limit)
-    file_offset = max(0, req.file_offset)
-    per_file_limit = _bounded_per_file_limit(req.per_file_limit)
-    query_limit = min(
-        max(req.limit, file_limit * per_file_limit),
-        file_limit * (per_file_limit + 1),
-    )
-    fetch_file_limit = file_limit + 1
+    request_started = perf_counter()
+    request_id = uuid.uuid4().hex[:12]
+    metrics: dict[str, Any] = {
+        "cache_status": "disabled" if not search_cache_enabled() else "miss",
+        "filename_source": "",
+        "filename_fallback_reason": "",
+        "everything_queried_count": 0,
+        "everything_candidate_count": 0,
+        "filename_ms": 0,
+        "content_ms": 0,
+        "merge_ms": 0,
+    }
+    file_types: list[str] = []
+    modified_from: Optional[float] = None
+    modified_to: Optional[float] = None
+    excluded_folder_paths: list[str] = []
+    file_limit: Optional[int] = None
+    file_offset: Optional[int] = None
+    per_file_limit: Optional[int] = None
 
-    if req.search_scope == "filename":
-        name_matches = _filename_matches(
-            req.query,
-            file_types,
-            fetch_file_limit,
-            file_offset,
-            modified_from,
-            modified_to,
-            excluded_folder_paths,
+    try:
+        normalize_started = perf_counter()
+        search_index_status = get_search_index_status()
+        content_index_ready = not bool(search_index_status.get("stale"))
+        file_types = normalize_file_type_filters(req.file_types)
+        modified_from = _parse_modified_bound(req.modified_from, end_of_day=False)
+        modified_to = _parse_modified_bound(req.modified_to, end_of_day=True)
+        excluded_folder_paths = [path for path in req.excluded_folder_paths if path.strip()]
+        file_limit = _bounded_file_limit(req.file_limit)
+        file_offset = max(0, req.file_offset)
+        per_file_limit = _bounded_per_file_limit(req.per_file_limit)
+        query_limit = min(
+            max(req.limit, file_limit * per_file_limit),
+            file_limit * (per_file_limit + 1),
         )
-        results, has_more = _cap_unique_files(name_matches, file_limit)
-    elif req.search_scope == "content":
-        if content_index_ready:
-            results = _content_matches(
-                req.query,
-                limit=query_limit,
+        fetch_file_limit = file_limit + 1
+        metrics["normalize_ms"] = elapsed_ms(normalize_started)
+        metrics["search_cache_epoch"] = current_epoch()
+
+        cache_key = _cache_key(
+            req,
+            file_types=file_types,
+            modified_from=modified_from,
+            modified_to=modified_to,
+            excluded_folder_paths=excluded_folder_paths,
+            file_limit=file_limit,
+            file_offset=file_offset,
+            per_file_limit=per_file_limit,
+            query_limit=query_limit,
+            search_index_status=search_index_status,
+            content_index_ready=content_index_ready,
+            epoch=int(metrics["search_cache_epoch"]),
+        )
+        cache_started = perf_counter()
+        cached_payload = get_search_cache(cache_key)
+        metrics["cache_lookup_ms"] = elapsed_ms(cache_started)
+        if cached_payload is not None:
+            response = SearchResponse(**cached_payload)
+            metrics["cache_status"] = "hit"
+            metrics["filename_source"] = "cache"
+            _log_search_request_done(
+                started=request_started,
+                request_id=request_id,
+                req=req,
+                metrics=metrics,
                 file_types=file_types,
-                file_limit=fetch_file_limit,
-                file_offset=file_offset,
-                per_file_limit=per_file_limit,
                 modified_from=modified_from,
                 modified_to=modified_to,
                 excluded_folder_paths=excluded_folder_paths,
+                file_limit=file_limit,
+                file_offset=file_offset,
+                per_file_limit=per_file_limit,
+                response=response,
             )
-            results, has_more = _cap_unique_files(results, file_limit)
-        else:
-            results, has_more = [], False
-    else:
-        name_matches = _filename_matches(
-            req.query,
-            file_types,
-            file_offset + fetch_file_limit,
-            0,
-            modified_from,
-            modified_to,
-            excluded_folder_paths,
-        )
-        name_page, name_has_more = _slice_unique_files(name_matches, file_offset, file_limit)
-        if len(name_page) >= file_limit and name_has_more:
-            results, has_more = name_page, True
-        else:
-            name_file_ids = {int(item["file_id"]) for item in name_matches}
-            content_candidates = []
+            return response
+
+        def remember_filename(telemetry: FilenameSearchTelemetry, elapsed: int) -> None:
+            metrics["filename_ms"] = metrics.get("filename_ms", 0) + elapsed
+            metrics["filename_source"] = telemetry.source
+            metrics["filename_fallback_reason"] = telemetry.fallback_reason
+            metrics["everything_queried_count"] = telemetry.everything_queried_count
+            metrics["everything_candidate_count"] = telemetry.everything_candidate_count
+
+        if req.search_scope == "filename":
+            filename_started = perf_counter()
+            name_matches, filename_telemetry = _filename_matches(
+                req.query,
+                file_types,
+                fetch_file_limit,
+                file_offset,
+                modified_from,
+                modified_to,
+                excluded_folder_paths,
+            )
+            remember_filename(filename_telemetry, elapsed_ms(filename_started))
+            merge_started = perf_counter()
+            results, has_more = _cap_unique_files(name_matches, file_limit)
+            metrics["merge_ms"] = elapsed_ms(merge_started)
+        elif req.search_scope == "content":
+            metrics["filename_source"] = "not_requested"
             if content_index_ready:
-                content_needed = max(1, file_offset + fetch_file_limit - _unique_file_count(name_matches))
-                content_file_limit = content_needed + len(name_file_ids)
-                content_candidates = _content_matches(
+                content_started = perf_counter()
+                results = _content_matches(
                     req.query,
-                    limit=max(query_limit, content_file_limit * per_file_limit),
+                    limit=query_limit,
                     file_types=file_types,
-                    file_limit=content_file_limit,
-                    file_offset=0,
+                    file_limit=fetch_file_limit,
+                    file_offset=file_offset,
                     per_file_limit=per_file_limit,
                     modified_from=modified_from,
                     modified_to=modified_to,
                     excluded_folder_paths=excluded_folder_paths,
                 )
-            content_results = []
-            seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
-            for item in content_candidates:
-                key = (item["file_id"], item["location"], item["snippet"])
-                if key in seen:
-                    continue
-                seen.add(key)
-                content_results.append(item)
-            results, combined_has_more = _slice_unique_files(name_matches + content_results, file_offset, file_limit)
-            has_more = name_has_more or combined_has_more
+                metrics["content_ms"] = elapsed_ms(content_started)
+                merge_started = perf_counter()
+                results, has_more = _cap_unique_files(results, file_limit)
+                metrics["merge_ms"] = elapsed_ms(merge_started)
+            else:
+                results, has_more = [], False
+        else:
+            filename_started = perf_counter()
+            name_matches, filename_telemetry = _filename_matches(
+                req.query,
+                file_types,
+                file_offset + fetch_file_limit,
+                0,
+                modified_from,
+                modified_to,
+                excluded_folder_paths,
+            )
+            remember_filename(filename_telemetry, elapsed_ms(filename_started))
+            merge_started = perf_counter()
+            name_page, name_has_more = _slice_unique_files(name_matches, file_offset, file_limit)
+            if len(name_page) >= file_limit and name_has_more:
+                results, has_more = name_page, True
+                metrics["merge_ms"] = elapsed_ms(merge_started)
+            else:
+                name_file_ids = {int(item["file_id"]) for item in name_matches}
+                content_candidates = []
+                if content_index_ready:
+                    content_needed = max(1, file_offset + fetch_file_limit - _unique_file_count(name_matches))
+                    content_file_limit = content_needed + len(name_file_ids)
+                    content_started = perf_counter()
+                    content_candidates = _content_matches(
+                        req.query,
+                        limit=max(query_limit, content_file_limit * per_file_limit),
+                        file_types=file_types,
+                        file_limit=content_file_limit,
+                        file_offset=0,
+                        per_file_limit=per_file_limit,
+                        modified_from=modified_from,
+                        modified_to=modified_to,
+                        excluded_folder_paths=excluded_folder_paths,
+                    )
+                    metrics["content_ms"] = elapsed_ms(content_started)
+                content_results = []
+                seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
+                for item in content_candidates:
+                    key = (item["file_id"], item["location"], item["snippet"])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    content_results.append(item)
+                results, combined_has_more = _slice_unique_files(name_matches + content_results, file_offset, file_limit)
+                has_more = name_has_more or combined_has_more
+                metrics["merge_ms"] = elapsed_ms(merge_started)
 
-    return SearchResponse(
-        query=req.query,
-        total=len(results),
-        results=[SearchResult(**result) for result in results],
-        file_count=_unique_file_count(results),
-        file_limit=file_limit,
-        has_more=has_more and (file_offset + file_limit) < MAX_SEARCH_FILE_LIMIT,
-        search_index_state=str(search_index_status.get("state") or "ready"),
-        search_index_stale=not content_index_ready,
-        search_index_updated_at=search_index_status.get("updated_at"),
-        search_index_error=search_index_status.get("error"),
-    )
+        response = SearchResponse(
+            query=req.query,
+            total=len(results),
+            results=[SearchResult(**result) for result in results],
+            file_count=_unique_file_count(results),
+            file_limit=file_limit,
+            has_more=has_more and (file_offset + file_limit) < MAX_SEARCH_FILE_LIMIT,
+            search_index_state=str(search_index_status.get("state") or "ready"),
+            search_index_stale=not content_index_ready,
+            search_index_updated_at=search_index_status.get("updated_at"),
+            search_index_error=search_index_status.get("error"),
+        )
+        cache_store_started = perf_counter()
+        set_search_cache(cache_key, response.model_dump())
+        metrics["cache_store_ms"] = elapsed_ms(cache_store_started)
+        _log_search_request_done(
+            started=request_started,
+            request_id=request_id,
+            req=req,
+            metrics=metrics,
+            file_types=file_types,
+            modified_from=modified_from,
+            modified_to=modified_to,
+            excluded_folder_paths=excluded_folder_paths,
+            file_limit=file_limit,
+            file_offset=file_offset,
+            per_file_limit=per_file_limit,
+            response=response,
+        )
+        return response
+    except Exception as exc:
+        _log_search_request_done(
+            started=request_started,
+            request_id=request_id,
+            req=req,
+            metrics=metrics,
+            file_types=file_types,
+            modified_from=modified_from,
+            modified_to=modified_to,
+            excluded_folder_paths=excluded_folder_paths,
+            file_limit=file_limit,
+            file_offset=file_offset,
+            per_file_limit=per_file_limit,
+            error=exc,
+        )
+        raise

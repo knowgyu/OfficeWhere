@@ -34,6 +34,25 @@ def test_library_settings_interval_is_floored_and_minimum(tmp_path, monkeypatch)
     assert saved.auto_rescan_interval_hours == 1
 
 
+def test_library_rescan_invalidates_search_response_cache_epoch(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.core.search_cache import current_epoch, reset_search_cache_for_tests
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+    reset_search_cache_for_tests()
+    save_library_settings(
+        LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}])
+    )
+
+    before = current_epoch()
+
+    library.rescan_library()
+
+    assert current_epoch() > before
+
+
 def test_library_settings_fast_worker_count_is_bounded_to_ui_steps(tmp_path, monkeypatch):
     from backend.core.library import load_library_settings
     from backend.database import set_setting

@@ -129,3 +129,111 @@ def test_query_everything_requests_and_returns_date_modified_metadata(tmp_path):
     assert total == 1
     assert mtimes[str(target)] == pytest.approx(modified)
     assert fake.request_flags & everything_scanner._EVERYTHING_REQUEST_DATE_MODIFIED
+
+
+def test_query_everything_filename_candidates_filters_by_basename_and_keeps_mtime(tmp_path):
+    target = tmp_path / "분기-report.docx"
+    target.write_text("x", encoding="utf-8")
+    path_only_match = tmp_path / "report-folder" / "notes.docx"
+    path_only_match.parent.mkdir()
+    path_only_match.write_text("x", encoding="utf-8")
+    temp_file = tmp_path / "~$분기-report.docx"
+    temp_file.write_text("x", encoding="utf-8")
+    modified = 1_700_000_456.0
+
+    class FakeEverythingDll:
+        def __init__(self):
+            self.request_flags = 0
+            self.match_path = None
+            self.search_query = ""
+            self.paths = [str(target), str(path_only_match), str(temp_file)]
+
+        def Everything_Reset(self):
+            pass
+
+        def Everything_SetSearchW(self, query):
+            self.search_query = query
+
+        def Everything_SetMatchPath(self, value):
+            self.match_path = bool(value)
+
+        def Everything_SetRequestFlags(self, flags):
+            self.request_flags = int(flags)
+
+        def Everything_QueryW(self, _wait):
+            return True
+
+        def Everything_GetLastError(self):
+            return 0
+
+        def Everything_GetNumResults(self):
+            return len(self.paths)
+
+        def Everything_IsFileResult(self, _index):
+            return True
+
+        def Everything_GetResultFullPathNameW(self, index, buffer, _max_chars):
+            buffer.value = self.paths[int(index)]
+            return len(buffer.value)
+
+        def Everything_GetResultDateModified(self, _index, filetime_pointer):
+            low, high = _filetime_parts_from_unix(modified)
+            filetime_pointer._obj.dwLowDateTime = low
+            filetime_pointer._obj.dwHighDateTime = high
+            return True
+
+    fake = FakeEverythingDll()
+
+    paths, total, mtimes, limit_exceeded = everything_scanner._query_everything_filename_candidates(
+        fake,
+        query="report",
+        supported_extensions={".docx"},
+        candidate_limit=10,
+    )
+
+    assert paths == [str(target)]
+    assert total == 3
+    assert limit_exceeded is False
+    assert mtimes[str(target)] == pytest.approx(modified)
+    assert fake.match_path is False
+    assert "report" in fake.search_query
+    assert fake.request_flags & everything_scanner._EVERYTHING_REQUEST_DATE_MODIFIED
+
+
+def test_query_everything_filename_candidates_falls_back_when_candidate_limit_exceeded():
+    class FakeEverythingDll:
+        def Everything_Reset(self):
+            pass
+
+        def Everything_SetSearchW(self, _query):
+            pass
+
+        def Everything_SetMatchPath(self, _value):
+            pass
+
+        def Everything_SetRequestFlags(self, _flags):
+            pass
+
+        def Everything_QueryW(self, _wait):
+            return True
+
+        def Everything_GetLastError(self):
+            return 0
+
+        def Everything_GetNumResults(self):
+            return 5
+
+        def Everything_IsFileResult(self, _index):  # pragma: no cover - should not be reached
+            raise AssertionError("candidate limit should stop result iteration")
+
+    paths, total, mtimes, limit_exceeded = everything_scanner._query_everything_filename_candidates(
+        FakeEverythingDll(),
+        query="report",
+        supported_extensions={".docx"},
+        candidate_limit=2,
+    )
+
+    assert paths == []
+    assert total == 5
+    assert mtimes == {}
+    assert limit_exceeded is True

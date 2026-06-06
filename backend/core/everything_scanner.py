@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from ..file_constants import SUPPORTED_EXTENSIONS
+
 EVERYTHING_HELP_URL = "https://www.voidtools.com/downloads/"
 EVERYTHING_SDK_HELP_URL = "https://www.voidtools.com/support/everything/sdk/"
 
@@ -19,6 +21,8 @@ _EVERYTHING_REQUEST_PATH = 0x00000002
 _EVERYTHING_REQUEST_DATE_MODIFIED = 0x00000040
 _EVERYTHING_ERROR_IPC = 2
 _MAX_PATH_CHARS = 32768
+_DEFAULT_FILENAME_CANDIDATE_LIMIT = 600
+_DEFAULT_FILENAME_EXTENSIONS = tuple(sorted(SUPPORTED_EXTENSIONS))
 _SDK_LOCK = threading.Lock()
 
 
@@ -228,6 +232,33 @@ def _build_query(folder_path: str, supported_extensions: Sequence[str]) -> str:
     return f"ext:{extensions} {_quote_query_term(normalized_folder)}"
 
 
+def filename_candidate_limit() -> int:
+    raw = os.environ.get("OW_EVERYTHING_FILENAME_CANDIDATE_LIMIT", "").strip()
+    if not raw:
+        return _DEFAULT_FILENAME_CANDIDATE_LIMIT
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_FILENAME_CANDIDATE_LIMIT
+
+
+def _safe_filename_query(query: str) -> str:
+    normalized = query.strip()
+    if not normalized:
+        return ""
+    # DB filename search currently uses SQLite LIKE.  Keep Everything as a
+    # conservative accelerator only for ordinary literal filename substrings.
+    # Wildcards/path characters stay on the authoritative DB fallback path.
+    if any(char in normalized for char in ('"', "*", "?", "%", "_", "/", "\\")):
+        return ""
+    return normalized
+
+
+def _build_filename_query(query: str, supported_extensions: Sequence[str]) -> str:
+    extensions = ";".join(sorted(ext.lower().lstrip(".") for ext in supported_extensions))
+    return f"ext:{extensions} {_quote_query_term(query)}"
+
+
 def _path_is_within(candidate: str, root: str, recursive: bool) -> bool:
     try:
         candidate_abs = os.path.normcase(os.path.abspath(candidate))
@@ -271,6 +302,20 @@ def _is_supported_candidate(
         return os.path.isfile(candidate)
     except OSError:
         return False
+
+
+def _is_supported_filename_candidate(
+    candidate: str,
+    *,
+    query: str,
+    supported_extensions: set[str],
+) -> bool:
+    name = os.path.basename(candidate)
+    if not name or name.startswith("~$"):
+        return False
+    if os.path.splitext(name)[1].lower() not in supported_extensions:
+        return False
+    return query.casefold() in name.casefold()
 
 
 def _query_everything(
@@ -322,6 +367,140 @@ def _query_everything(
         if modified_time is not None:
             modified_time_by_path[candidate] = modified_time
     return sorted(paths), total, modified_time_by_path
+
+
+def _query_everything_filename_candidates(
+    dll: ctypes.CDLL,
+    *,
+    query: str,
+    supported_extensions: set[str],
+    candidate_limit: int,
+) -> tuple[list[str], int, dict[str, float], bool]:
+    """Return Everything filename candidates for DB-constrained search.
+
+    The result is intentionally only a candidate list; callers must still join
+    against registered DB rows to preserve OfficeWhere's source of truth.
+    """
+
+    search_query = _build_filename_query(query, sorted(supported_extensions))
+    buffer = ctypes.create_unicode_buffer(_MAX_PATH_CHARS)
+    paths: list[str] = []
+    modified_time_by_path: dict[str, float] = {}
+    seen: set[str] = set()
+
+    dll.Everything_Reset()
+    dll.Everything_SetSearchW(search_query)
+    dll.Everything_SetMatchPath(False)
+    dll.Everything_SetRequestFlags(
+        _EVERYTHING_REQUEST_FILE_NAME | _EVERYTHING_REQUEST_PATH | _EVERYTHING_REQUEST_DATE_MODIFIED
+    )
+    if not dll.Everything_QueryW(True):
+        error_code = int(dll.Everything_GetLastError())
+        raise RuntimeError(f"Everything IPC query failed: {error_code}")
+
+    total = int(dll.Everything_GetNumResults())
+    if total > candidate_limit:
+        return [], total, {}, True
+
+    for index in range(total):
+        if not dll.Everything_IsFileResult(index):
+            continue
+        copied = int(dll.Everything_GetResultFullPathNameW(index, buffer, _MAX_PATH_CHARS))
+        if copied <= 0:
+            continue
+        candidate = os.path.normpath(ctypes.wstring_at(buffer))
+        if not _is_supported_filename_candidate(
+            candidate,
+            query=query,
+            supported_extensions=supported_extensions,
+        ):
+            continue
+        key = os.path.normcase(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        paths.append(candidate)
+        modified_time = _result_modified_time(dll, index)
+        if modified_time is not None:
+            modified_time_by_path[candidate] = modified_time
+    return sorted(paths), total, modified_time_by_path, False
+
+
+def discover_filename_candidates(
+    query: str,
+    *,
+    supported_extensions: Iterable[str] = _DEFAULT_FILENAME_EXTENSIONS,
+    candidate_limit: int | None = None,
+) -> EverythingDiscovery:
+    """Return optional Everything candidates for filename search.
+
+    Any unavailable or uncertain state is non-fatal so callers can fall back to
+    the existing DB LIKE filename search.
+    """
+
+    safe_query = _safe_filename_query(query)
+    if not safe_query:
+        return EverythingDiscovery(unavailable_reason="unsupported_query")
+    if not is_windows():
+        return EverythingDiscovery(unavailable_reason="non_windows")
+    if sdk_disabled():
+        return EverythingDiscovery(unavailable_reason="disabled")
+
+    dll_path = _resolve_dll_path()
+    if not dll_path:
+        return _missing_dll_discovery()
+
+    limit = candidate_limit or filename_candidate_limit()
+    extensions = {ext.lower() if str(ext).startswith(".") else f".{str(ext).lower()}" for ext in supported_extensions}
+    try:
+        with _SDK_LOCK:
+            dll = _load_dll(dll_path)
+            paths, queried_count, modified_time_by_path, limit_exceeded = _query_everything_filename_candidates(
+                dll,
+                query=safe_query,
+                supported_extensions=extensions,
+                candidate_limit=limit,
+            )
+    except RuntimeError as exc:
+        text = str(exc)
+        is_ipc_error = text.endswith(f": {_EVERYTHING_ERROR_IPC}")
+        if is_ipc_error:
+            return EverythingDiscovery(
+                unavailable_reason="ipc_unavailable",
+                hint=(
+                    "Everything IPC를 사용할 수 없어 파일명 검색은 기본 DB 검색으로 진행했습니다. "
+                    "Everything이 백그라운드에서 실행 중인지 확인해 주세요."
+                ),
+                help_url=EVERYTHING_HELP_URL,
+                dll_path=dll_path,
+            )
+        return EverythingDiscovery(
+            unavailable_reason="query_failed",
+            hint="Everything 파일명 후보 검색 중 오류가 발생해 기본 DB 검색으로 진행했습니다.",
+            help_url=EVERYTHING_SDK_HELP_URL,
+            dll_path=dll_path,
+        )
+    except Exception:
+        return EverythingDiscovery(
+            unavailable_reason="sdk_error",
+            hint="Everything SDK를 불러오지 못해 파일명 검색은 기본 DB 검색으로 진행했습니다.",
+            help_url=EVERYTHING_SDK_HELP_URL,
+            dll_path=dll_path,
+        )
+
+    if limit_exceeded:
+        return EverythingDiscovery(
+            unavailable_reason="candidate_limit_exceeded",
+            dll_path=dll_path,
+            queried_count=queried_count,
+        )
+
+    return EverythingDiscovery(
+        paths=paths,
+        dll_path=dll_path,
+        queried_count=queried_count,
+        modified_time_by_path=modified_time_by_path,
+    )
 
 
 def discover_supported_paths(
