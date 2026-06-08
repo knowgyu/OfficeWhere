@@ -3250,6 +3250,106 @@ def _log_search_done(
     log_index_perf("search_done", **payload)
 
 
+def _search_chunks_by_file_early_stop(
+    cursor: sqlite3.Cursor,
+    *,
+    search_table: str,
+    fts_query: str,
+    query_text: str,
+    filter_clause: str,
+    filter_params: Sequence[Any],
+    file_limit: int,
+    file_offset: int,
+    per_file_limit: int,
+) -> List[Dict[str, Any]]:
+    """Return first matching files without grouping every matching chunk.
+
+    Common terms can match millions of chunks.  The older CTE grouped all
+    matching chunk rows by file before applying ``file_limit``; this helper
+    streams FTS rowids in rowid order, stops once enough distinct files are
+    discovered, then performs exact per-file chunk lookups for the selected
+    files.  Final snippets still come from chunk-level FTS matches.
+    """
+
+    target_file_count = max(1, file_offset + file_limit)
+    rowid_batch_size = 2048
+    last_rowid = 0
+    seen_file_ids: set[int] = set()
+    ordered_file_ids: List[int] = []
+
+    while len(ordered_file_ids) < target_file_count:
+        cursor.execute(
+            f"""
+            SELECT rowid
+            FROM {search_table}
+            WHERE {search_table} MATCH ?
+              AND rowid > ?
+            LIMIT ?
+            """,
+            (fts_query, last_rowid, rowid_batch_size),
+        )
+        rowids = [int(row[0]) for row in cursor.fetchall()]
+        if not rowids:
+            break
+        last_rowid = rowids[-1]
+
+        placeholders = ",".join("?" for _ in rowids)
+        cursor.execute(
+            f"""
+            SELECT fc.id, fc.file_id
+            FROM file_chunks fc
+            JOIN registered_files rf ON rf.id = fc.file_id
+            WHERE fc.id IN ({placeholders}){filter_clause}
+            ORDER BY fc.id ASC
+            """,
+            [*rowids, *filter_params],
+        )
+        for row in cursor.fetchall():
+            file_id = int(row["file_id"])
+            if file_id in seen_file_ids:
+                continue
+            seen_file_ids.add(file_id)
+            ordered_file_ids.append(file_id)
+            if len(ordered_file_ids) >= target_file_count:
+                break
+
+    selected_file_ids = ordered_file_ids[file_offset : file_offset + file_limit]
+    rows: List[sqlite3.Row] = []
+    for file_id in selected_file_ids:
+        cursor.execute(
+            f"""
+            SELECT fc.id
+            FROM file_chunks fc
+            JOIN {search_table} ON {search_table}.rowid = fc.id
+            WHERE fc.file_id = ?
+              AND {search_table} MATCH ?
+            ORDER BY fc.id ASC
+            LIMIT ?
+            """,
+            (file_id, fts_query, per_file_limit),
+        )
+        chunk_ids = [int(row["id"]) for row in cursor.fetchall()]
+        if not chunk_ids:
+            continue
+
+        placeholders = ",".join("?" for _ in chunk_ids)
+        cursor.execute(
+            f"""
+            SELECT fc.file_id, rf.name, rf.path, rf.file_type, rf.file_mtime, fc.location, fc.content,
+                   df.normalized_hash, df.content_hash, df.content_chars, df.chunk_count
+            FROM file_chunks fc
+            JOIN registered_files rf ON rf.id = fc.file_id
+            LEFT JOIN document_fingerprints df ON df.file_id = rf.id
+            WHERE fc.id IN ({placeholders})
+            ORDER BY fc.id ASC
+            """,
+            chunk_ids,
+        )
+        rows.extend(cursor.fetchall())
+
+    return _search_row_dicts(rows, query_text)
+
+
 def search_chunks(
     fts_query: str,
     limit: int = 100,
@@ -3323,43 +3423,17 @@ def search_chunks(
         safe_file_limit = max(1, file_limit)
         safe_file_offset = max(0, file_offset)
         safe_per_file_limit = max(1, per_file_limit)
-        cursor.execute(
-            f"""
-            WITH matched_files AS (
-                SELECT fc.file_id AS file_id,
-                       MIN(fc.id) AS first_match_chunk_id
-                FROM {search_table}
-                JOIN file_chunks fc ON fc.id = {search_table}.rowid
-                JOIN registered_files rf ON rf.id = fc.file_id
-                WHERE {search_table} MATCH ?{filter_clause}
-                GROUP BY fc.file_id
-                ORDER BY first_match_chunk_id ASC
-                LIMIT ?
-                OFFSET ?
-            ),
-            ranked_chunks AS (
-                SELECT fc.file_id, rf.name, rf.path, rf.file_type, rf.file_mtime, fc.location, fc.content,
-                       df.normalized_hash, df.content_hash, df.content_chars, df.chunk_count,
-                       matched_files.first_match_chunk_id AS first_match_chunk_id,
-                       ROW_NUMBER() OVER (PARTITION BY fc.file_id ORDER BY fc.id ASC) AS chunk_number
-                FROM matched_files
-                JOIN file_chunks fc ON fc.file_id = matched_files.file_id
-                JOIN {search_table} ON {search_table}.rowid = fc.id
-                JOIN registered_files rf ON rf.id = fc.file_id
-                LEFT JOIN document_fingerprints df ON df.file_id = rf.id
-                WHERE {search_table} MATCH ?
-            )
-            SELECT file_id, name, path, file_type, file_mtime, location, content,
-                   normalized_hash, content_hash, content_chars, chunk_count
-            FROM ranked_chunks
-            WHERE chunk_number <= ?
-            ORDER BY first_match_chunk_id ASC,
-                     chunk_number ASC
-            """,
-            [*params, safe_file_limit, safe_file_offset, fts_query, safe_per_file_limit],
+        result = _search_chunks_by_file_early_stop(
+            cursor,
+            search_table=search_table,
+            fts_query=fts_query,
+            query_text=query_text,
+            filter_clause=filter_clause,
+            filter_params=params[1:],
+            file_limit=safe_file_limit,
+            file_offset=safe_file_offset,
+            per_file_limit=safe_per_file_limit,
         )
-        rows = cursor.fetchall()
-        result = _search_row_dicts(rows, query_text)
         _log_search_done(
             started=started,
             search_table=search_table,
