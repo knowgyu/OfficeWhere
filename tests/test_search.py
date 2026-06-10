@@ -630,6 +630,154 @@ def test_search_response_cache_hits_then_invalidates_on_mtime_update(tmp_path, m
     assert statuses == ["miss", "hit", "miss"]
 
 
+def test_search_storage_prewarm_touches_search_tables_without_writes(monkeypatch):
+    from backend.database import prewarm_search_storage
+
+    events = []
+    monkeypatch.setattr(
+        "backend.database.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    result = prewarm_search_storage()
+
+    assert result["success"] is True
+    assert result["probe_count"] == 6
+    assert "file_search_ko" in result["probes"]
+    assert "file_search_trigram" in result["probes"]
+    assert events[-1][0] == "search_storage_prewarm_done"
+    assert events[-1][1]["success"] is True
+
+
+def test_filename_content_search_cache_miss_reuses_one_read_connection(tmp_path, monkeypatch):
+    from backend import database
+    from backend.api.search import search_files
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    monkeypatch.setattr(
+        "backend.application.search_service.discover_filename_candidates",
+        lambda _query: EverythingDiscovery(unavailable_reason="disabled"),
+    )
+
+    file_id = register_file(
+        str(tmp_path / "single-open-target.docx"),
+        "single-open-target.docx",
+        "Word",
+        0,
+    )
+    save_file_chunks(file_id, [{"location": "문단", "content": "single-open-target 본문"}])
+    reset_search_cache_for_tests()
+
+    original_connect = database._connect
+    connect_count = 0
+
+    def counted_connect():
+        nonlocal connect_count
+        connect_count += 1
+        return original_connect()
+
+    monkeypatch.setattr(database, "_connect", counted_connect)
+
+    response = search_files(SearchRequest(query="single-open-target", search_scope="filename_content"))
+
+    request_events = [fields for event, fields in events if event == "search_request_done"]
+    assert request_events[-1]["cache_status"] == "miss"
+    assert connect_count == 1
+    assert response.file_count == 1
+    assert {item.location for item in response.results} >= {"파일명", "문단"}
+
+
+def test_everything_filename_content_path_reuses_one_read_connection(tmp_path, monkeypatch):
+    from backend import database
+    from backend.api.search import search_files
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    older_id = register_file(str(tmp_path / "everything-open-a.docx"), "everything-open-a.docx", "Word", 0)
+    newer_id = register_file(str(tmp_path / "everything-open-b.docx"), "everything-open-b.docx", "Word", 0)
+    save_file_chunks(older_id, [{"location": "문단", "content": "everything-open 본문 A"}])
+    save_file_chunks(newer_id, [{"location": "문단", "content": "everything-open 본문 B"}])
+    unregistered = tmp_path / "everything-open-unregistered.docx"
+    monkeypatch.setattr(
+        "backend.application.search_service.discover_filename_candidates",
+        lambda _query: EverythingDiscovery(
+            paths=[
+                str(tmp_path / "everything-open-a.docx"),
+                str(tmp_path / "everything-open-b.docx"),
+                str(unregistered),
+            ],
+            queried_count=3,
+        ),
+    )
+    reset_search_cache_for_tests()
+
+    original_connect = database._connect
+    connect_count = 0
+
+    def counted_connect():
+        nonlocal connect_count
+        connect_count += 1
+        return original_connect()
+
+    monkeypatch.setattr(database, "_connect", counted_connect)
+
+    response = search_files(SearchRequest(query="everything-open", search_scope="filename_content", file_limit=2))
+
+    request_events = [fields for event, fields in events if event == "search_request_done"]
+    assert request_events[-1]["cache_status"] == "miss"
+    assert request_events[-1]["filename_source"] == "everything_sdk"
+    assert connect_count == 1
+    assert response.file_count == 2
+    assert response.results[0].file_id == newer_id
+    assert all("unregistered" not in item.path for item in response.results)
+
+
+def test_borrowed_search_connection_remains_open_and_row_compatible(tmp_path):
+    from backend import database
+
+    file_id = register_file(str(tmp_path / "borrowed-open.docx"), "borrowed-open.docx", "Word", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "borrowed-open 본문"}])
+
+    conn = database._connect()
+    original_row_factory = conn.row_factory
+    try:
+        status = database.get_search_index_status(conn=conn)
+        assert conn.row_factory is original_row_factory
+
+        filename_rows = database.search_file_names("borrowed-open", conn=conn)
+        assert conn.row_factory is original_row_factory
+
+        path_rows = database.search_file_names_by_paths(
+            "borrowed-open",
+            [str(tmp_path / "borrowed-open.docx")],
+            conn=conn,
+        )
+        assert conn.row_factory is original_row_factory
+
+        content_rows = database.search_chunks('"borrowed-open"', raw_query="borrowed-open", conn=conn)
+        assert conn.row_factory is original_row_factory
+
+        assert status["state"] == "ready"
+        assert filename_rows[0]["id"] == file_id
+        assert path_rows[0]["id"] == file_id
+        assert content_rows[0]["file_id"] == file_id
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
 def test_everything_filename_candidates_preserve_db_authority_order_and_pagination(tmp_path, monkeypatch):
     from backend.api.search import search_files
     from backend.core.everything_scanner import EverythingDiscovery

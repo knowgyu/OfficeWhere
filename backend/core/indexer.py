@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -411,6 +412,7 @@ def search(
     file_offset: int = 0,
     per_file_limit: int = 3,
     excluded_folder_paths: Optional[Sequence[str]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> list:
     if not query.strip():
         return []
@@ -425,6 +427,7 @@ def search(
         file_offset=file_offset,
         per_file_limit=per_file_limit,
         excluded_folder_paths=excluded_folder_paths,
+        conn=conn,
     )
 
 

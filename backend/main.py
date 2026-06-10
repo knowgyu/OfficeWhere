@@ -11,7 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .database import get_db_path, get_excel_index_status, get_search_index_status, init_db, pop_setting
+from .database import (
+    get_db_path,
+    get_excel_index_status,
+    get_search_index_status,
+    init_db,
+    pop_setting,
+    prewarm_search_storage,
+)
 from .api.files import router as files_router
 from .api.check import router as check_router
 from .api.search import router as search_router
@@ -39,6 +46,15 @@ async def lifespan(app: FastAPI):
         get_db_path(),
     )
     try:
+        prewarm_result = prewarm_search_storage()
+        logger.info(
+            "backend startup: search storage prewarm done duration_ms=%s probes=%s",
+            prewarm_result.get("total_ms"),
+            prewarm_result.get("probes"),
+        )
+    except Exception:
+        logger.warning("backend startup: search storage prewarm failed", exc_info=True)
+    try:
         cleanup_started = perf_counter()
         cleanup_tutorial_library()
         logger.info(
@@ -52,7 +68,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="officewhere", version="0.14.5", lifespan=lifespan)
+app = FastAPI(title="officewhere", version="0.15.0", lifespan=lifespan)
 
 # CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(

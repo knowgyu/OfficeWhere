@@ -517,9 +517,61 @@ def _excel_index_status_with_cursor(cursor: sqlite3.Cursor) -> Dict[str, Any]:
     )
 
 
-def get_search_index_status() -> Dict[str, Any]:
-    with _read_connection() as conn:
+def get_search_index_status(conn: Optional[sqlite3.Connection] = None) -> Dict[str, Any]:
+    if conn is not None:
         return _search_index_status_with_cursor(conn.cursor())
+    with _read_connection() as owned_conn:
+        return _search_index_status_with_cursor(owned_conn.cursor())
+
+
+def prewarm_search_storage() -> Dict[str, Any]:
+    """Touch the main DB and search tables once during backend startup.
+
+    Some corporate endpoint protection tools add a noticeable fixed cost to the
+    first SQLite/FTS file access.  This intentionally performs tiny read-only
+    probes after schema initialization so that cost is paid before the user's
+    first interactive search rather than inside the search request.
+    """
+
+    started = perf_counter()
+    probes: List[str] = []
+    conn = _connect()
+    try:
+        cursor = conn.cursor()
+        for label, statement in (
+            ("pragma_schema_version", "PRAGMA schema_version"),
+            ("settings", "SELECT value FROM settings WHERE key = ? LIMIT 1"),
+            ("registered_files", "SELECT id FROM registered_files LIMIT 1"),
+            ("file_chunks", "SELECT id FROM file_chunks LIMIT 1"),
+            ("file_search_ko", "SELECT rowid FROM file_search_ko LIMIT 1"),
+            ("file_search_trigram", "SELECT rowid FROM file_search_trigram LIMIT 1"),
+        ):
+            if label == "settings":
+                cursor.execute(statement, (SEARCH_INDEX_STATE_KEY,))
+            else:
+                cursor.execute(statement)
+            cursor.fetchone()
+            probes.append(label)
+        result = {
+            "success": True,
+            "probe_count": len(probes),
+            "probes": ",".join(probes),
+            "total_ms": elapsed_ms(started),
+        }
+        log_index_perf("search_storage_prewarm_done", **result)
+        return result
+    except Exception as exc:
+        result = {
+            "success": False,
+            "probe_count": len(probes),
+            "probes": ",".join(probes),
+            "error_type": exc.__class__.__name__,
+            "total_ms": elapsed_ms(started),
+        }
+        log_index_perf("search_storage_prewarm_done", **result)
+        raise
+    finally:
+        conn.close()
 
 
 def get_excel_index_status() -> Dict[str, Any]:
@@ -2584,6 +2636,7 @@ def search_file_names(
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     excluded_folder_paths: Optional[Sequence[str]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> List[Dict[str, Any]]:
     normalized_query = query.strip()
     if not normalized_query:
@@ -2607,8 +2660,9 @@ def search_file_names(
     _extend_excluded_path_filters(clauses, params, excluded_folder_paths)
     params.extend([max(1, limit), max(0, offset)])
 
-    with _read_connection(row_factory=sqlite3.Row) as conn:
-        cursor = conn.cursor()
+    def fetch_rows(active_conn: sqlite3.Connection) -> List[sqlite3.Row]:
+        cursor = active_conn.cursor()
+        cursor.row_factory = sqlite3.Row
         cursor.execute(
             f"""
             SELECT rf.*,
@@ -2625,7 +2679,13 @@ def search_file_names(
             """,
             params,
         )
-        rows = cursor.fetchall()
+        return cursor.fetchall()
+
+    if conn is not None:
+        rows = fetch_rows(conn)
+    else:
+        with _read_connection(row_factory=sqlite3.Row) as owned_conn:
+            rows = fetch_rows(owned_conn)
     return [dict(row) for row in rows]
 
 
@@ -2639,6 +2699,7 @@ def search_file_names_by_paths(
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     excluded_folder_paths: Optional[Sequence[str]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> List[Dict[str, Any]]:
     """Search registered filenames constrained to Everything candidate paths.
 
@@ -2689,8 +2750,9 @@ def search_file_names_by_paths(
     _extend_excluded_path_filters(clauses, params, excluded_folder_paths)
     params.extend([max(1, limit), max(0, offset)])
 
-    with _read_connection(row_factory=sqlite3.Row) as conn:
-        cursor = conn.cursor()
+    def fetch_rows(active_conn: sqlite3.Connection) -> List[sqlite3.Row]:
+        cursor = active_conn.cursor()
+        cursor.row_factory = sqlite3.Row
         cursor.execute(
             f"""
             SELECT rf.*,
@@ -2707,7 +2769,13 @@ def search_file_names_by_paths(
             """,
             params,
         )
-        rows = cursor.fetchall()
+        return cursor.fetchall()
+
+    if conn is not None:
+        rows = fetch_rows(conn)
+    else:
+        with _read_connection(row_factory=sqlite3.Row) as owned_conn:
+            rows = fetch_rows(owned_conn)
     return [dict(row) for row in rows]
 
 
@@ -3361,13 +3429,16 @@ def search_chunks(
     file_offset: int = 0,
     per_file_limit: int = 3,
     excluded_folder_paths: Optional[Sequence[str]] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> List[Dict[str, Any]]:
     started = perf_counter()
     query_text = raw_query or fts_query
     search_table = _search_table_for_query(query_text)
-    conn = _connect()
-    conn.row_factory = sqlite3.Row
+    owns_connection = conn is None
+    if conn is None:
+        conn = _connect()
     cursor = conn.cursor()
+    cursor.row_factory = sqlite3.Row
     filters = [file_type for file_type in (file_types or []) if file_type]
     filter_clause = " AND rf.availability_status != 'missing'"
     params: List[Any] = [fts_query]
@@ -3460,7 +3531,8 @@ def search_chunks(
         )
         raise
     finally:
-        conn.close()
+        if owns_connection:
+            conn.close()
 
 
 def get_setting(key: str, default: str = "") -> str:

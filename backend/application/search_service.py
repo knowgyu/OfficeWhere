@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, time
@@ -14,7 +15,7 @@ from ..core.index_perf import elapsed_ms, log_index_perf
 from ..core.indexer import search
 from ..core.search_cache import current_epoch, enabled as search_cache_enabled
 from ..core.search_cache import get_search_cache, set_search_cache
-from ..database import get_search_index_status, search_file_names, search_file_names_by_paths
+from ..database import _read_connection, get_search_index_status, search_file_names, search_file_names_by_paths
 from ..models.schemas import SearchRequest, SearchResponse, SearchResult
 
 FILE_TYPE_ALIASES = {
@@ -134,6 +135,7 @@ def _filename_rows(
     excluded_folder_paths: Optional[list[str]] = None,
     *,
     prefer_everything: bool = True,
+    conn=None,
 ) -> tuple[list[dict], FilenameSearchTelemetry]:
     normalized_query = query.strip()
     telemetry = FilenameSearchTelemetry()
@@ -155,6 +157,7 @@ def _filename_rows(
                 excluded_folder_paths=excluded_folder_paths,
                 limit=limit,
                 offset=offset,
+                conn=conn,
             )
             if rows:
                 telemetry.source = discovery.source or "everything_sdk"
@@ -172,6 +175,7 @@ def _filename_rows(
         excluded_folder_paths=excluded_folder_paths,
         limit=limit,
         offset=offset,
+        conn=conn,
     )
     return rows, telemetry
 
@@ -202,6 +206,7 @@ def _filename_matches(
     excluded_folder_paths: Optional[list[str]] = None,
     *,
     prefer_everything: bool = True,
+    conn=None,
 ) -> tuple[list[dict], FilenameSearchTelemetry]:
     normalized_query = query.strip()
     rows, telemetry = _filename_rows(
@@ -213,6 +218,7 @@ def _filename_matches(
         modified_to,
         excluded_folder_paths,
         prefer_everything=prefer_everything,
+        conn=conn,
     )
     return [_file_info_to_filename_match(file_info, normalized_query) for file_info in rows], telemetry
 
@@ -227,6 +233,7 @@ def _content_matches(
     modified_from: Optional[float] = None,
     modified_to: Optional[float] = None,
     excluded_folder_paths: Optional[list[str]] = None,
+    conn=None,
 ) -> list[dict]:
     return search(
         query,
@@ -238,6 +245,7 @@ def _content_matches(
         file_offset=file_offset,
         per_file_limit=per_file_limit,
         excluded_folder_paths=excluded_folder_paths,
+        conn=conn,
     )
 
 
@@ -346,10 +354,14 @@ def search_documents(req: SearchRequest) -> SearchResponse:
     file_limit: Optional[int] = None
     file_offset: Optional[int] = None
     per_file_limit: Optional[int] = None
+    search_conn_cm = None
+    search_conn = None
 
     try:
+        search_conn_cm = _read_connection(row_factory=sqlite3.Row)
+        search_conn = search_conn_cm.__enter__()
         normalize_started = perf_counter()
-        search_index_status = get_search_index_status()
+        search_index_status = get_search_index_status(conn=search_conn)
         content_index_ready = not bool(search_index_status.get("stale"))
         file_types = normalize_file_type_filters(req.file_types)
         modified_from = _parse_modified_bound(req.modified_from, end_of_day=False)
@@ -420,6 +432,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
                 modified_from,
                 modified_to,
                 excluded_folder_paths,
+                conn=search_conn,
             )
             remember_filename(filename_telemetry, elapsed_ms(filename_started))
             merge_started = perf_counter()
@@ -439,6 +452,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
                     modified_from=modified_from,
                     modified_to=modified_to,
                     excluded_folder_paths=excluded_folder_paths,
+                    conn=search_conn,
                 )
                 metrics["content_ms"] = elapsed_ms(content_started)
                 merge_started = perf_counter()
@@ -456,6 +470,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
                 modified_from,
                 modified_to,
                 excluded_folder_paths,
+                conn=search_conn,
             )
             remember_filename(filename_telemetry, elapsed_ms(filename_started))
             merge_started = perf_counter()
@@ -480,6 +495,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
                         modified_from=modified_from,
                         modified_to=modified_to,
                         excluded_folder_paths=excluded_folder_paths,
+                        conn=search_conn,
                     )
                     metrics["content_ms"] = elapsed_ms(content_started)
                 content_results = []
@@ -540,3 +556,6 @@ def search_documents(req: SearchRequest) -> SearchResponse:
             error=exc,
         )
         raise
+    finally:
+        if search_conn_cm is not None:
+            search_conn_cm.__exit__(None, None, None)
