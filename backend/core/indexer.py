@@ -413,6 +413,7 @@ def search(
     per_file_limit: int = 3,
     excluded_folder_paths: Optional[Sequence[str]] = None,
     conn: Optional[sqlite3.Connection] = None,
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> list:
     if not query.strip():
         return []
@@ -428,6 +429,7 @@ def search(
         per_file_limit=per_file_limit,
         excluded_folder_paths=excluded_folder_paths,
         conn=conn,
+        metrics=metrics,
     )
 
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { renderWithProviders, screen, waitFor, fireEvent } from '../test/utils'
+import { act, renderWithProviders, screen, waitFor, fireEvent } from '../test/utils'
 import userEvent from '@testing-library/user-event'
 
 vi.mock('../api/client', async () => {
@@ -272,7 +272,9 @@ describe('FileSearch', () => {
 
       expect(await screen.findByText('최근문서-1.docx')).toBeInTheDocument()
       await waitFor(() => expect(latestObserver?.observe).toHaveBeenCalled())
-      latestObserver?.trigger()
+      act(() => {
+        latestObserver?.trigger()
+      })
 
       await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
       expect(mockedFilesPage.mock.calls[1]?.[0]).toEqual({
@@ -552,12 +554,86 @@ describe('FileSearch', () => {
       await waitFor(() => expect(screen.getByText('첫문서.docx')).toBeInTheDocument())
       expect(mockedSearchQuery).toHaveBeenCalledTimes(1)
       await waitFor(() => expect(latestObserver?.observe).toHaveBeenCalled())
-      latestObserver?.trigger()
+      act(() => {
+        latestObserver?.trigger()
+      })
 
       await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
       expect(mockedSearchQuery.mock.calls[1]?.[0]?.file_limit).toBe(20)
       expect(mockedSearchQuery.mock.calls[1]?.[0]?.file_offset).toBe(1)
       expect(mockedSearchQuery.mock.calls[1]?.[0]?.per_file_limit).toBe(5)
+
+      vi.unstubAllGlobals()
+    })
+
+    it('does not replay an external launch search when infinite scroll appends results', async () => {
+      let latestObserver: {
+        trigger: () => void
+        observe: ReturnType<typeof vi.fn>
+        disconnect: ReturnType<typeof vi.fn>
+      } | null = null
+      class MockIntersectionObserver {
+        observe = vi.fn()
+        disconnect = vi.fn()
+        private callback: IntersectionObserverCallback
+
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback
+          latestObserver = this
+        }
+
+        trigger() {
+          this.callback([{ isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+        }
+      }
+      vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+
+      mockedSearchQuery
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 1,
+            results: [searchHit({ file_id: 1, name: '첫문서.docx', path: '/lib/첫문서.docx' })],
+            file_count: 1,
+            file_limit: 20,
+            has_more: true,
+          },
+        })
+        .mockResolvedValueOnce({
+          data: {
+            query: '회의',
+            total: 1,
+            results: [
+              searchHit({ file_id: 2, name: '다음문서.docx', path: '/lib/다음문서.docx' }),
+            ],
+            file_count: 1,
+            file_limit: 20,
+            has_more: false,
+          },
+        })
+
+      renderWithProviders(
+        <FileSearch
+          active
+          launchQueryRequest={{ query: '회의', nonce: 123 }}
+          onOpenLibrarySettings={vi.fn()}
+        />,
+        { withLibraryRescan: false },
+      )
+
+      await waitFor(() => expect(screen.getByText('첫문서.docx')).toBeInTheDocument())
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(latestObserver?.observe).toHaveBeenCalled())
+
+      act(() => {
+        latestObserver?.trigger()
+      })
+
+      await waitFor(() => expect(screen.getByText('다음문서.docx')).toBeInTheDocument())
+      await waitFor(() => expect(mockedSearchQuery).toHaveBeenCalledTimes(2))
+      expect(mockedSearchQuery).toHaveBeenCalledTimes(2)
+      expect(mockedSearchQuery.mock.calls.map((call) => call[0].file_offset)).toEqual([0, 1])
+      expect(screen.getByText('첫문서.docx')).toBeInTheDocument()
 
       vi.unstubAllGlobals()
     })

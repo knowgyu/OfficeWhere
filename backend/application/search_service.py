@@ -34,6 +34,23 @@ CONTENT_MATCHES_PER_FILE = 8
 MIN_CONTENT_MATCHES_PER_FILE = 1
 
 
+CONTENT_STORAGE_METRIC_DEFAULTS: dict[str, Any] = {
+    "storage_db_open_ms": 0,
+    "storage_borrowed_connection": False,
+    "storage_search_table": "",
+    "direct_query_ms": 0,
+    "fts_rowid_ms": 0,
+    "rowid_filter_ms": 0,
+    "per_file_fts_ms": 0,
+    "detail_fetch_ms": 0,
+    "snippet_ms": 0,
+    "fts_rowid_batches": 0,
+    "fts_rowid_count": 0,
+    "selected_file_count": 0,
+    "detail_query_count": 0,
+}
+
+
 @dataclass
 class FilenameSearchTelemetry:
     source: str = "db_like"
@@ -234,6 +251,7 @@ def _content_matches(
     modified_to: Optional[float] = None,
     excluded_folder_paths: Optional[list[str]] = None,
     conn=None,
+    metrics: Optional[dict[str, Any]] = None,
 ) -> list[dict]:
     return search(
         query,
@@ -246,7 +264,13 @@ def _content_matches(
         per_file_limit=per_file_limit,
         excluded_folder_paths=excluded_folder_paths,
         conn=conn,
+        metrics=metrics,
     )
+
+
+def _prefixed_content_storage_metrics(storage_metrics: dict[str, Any]) -> dict[str, Any]:
+    combined = {**CONTENT_STORAGE_METRIC_DEFAULTS, **storage_metrics}
+    return {f"content_{key}": value for key, value in combined.items()}
 
 
 def _cache_key(
@@ -343,9 +367,12 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         "filename_fallback_reason": "",
         "everything_queried_count": 0,
         "everything_candidate_count": 0,
+        "db_open_ms": 0,
+        "search_index_status_ms": 0,
         "filename_ms": 0,
         "content_ms": 0,
         "merge_ms": 0,
+        **_prefixed_content_storage_metrics({}),
     }
     file_types: list[str] = []
     modified_from: Optional[float] = None
@@ -358,10 +385,14 @@ def search_documents(req: SearchRequest) -> SearchResponse:
     search_conn = None
 
     try:
+        db_open_started = perf_counter()
         search_conn_cm = _read_connection(row_factory=sqlite3.Row)
         search_conn = search_conn_cm.__enter__()
+        metrics["db_open_ms"] = elapsed_ms(db_open_started)
         normalize_started = perf_counter()
+        search_index_status_started = perf_counter()
         search_index_status = get_search_index_status(conn=search_conn)
+        metrics["search_index_status_ms"] = elapsed_ms(search_index_status_started)
         content_index_ready = not bool(search_index_status.get("stale"))
         file_types = normalize_file_type_filters(req.file_types)
         modified_from = _parse_modified_bound(req.modified_from, end_of_day=False)
@@ -442,6 +473,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
             metrics["filename_source"] = "not_requested"
             if content_index_ready:
                 content_started = perf_counter()
+                content_storage_metrics: dict[str, Any] = {}
                 results = _content_matches(
                     req.query,
                     limit=query_limit,
@@ -453,8 +485,10 @@ def search_documents(req: SearchRequest) -> SearchResponse:
                     modified_to=modified_to,
                     excluded_folder_paths=excluded_folder_paths,
                     conn=search_conn,
+                    metrics=content_storage_metrics,
                 )
                 metrics["content_ms"] = elapsed_ms(content_started)
+                metrics.update(_prefixed_content_storage_metrics(content_storage_metrics))
                 merge_started = perf_counter()
                 results, has_more = _cap_unique_files(results, file_limit)
                 metrics["merge_ms"] = elapsed_ms(merge_started)
@@ -485,6 +519,7 @@ def search_documents(req: SearchRequest) -> SearchResponse:
                     content_needed = max(1, file_offset + fetch_file_limit - _unique_file_count(name_matches))
                     content_file_limit = content_needed + len(name_file_ids)
                     content_started = perf_counter()
+                    content_storage_metrics = {}
                     content_candidates = _content_matches(
                         req.query,
                         limit=max(query_limit, content_file_limit * per_file_limit),
@@ -496,8 +531,10 @@ def search_documents(req: SearchRequest) -> SearchResponse:
                         modified_to=modified_to,
                         excluded_folder_paths=excluded_folder_paths,
                         conn=search_conn,
+                        metrics=content_storage_metrics,
                     )
                     metrics["content_ms"] = elapsed_ms(content_started)
+                    metrics.update(_prefixed_content_storage_metrics(content_storage_metrics))
                 content_results = []
                 seen = {(item["file_id"], item["location"], item["snippet"]) for item in name_matches}
                 for item in content_candidates:

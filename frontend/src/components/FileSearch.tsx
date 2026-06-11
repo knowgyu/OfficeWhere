@@ -287,6 +287,9 @@ export default function FileSearch({
   const initialDataRequestSeq = useRef(0)
   const watchedFoldersRequestSeq = useRef(0)
   const tutorialSearchAdvanceRef = useRef<string | null>(null)
+  // External openSearch requests are edge-triggered. Search state changes can
+  // recreate doSearch, so the same nonce must not replay and replace appended pages.
+  const handledLaunchNonceRef = useRef<number | null>(null)
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
   const landingLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
 
@@ -606,11 +609,14 @@ export default function FileSearch({
 
   useEffect(() => {
     if (!active || !launchQueryRequest) return
+    if (handledLaunchNonceRef.current === launchQueryRequest.nonce) return
     const nextQuery = launchQueryRequest.query.trim()
     if (!nextQuery) return
+    handledLaunchNonceRef.current = launchQueryRequest.nonce
+    clearPendingSearch()
     setQuery(nextQuery)
     void doSearch(nextQuery)
-  }, [active, doSearch, launchQueryRequest?.nonce])
+  }, [active, doSearch, launchQueryRequest?.nonce, launchQueryRequest?.query])
 
   const loadLandingFiles = useCallback(
     async (offset = 0, mode: 'replace' | 'more' = 'replace') => {

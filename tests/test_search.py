@@ -599,10 +599,51 @@ def test_search_request_logs_request_level_timings_and_fallback_reason(tmp_path,
     assert fields["cache_status"] == "miss"
     assert fields["filename_source"] == "db_like"
     assert fields["filename_fallback_reason"] in {"non_windows", "disabled", "sdk_dll_missing"}
+    assert fields["db_open_ms"] >= 0
+    assert fields["search_index_status_ms"] >= 0
     assert fields["filename_ms"] >= 0
     assert fields["content_ms"] == 0
+    assert fields["content_storage_search_table"] == ""
     assert fields["merge_ms"] >= 0
     assert fields["row_count"] == 1
+
+
+def test_content_search_request_logs_fts_read_timings(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.database import save_file_chunks, update_file_mtime
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    for index in range(3):
+        file_id = register_file(str(tmp_path / f"fts-log-{index}.docx"), f"fts-log-{index}.docx", "Word", 0)
+        save_file_chunks(file_id, [{"location": "문단", "content": f"반복진단키워드 본문 {index}"}])
+        update_file_mtime(file_id, float(index))
+
+    response = search_files(
+        SearchRequest(query="반복진단키워드", search_scope="content", file_limit=2, per_file_limit=1)
+    )
+
+    assert response.file_count == 2
+    request_events = [fields for event, fields in events if event == "search_request_done"]
+    fields = request_events[-1]
+    assert fields["content_ms"] >= 0
+    assert fields["content_storage_borrowed_connection"] is True
+    assert fields["content_storage_db_open_ms"] == 0
+    assert fields["content_storage_search_table"] in {"file_search_ko", "file_search_trigram"}
+    assert fields["content_fts_rowid_ms"] >= 0
+    assert fields["content_rowid_filter_ms"] >= 0
+    assert fields["content_per_file_fts_ms"] >= 0
+    assert fields["content_detail_fetch_ms"] >= 0
+    assert fields["content_snippet_ms"] >= 0
+    assert fields["content_fts_rowid_batches"] >= 1
+    assert fields["content_fts_rowid_count"] >= 2
+    assert fields["content_selected_file_count"] >= response.file_count
+    assert fields["content_detail_query_count"] >= response.file_count
 
 
 def test_search_response_cache_hits_then_invalidates_on_mtime_update(tmp_path, monkeypatch):

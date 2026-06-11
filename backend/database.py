@@ -3268,6 +3268,10 @@ def _search_table_for_query(raw_query: str) -> str:
     return "file_search_ko"
 
 
+def _duration_ms(duration: float) -> int:
+    return int(round(duration * 1000))
+
+
 def _search_row_dicts(rows: Sequence[sqlite3.Row], query_for_snippet: str) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     for row in rows:
@@ -3294,6 +3298,7 @@ def _log_search_done(
     file_limit: Optional[int],
     per_file_limit: int,
     result: Optional[Sequence[Dict[str, Any]]] = None,
+    storage_metrics: Optional[Dict[str, Any]] = None,
     error: Optional[Exception] = None,
 ) -> None:
     payload: Dict[str, Any] = {
@@ -3306,6 +3311,8 @@ def _log_search_done(
         "has_modified_filter": modified_from is not None or modified_to is not None,
         "total_ms": elapsed_ms(started),
     }
+    if storage_metrics:
+        payload.update(storage_metrics)
     if result is not None:
         payload.update(
             {
@@ -3329,6 +3336,7 @@ def _search_chunks_by_file_early_stop(
     file_limit: int,
     file_offset: int,
     per_file_limit: int,
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Return first matching files without grouping every matching chunk.
 
@@ -3344,78 +3352,121 @@ def _search_chunks_by_file_early_stop(
     last_rowid = 0
     seen_file_ids: set[int] = set()
     ordered_file_ids: List[int] = []
+    fts_rowid_seconds = 0.0
+    rowid_filter_seconds = 0.0
+    per_file_fts_seconds = 0.0
+    detail_fetch_seconds = 0.0
+    snippet_seconds = 0.0
+    fts_rowid_batches = 0
+    fts_rowid_count = 0
+    detail_query_count = 0
 
-    while len(ordered_file_ids) < target_file_count:
-        cursor.execute(
-            f"""
-            SELECT rowid
-            FROM {search_table}
-            WHERE {search_table} MATCH ?
-              AND rowid > ?
-            LIMIT ?
-            """,
-            (fts_query, last_rowid, rowid_batch_size),
+    def record_metrics() -> None:
+        if metrics is None:
+            return
+        metrics.update(
+            {
+                "fts_rowid_ms": _duration_ms(fts_rowid_seconds),
+                "rowid_filter_ms": _duration_ms(rowid_filter_seconds),
+                "per_file_fts_ms": _duration_ms(per_file_fts_seconds),
+                "detail_fetch_ms": _duration_ms(detail_fetch_seconds),
+                "snippet_ms": _duration_ms(snippet_seconds),
+                "fts_rowid_batches": fts_rowid_batches,
+                "fts_rowid_count": fts_rowid_count,
+                "selected_file_count": len(ordered_file_ids[file_offset : file_offset + file_limit]),
+                "detail_query_count": detail_query_count,
+            }
         )
-        rowids = [int(row[0]) for row in cursor.fetchall()]
-        if not rowids:
-            break
-        last_rowid = rowids[-1]
 
-        placeholders = ",".join("?" for _ in rowids)
-        cursor.execute(
-            f"""
-            SELECT fc.id, fc.file_id
-            FROM file_chunks fc
-            JOIN registered_files rf ON rf.id = fc.file_id
-            WHERE fc.id IN ({placeholders}){filter_clause}
-            ORDER BY fc.id ASC
-            """,
-            [*rowids, *filter_params],
-        )
-        for row in cursor.fetchall():
-            file_id = int(row["file_id"])
-            if file_id in seen_file_ids:
-                continue
-            seen_file_ids.add(file_id)
-            ordered_file_ids.append(file_id)
-            if len(ordered_file_ids) >= target_file_count:
+    try:
+        while len(ordered_file_ids) < target_file_count:
+            query_started = perf_counter()
+            cursor.execute(
+                f"""
+                SELECT rowid
+                FROM {search_table}
+                WHERE {search_table} MATCH ?
+                  AND rowid > ?
+                LIMIT ?
+                """,
+                (fts_query, last_rowid, rowid_batch_size),
+            )
+            rowids = [int(row[0]) for row in cursor.fetchall()]
+            fts_rowid_seconds += perf_counter() - query_started
+            fts_rowid_batches += 1
+            fts_rowid_count += len(rowids)
+            if not rowids:
                 break
+            last_rowid = rowids[-1]
 
-    selected_file_ids = ordered_file_ids[file_offset : file_offset + file_limit]
-    rows: List[sqlite3.Row] = []
-    for file_id in selected_file_ids:
-        cursor.execute(
-            f"""
-            SELECT fc.id
-            FROM file_chunks fc
-            JOIN {search_table} ON {search_table}.rowid = fc.id
-            WHERE fc.file_id = ?
-              AND {search_table} MATCH ?
-            ORDER BY fc.id ASC
-            LIMIT ?
-            """,
-            (file_id, fts_query, per_file_limit),
-        )
-        chunk_ids = [int(row["id"]) for row in cursor.fetchall()]
-        if not chunk_ids:
-            continue
+            placeholders = ",".join("?" for _ in rowids)
+            query_started = perf_counter()
+            cursor.execute(
+                f"""
+                SELECT fc.id, fc.file_id
+                FROM file_chunks fc
+                JOIN registered_files rf ON rf.id = fc.file_id
+                WHERE fc.id IN ({placeholders}){filter_clause}
+                ORDER BY fc.id ASC
+                """,
+                [*rowids, *filter_params],
+            )
+            filtered_rows = cursor.fetchall()
+            rowid_filter_seconds += perf_counter() - query_started
+            for row in filtered_rows:
+                file_id = int(row["file_id"])
+                if file_id in seen_file_ids:
+                    continue
+                seen_file_ids.add(file_id)
+                ordered_file_ids.append(file_id)
+                if len(ordered_file_ids) >= target_file_count:
+                    break
 
-        placeholders = ",".join("?" for _ in chunk_ids)
-        cursor.execute(
-            f"""
-            SELECT fc.file_id, rf.name, rf.path, rf.file_type, rf.file_mtime, fc.location, fc.content,
-                   df.normalized_hash, df.content_hash, df.content_chars, df.chunk_count
-            FROM file_chunks fc
-            JOIN registered_files rf ON rf.id = fc.file_id
-            LEFT JOIN document_fingerprints df ON df.file_id = rf.id
-            WHERE fc.id IN ({placeholders})
-            ORDER BY fc.id ASC
-            """,
-            chunk_ids,
-        )
-        rows.extend(cursor.fetchall())
+        selected_file_ids = ordered_file_ids[file_offset : file_offset + file_limit]
+        rows: List[sqlite3.Row] = []
+        for file_id in selected_file_ids:
+            query_started = perf_counter()
+            cursor.execute(
+                f"""
+                SELECT fc.id
+                FROM file_chunks fc
+                JOIN {search_table} ON {search_table}.rowid = fc.id
+                WHERE fc.file_id = ?
+                  AND {search_table} MATCH ?
+                ORDER BY fc.id ASC
+                LIMIT ?
+                """,
+                (file_id, fts_query, per_file_limit),
+            )
+            chunk_ids = [int(row["id"]) for row in cursor.fetchall()]
+            per_file_fts_seconds += perf_counter() - query_started
+            if not chunk_ids:
+                continue
 
-    return _search_row_dicts(rows, query_text)
+            placeholders = ",".join("?" for _ in chunk_ids)
+            query_started = perf_counter()
+            cursor.execute(
+                f"""
+                SELECT fc.file_id, rf.name, rf.path, rf.file_type, rf.file_mtime, fc.location, fc.content,
+                       df.normalized_hash, df.content_hash, df.content_chars, df.chunk_count
+                FROM file_chunks fc
+                JOIN registered_files rf ON rf.id = fc.file_id
+                LEFT JOIN document_fingerprints df ON df.file_id = rf.id
+                WHERE fc.id IN ({placeholders})
+                ORDER BY fc.id ASC
+                """,
+                chunk_ids,
+            )
+            rows.extend(cursor.fetchall())
+            detail_fetch_seconds += perf_counter() - query_started
+            detail_query_count += 1
+
+        snippet_started = perf_counter()
+        result = _search_row_dicts(rows, query_text)
+        snippet_seconds = perf_counter() - snippet_started
+        return result
+    finally:
+        record_metrics()
 
 
 def search_chunks(
@@ -3430,15 +3481,36 @@ def search_chunks(
     per_file_limit: int = 3,
     excluded_folder_paths: Optional[Sequence[str]] = None,
     conn: Optional[sqlite3.Connection] = None,
+    metrics: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     started = perf_counter()
     query_text = raw_query or fts_query
     search_table = _search_table_for_query(query_text)
     owns_connection = conn is None
+    db_open_ms = 0
     if conn is None:
+        db_open_started = perf_counter()
         conn = _connect()
+        db_open_ms = elapsed_ms(db_open_started)
     cursor = conn.cursor()
     cursor.row_factory = sqlite3.Row
+    search_metrics: Dict[str, Any] = {
+        "storage_db_open_ms": db_open_ms,
+        "storage_borrowed_connection": not owns_connection,
+        "storage_search_table": search_table,
+        "direct_query_ms": 0,
+        "fts_rowid_ms": 0,
+        "rowid_filter_ms": 0,
+        "per_file_fts_ms": 0,
+        "detail_fetch_ms": 0,
+        "snippet_ms": 0,
+        "fts_rowid_batches": 0,
+        "fts_rowid_count": 0,
+        "selected_file_count": 0,
+        "detail_query_count": 0,
+    }
+    if metrics is not None:
+        metrics.update(search_metrics)
     filters = [file_type for file_type in (file_types or []) if file_type]
     filter_clause = " AND rf.availability_status != 'missing'"
     params: List[Any] = [fts_query]
@@ -3462,6 +3534,7 @@ def search_chunks(
     try:
         if file_limit is None:
             params.append(limit)
+            query_started = perf_counter()
             cursor.execute(
                 f"""
                 SELECT fc.file_id, rf.name, rf.path, rf.file_type, rf.file_mtime, fc.location, fc.content,
@@ -3477,7 +3550,13 @@ def search_chunks(
                 params,
             )
             rows = cursor.fetchall()
+            search_metrics["direct_query_ms"] = elapsed_ms(query_started)
+            snippet_started = perf_counter()
             result = _search_row_dicts(rows, query_text)
+            search_metrics["snippet_ms"] = elapsed_ms(snippet_started)
+            search_metrics["selected_file_count"] = len({row["file_id"] for row in result})
+            if metrics is not None:
+                metrics.update(search_metrics)
             _log_search_done(
                 started=started,
                 search_table=search_table,
@@ -3488,6 +3567,7 @@ def search_chunks(
                 file_limit=None,
                 per_file_limit=per_file_limit,
                 result=result,
+                storage_metrics=search_metrics,
             )
             return result
 
@@ -3504,7 +3584,10 @@ def search_chunks(
             file_limit=safe_file_limit,
             file_offset=safe_file_offset,
             per_file_limit=safe_per_file_limit,
+            metrics=search_metrics,
         )
+        if metrics is not None:
+            metrics.update(search_metrics)
         _log_search_done(
             started=started,
             search_table=search_table,
@@ -3515,9 +3598,12 @@ def search_chunks(
             file_limit=safe_file_limit,
             per_file_limit=safe_per_file_limit,
             result=result,
+            storage_metrics=search_metrics,
         )
         return result
     except Exception as exc:
+        if metrics is not None:
+            metrics.update(search_metrics)
         _log_search_done(
             started=started,
             search_table=search_table,
@@ -3527,6 +3613,7 @@ def search_chunks(
             modified_to=modified_to,
             file_limit=file_limit,
             per_file_limit=per_file_limit,
+            storage_metrics=search_metrics,
             error=exc,
         )
         raise
