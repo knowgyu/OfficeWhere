@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .database import (
+    close_persistent_search_read_connection,
     get_db_path,
     get_excel_index_status,
     get_search_index_status,
@@ -46,15 +47,6 @@ async def lifespan(app: FastAPI):
         get_db_path(),
     )
     try:
-        prewarm_result = prewarm_search_storage()
-        logger.info(
-            "backend startup: search storage prewarm done duration_ms=%s probes=%s",
-            prewarm_result.get("total_ms"),
-            prewarm_result.get("probes"),
-        )
-    except Exception:
-        logger.warning("backend startup: search storage prewarm failed", exc_info=True)
-    try:
         cleanup_started = perf_counter()
         cleanup_tutorial_library()
         logger.info(
@@ -63,12 +55,25 @@ async def lifespan(app: FastAPI):
         )
     except Exception:
         logger.warning("failed to clean stale tutorial library", exc_info=True)
+    try:
+        prewarm_result = prewarm_search_storage()
+        logger.info(
+            "backend startup: search storage prewarm done duration_ms=%s probes=%s connection_source=%s",
+            prewarm_result.get("total_ms"),
+            prewarm_result.get("probes"),
+            prewarm_result.get("db_connection_source"),
+        )
+    except Exception:
+        logger.warning("backend startup: search storage prewarm failed", exc_info=True)
     start_scheduler()
     start_startup_derived_index_repair()
-    yield
+    try:
+        yield
+    finally:
+        close_persistent_search_read_connection("backend_shutdown")
 
 
-app = FastAPI(title="officewhere", version="0.15.1", lifespan=lifespan)
+app = FastAPI(title="officewhere", version="0.15.2", lifespan=lifespan)
 
 # CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(

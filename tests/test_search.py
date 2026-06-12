@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from backend.core.search_cache import reset_search_cache_for_tests
 from backend.core.indexer import index_file, inspect_and_chunk, reindex_all, search, _sanitize_fts_query
 from backend.database import (
+    close_persistent_search_read_connection,
     init_db,
     register_file,
     delete_file,
@@ -22,11 +23,14 @@ from backend.database import (
 
 @pytest.fixture(autouse=True)
 def setup_db(tmp_path, monkeypatch):
+    close_persistent_search_read_connection("test_setup")
     db_path = tmp_path / "test.db"
     monkeypatch.setattr("backend.database.DB_PATH", db_path)
     monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
     init_db()
     reset_search_cache_for_tests()
+    yield
+    close_persistent_search_read_connection("test_teardown")
 
 
 def _make_excel(path: str, data: dict):
@@ -88,6 +92,21 @@ def _make_pdf(path: str, pages: list[str]):
     )
     with open(path, "wb") as handle:
         handle.write(output)
+
+
+def _count_persistent_read_opens(monkeypatch):
+    from backend import database
+
+    original_connect_path = database._connect_path
+    state = {"count": 0}
+
+    def counted_connect_path(path, *, bulk_load=False, check_same_thread=True):
+        if not bulk_load and check_same_thread is False:
+            state["count"] += 1
+        return original_connect_path(path, bulk_load=bulk_load, check_same_thread=check_same_thread)
+
+    monkeypatch.setattr(database, "_connect_path", counted_connect_path)
+    return lambda: state["count"]
 
 
 def test_index_and_search_excel(tmp_path):
@@ -690,8 +709,38 @@ def test_search_storage_prewarm_touches_search_tables_without_writes(monkeypatch
     assert events[-1][1]["success"] is True
 
 
+def test_search_storage_prewarm_keeps_connection_for_next_cache_miss_search(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.database import prewarm_search_storage
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    monkeypatch.setattr(
+        "backend.application.search_service.discover_filename_candidates",
+        lambda _query: EverythingDiscovery(unavailable_reason="disabled"),
+    )
+
+    file_id = register_file(str(tmp_path / "prewarm-reuse.docx"), "prewarm-reuse.docx", "Word", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "prewarm-reuse 본문"}])
+    reset_search_cache_for_tests()
+
+    prewarm_result = prewarm_search_storage()
+    response = search_files(SearchRequest(query="prewarm-reuse", search_scope="filename_content"))
+
+    request_events = [fields for event, fields in events if event == "search_request_done"]
+    assert prewarm_result["db_connection_source"] == "persistent_opened"
+    assert request_events[-1]["cache_status"] == "miss"
+    assert request_events[-1]["db_connection_source"] == "persistent_reused"
+    assert request_events[-1]["db_open_ms"] == 0
+    assert response.file_count == 1
+
+
 def test_filename_content_search_cache_miss_reuses_one_read_connection(tmp_path, monkeypatch):
-    from backend import database
     from backend.api.search import search_files
     from backend.core.everything_scanner import EverythingDiscovery
     from backend.models.schemas import SearchRequest
@@ -715,27 +764,19 @@ def test_filename_content_search_cache_miss_reuses_one_read_connection(tmp_path,
     save_file_chunks(file_id, [{"location": "문단", "content": "single-open-target 본문"}])
     reset_search_cache_for_tests()
 
-    original_connect = database._connect
-    connect_count = 0
-
-    def counted_connect():
-        nonlocal connect_count
-        connect_count += 1
-        return original_connect()
-
-    monkeypatch.setattr(database, "_connect", counted_connect)
+    persistent_read_opens = _count_persistent_read_opens(monkeypatch)
 
     response = search_files(SearchRequest(query="single-open-target", search_scope="filename_content"))
 
     request_events = [fields for event, fields in events if event == "search_request_done"]
     assert request_events[-1]["cache_status"] == "miss"
-    assert connect_count == 1
+    assert persistent_read_opens() == 1
+    assert request_events[-1]["db_connection_source"] == "persistent_opened"
     assert response.file_count == 1
     assert {item.location for item in response.results} >= {"파일명", "문단"}
 
 
 def test_everything_filename_content_path_reuses_one_read_connection(tmp_path, monkeypatch):
-    from backend import database
     from backend.api.search import search_files
     from backend.core.everything_scanner import EverythingDiscovery
     from backend.models.schemas import SearchRequest
@@ -764,25 +805,115 @@ def test_everything_filename_content_path_reuses_one_read_connection(tmp_path, m
     )
     reset_search_cache_for_tests()
 
-    original_connect = database._connect
-    connect_count = 0
-
-    def counted_connect():
-        nonlocal connect_count
-        connect_count += 1
-        return original_connect()
-
-    monkeypatch.setattr(database, "_connect", counted_connect)
+    persistent_read_opens = _count_persistent_read_opens(monkeypatch)
 
     response = search_files(SearchRequest(query="everything-open", search_scope="filename_content", file_limit=2))
 
     request_events = [fields for event, fields in events if event == "search_request_done"]
     assert request_events[-1]["cache_status"] == "miss"
     assert request_events[-1]["filename_source"] == "everything_sdk"
-    assert connect_count == 1
+    assert persistent_read_opens() == 1
+    assert request_events[-1]["db_connection_source"] == "persistent_opened"
     assert response.file_count == 2
     assert response.results[0].file_id == newer_id
     assert all("unregistered" not in item.path for item in response.results)
+
+
+def test_repeated_cache_miss_searches_reuse_persistent_read_connection(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    monkeypatch.setattr(
+        "backend.application.search_service.discover_filename_candidates",
+        lambda _query: EverythingDiscovery(unavailable_reason="disabled"),
+    )
+
+    for name in ("persistent-reuse-a", "persistent-reuse-b"):
+        file_id = register_file(str(tmp_path / f"{name}.docx"), f"{name}.docx", "Word", 0)
+        save_file_chunks(file_id, [{"location": "문단", "content": f"{name} 본문"}])
+    reset_search_cache_for_tests()
+
+    persistent_read_opens = _count_persistent_read_opens(monkeypatch)
+
+    first = search_files(SearchRequest(query="persistent-reuse-a", search_scope="filename_content"))
+    second = search_files(SearchRequest(query="persistent-reuse-b", search_scope="filename_content"))
+
+    request_events = [fields for event, fields in events if event == "search_request_done"]
+    assert [fields["cache_status"] for fields in request_events[-2:]] == ["miss", "miss"]
+    assert [fields["db_connection_source"] for fields in request_events[-2:]] == [
+        "persistent_opened",
+        "persistent_reused",
+    ]
+    assert request_events[-1]["db_open_ms"] == 0
+    assert request_events[-1]["content_storage_borrowed_connection"] is True
+    assert request_events[-1]["content_storage_db_open_ms"] == 0
+    assert persistent_read_opens() == 1
+    assert first.file_count == 1
+    assert second.file_count == 1
+
+
+def test_search_write_invalidation_reopens_persistent_read_connection(tmp_path, monkeypatch):
+    from backend.api.search import search_files
+    from backend.core.everything_scanner import EverythingDiscovery
+    from backend.models.schemas import SearchRequest
+
+    events = []
+    monkeypatch.setattr(
+        "backend.application.search_service.log_index_perf",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    monkeypatch.setattr(
+        "backend.application.search_service.discover_filename_candidates",
+        lambda _query: EverythingDiscovery(unavailable_reason="disabled"),
+    )
+
+    file_id = register_file(str(tmp_path / "persistent-refresh.docx"), "persistent-refresh.docx", "Word", 0)
+    save_file_chunks(file_id, [{"location": "문단", "content": "persistent-refresh 본문"}])
+    reset_search_cache_for_tests()
+
+    persistent_read_opens = _count_persistent_read_opens(monkeypatch)
+
+    first = search_files(SearchRequest(query="persistent-refresh", search_scope="filename"))
+    update_file_mtime(file_id, 1_700_000_123.0)
+    second = search_files(SearchRequest(query="persistent-refresh", search_scope="filename"))
+    third = search_files(SearchRequest(query="persistent-refresh", search_scope="content"))
+
+    request_events = [fields for event, fields in events if event == "search_request_done"]
+    assert [fields["db_connection_source"] for fields in request_events[-3:]] == [
+        "persistent_opened",
+        "persistent_opened",
+        "persistent_reused",
+    ]
+    assert persistent_read_opens() == 2
+    assert first.file_count == 1
+    assert second.results[0].file_mtime == 1_700_000_123.0
+    assert third.file_count == 1
+
+
+def test_configure_database_and_manual_close_release_persistent_read_connection(tmp_path):
+    from backend import database
+
+    with database.persistent_search_read_connection(row_factory=sqlite3.Row) as (conn, metrics):
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+        assert metrics["db_connection_source"] == "persistent_opened"
+
+    assert database.persistent_search_read_connection_state()["open"] is True
+    database.configure_database(tmp_path / "next-db")
+    assert database.persistent_search_read_connection_state()["open"] is False
+
+    init_db()
+    with database.persistent_search_read_connection(row_factory=sqlite3.Row):
+        pass
+    assert database.persistent_search_read_connection_state()["open"] is True
+    close_result = database.close_persistent_search_read_connection("unit_test_shutdown")
+    assert close_result["closed"] is True
+    assert database.persistent_search_read_connection_state()["open"] is False
 
 
 def test_borrowed_search_connection_remains_open_and_row_compatible(tmp_path):

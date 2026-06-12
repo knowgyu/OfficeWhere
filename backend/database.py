@@ -61,6 +61,11 @@ COMPARISON_CACHE_MAX_AGE_DAYS = 90
 COMPARISON_CACHE_MIN_KEEP_ROWS = 50
 MISSING_FILE_RETENTION_DAYS = 7
 _DB_WRITE_LOCK = threading.RLock()
+_SEARCH_READ_LOCK = threading.RLock()
+_SEARCH_READ_CONN: Optional[sqlite3.Connection] = None
+_SEARCH_READ_CONN_PATH: Optional[Path] = None
+_SEARCH_READ_CONN_GENERATION = -1
+_DB_READ_GENERATION = 0
 _FTS5_TRIGRAM_SUPPORTED: Optional[bool] = None
 
 
@@ -70,6 +75,7 @@ def _invalidate_search_cache(reason: str) -> None:
     except Exception:
         # Search-result cache invalidation must never break durable DB writes.
         logger.debug("search cache invalidation failed", exc_info=True, extra={"reason": reason})
+    close_persistent_search_read_connection(reason)
 
 
 @dataclass(frozen=True)
@@ -191,6 +197,7 @@ class InitialIndexStagingDatabase:
 
 def configure_database(data_dir: str | os.PathLike[str]):
     global DB_DIR, DB_PATH
+    close_persistent_search_read_connection("configure_database")
     DB_DIR = Path(data_dir).expanduser()
     DB_PATH = DB_DIR / "data.db"
 
@@ -199,8 +206,13 @@ def get_db_path() -> str:
     return str(DB_PATH)
 
 
-def _connect_path(path: Path, *, bulk_load: bool = False) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path), timeout=30)
+def _connect_path(
+    path: Path,
+    *,
+    bulk_load: bool = False,
+    check_same_thread: bool = True,
+) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(path), timeout=30, check_same_thread=check_same_thread)
     conn.execute("PRAGMA busy_timeout=30000")
     if bulk_load:
         # Safe for rebuildable staging DBs only. If the process/OS dies, the
@@ -219,6 +231,105 @@ def _connect_path(path: Path, *, bulk_load: bool = False) -> sqlite3.Connection:
 
 def _connect() -> sqlite3.Connection:
     return _connect_path(DB_PATH)
+
+
+def _close_persistent_search_read_connection_locked(reason: str, *, bump_generation: bool) -> bool:
+    global _DB_READ_GENERATION, _SEARCH_READ_CONN, _SEARCH_READ_CONN_GENERATION, _SEARCH_READ_CONN_PATH
+    closed = False
+    if _SEARCH_READ_CONN is not None:
+        try:
+            _SEARCH_READ_CONN.close()
+        except Exception:
+            logger.debug(
+                "persistent search read connection close failed",
+                exc_info=True,
+                extra={"reason": reason},
+            )
+        closed = True
+    _SEARCH_READ_CONN = None
+    _SEARCH_READ_CONN_PATH = None
+    _SEARCH_READ_CONN_GENERATION = -1
+    if bump_generation:
+        _DB_READ_GENERATION += 1
+    return closed
+
+
+def close_persistent_search_read_connection(reason: str = "manual") -> Dict[str, Any]:
+    """Close the process-wide search read connection and advance read generation.
+
+    The connection is app-owned SQLite state only.  It is deliberately separate
+    from source Office files, and callers use it when DB writes, schema work,
+    data-dir changes, or shutdown can make an existing read snapshot stale.
+    """
+
+    with _SEARCH_READ_LOCK:
+        closed = _close_persistent_search_read_connection_locked(reason, bump_generation=True)
+        return {
+            "closed": closed,
+            "reason": reason,
+            "generation": _DB_READ_GENERATION,
+        }
+
+
+def persistent_search_read_connection_state() -> Dict[str, Any]:
+    with _SEARCH_READ_LOCK:
+        return {
+            "open": _SEARCH_READ_CONN is not None,
+            "path": str(_SEARCH_READ_CONN_PATH) if _SEARCH_READ_CONN_PATH is not None else "",
+            "generation": _DB_READ_GENERATION,
+            "connection_generation": _SEARCH_READ_CONN_GENERATION,
+        }
+
+
+@contextmanager
+def persistent_search_read_connection(*, row_factory: Optional[type] = None):
+    """Borrow a process-wide read connection for interactive search.
+
+    Corporate endpoint protection can make opening SQLite handles expensive.
+    Search queries themselves are short, so one locked persistent read handle
+    removes repeated open cost while keeping close/invalidation explicit.
+    """
+
+    global _SEARCH_READ_CONN, _SEARCH_READ_CONN_GENERATION, _SEARCH_READ_CONN_PATH
+    metrics: Dict[str, Any] = {
+        "db_open_ms": 0,
+        "db_connection_source": "persistent_reused",
+        "db_connection_reused": True,
+        "db_connection_generation": _DB_READ_GENERATION,
+        "db_connection_invalidated": False,
+        "db_connection_invalidate_reason": "",
+    }
+    with _SEARCH_READ_LOCK:
+        current_path = Path(DB_PATH)
+        if _SEARCH_READ_CONN is not None and (
+            _SEARCH_READ_CONN_PATH != current_path or _SEARCH_READ_CONN_GENERATION != _DB_READ_GENERATION
+        ):
+            metrics["db_connection_invalidated"] = True
+            metrics["db_connection_invalidate_reason"] = "path_or_generation_changed"
+            _close_persistent_search_read_connection_locked("path_or_generation_changed", bump_generation=False)
+
+        if _SEARCH_READ_CONN is None:
+            opened_started = perf_counter()
+            _SEARCH_READ_CONN = _connect_path(current_path, check_same_thread=False)
+            metrics["db_open_ms"] = elapsed_ms(opened_started)
+            metrics["db_connection_source"] = "persistent_opened"
+            metrics["db_connection_reused"] = False
+            _SEARCH_READ_CONN_PATH = current_path
+            _SEARCH_READ_CONN_GENERATION = _DB_READ_GENERATION
+
+        if row_factory is not None:
+            _SEARCH_READ_CONN.row_factory = row_factory
+        metrics["db_connection_generation"] = _DB_READ_GENERATION
+        try:
+            yield _SEARCH_READ_CONN, metrics
+        except sqlite3.Error as exc:
+            metrics["db_connection_invalidated"] = True
+            metrics["db_connection_invalidate_reason"] = f"sqlite_error:{exc.__class__.__name__}"
+            _close_persistent_search_read_connection_locked(
+                metrics["db_connection_invalidate_reason"],
+                bump_generation=True,
+            )
+            raise
 
 
 def _supports_fts5_trigram() -> bool:
@@ -528,35 +639,37 @@ def prewarm_search_storage() -> Dict[str, Any]:
     """Touch the main DB and search tables once during backend startup.
 
     Some corporate endpoint protection tools add a noticeable fixed cost to the
-    first SQLite/FTS file access.  This intentionally performs tiny read-only
-    probes after schema initialization so that cost is paid before the user's
-    first interactive search rather than inside the search request.
+    first SQLite/FTS file access.  This intentionally opens the persistent
+    search read connection and performs tiny read-only probes after schema
+    initialization so that cost is paid before the user's first interactive
+    search rather than inside the search request.
     """
 
     started = perf_counter()
     probes: List[str] = []
-    conn = _connect()
     try:
-        cursor = conn.cursor()
-        for label, statement in (
-            ("pragma_schema_version", "PRAGMA schema_version"),
-            ("settings", "SELECT value FROM settings WHERE key = ? LIMIT 1"),
-            ("registered_files", "SELECT id FROM registered_files LIMIT 1"),
-            ("file_chunks", "SELECT id FROM file_chunks LIMIT 1"),
-            ("file_search_ko", "SELECT rowid FROM file_search_ko LIMIT 1"),
-            ("file_search_trigram", "SELECT rowid FROM file_search_trigram LIMIT 1"),
-        ):
-            if label == "settings":
-                cursor.execute(statement, (SEARCH_INDEX_STATE_KEY,))
-            else:
-                cursor.execute(statement)
-            cursor.fetchone()
-            probes.append(label)
+        with persistent_search_read_connection() as (conn, connection_metrics):
+            cursor = conn.cursor()
+            for label, statement in (
+                ("pragma_schema_version", "PRAGMA schema_version"),
+                ("settings", "SELECT value FROM settings WHERE key = ? LIMIT 1"),
+                ("registered_files", "SELECT id FROM registered_files LIMIT 1"),
+                ("file_chunks", "SELECT id FROM file_chunks LIMIT 1"),
+                ("file_search_ko", "SELECT rowid FROM file_search_ko LIMIT 1"),
+                ("file_search_trigram", "SELECT rowid FROM file_search_trigram LIMIT 1"),
+            ):
+                if label == "settings":
+                    cursor.execute(statement, (SEARCH_INDEX_STATE_KEY,))
+                else:
+                    cursor.execute(statement)
+                cursor.fetchone()
+                probes.append(label)
         result = {
             "success": True,
             "probe_count": len(probes),
             "probes": ",".join(probes),
             "total_ms": elapsed_ms(started),
+            **connection_metrics,
         }
         log_index_perf("search_storage_prewarm_done", **result)
         return result
@@ -570,8 +683,6 @@ def prewarm_search_storage() -> Dict[str, Any]:
         }
         log_index_perf("search_storage_prewarm_done", **result)
         raise
-    finally:
-        conn.close()
 
 
 def get_excel_index_status() -> Dict[str, Any]:
@@ -1613,6 +1724,7 @@ def prune_unsupported_file_extensions(reason: str = "background") -> Dict[str, A
 
 
 def init_db():
+    close_persistent_search_read_connection("init_db")
     init_started = perf_counter()
     metrics: Dict[str, Any] = {"db_path": str(DB_PATH)}
     log_index_perf("db_init_start", **metrics)

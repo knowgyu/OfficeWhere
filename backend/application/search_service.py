@@ -15,7 +15,13 @@ from ..core.index_perf import elapsed_ms, log_index_perf
 from ..core.indexer import search
 from ..core.search_cache import current_epoch, enabled as search_cache_enabled
 from ..core.search_cache import get_search_cache, set_search_cache
-from ..database import _read_connection, get_search_index_status, search_file_names, search_file_names_by_paths
+from ..database import (
+    close_persistent_search_read_connection,
+    get_search_index_status,
+    persistent_search_read_connection,
+    search_file_names,
+    search_file_names_by_paths,
+)
 from ..models.schemas import SearchRequest, SearchResponse, SearchResult
 
 FILE_TYPE_ALIASES = {
@@ -368,6 +374,11 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         "everything_queried_count": 0,
         "everything_candidate_count": 0,
         "db_open_ms": 0,
+        "db_connection_source": "",
+        "db_connection_reused": False,
+        "db_connection_generation": 0,
+        "db_connection_invalidated": False,
+        "db_connection_invalidate_reason": "",
         "search_index_status_ms": 0,
         "filename_ms": 0,
         "content_ms": 0,
@@ -382,13 +393,14 @@ def search_documents(req: SearchRequest) -> SearchResponse:
     file_offset: Optional[int] = None
     per_file_limit: Optional[int] = None
     search_conn_cm = None
+    search_conn_entered = False
     search_conn = None
 
     try:
-        db_open_started = perf_counter()
-        search_conn_cm = _read_connection(row_factory=sqlite3.Row)
-        search_conn = search_conn_cm.__enter__()
-        metrics["db_open_ms"] = elapsed_ms(db_open_started)
+        search_conn_cm = persistent_search_read_connection(row_factory=sqlite3.Row)
+        search_conn, connection_metrics = search_conn_cm.__enter__()
+        search_conn_entered = True
+        metrics.update(connection_metrics)
         normalize_started = perf_counter()
         search_index_status_started = perf_counter()
         search_index_status = get_search_index_status(conn=search_conn)
@@ -578,6 +590,11 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         )
         return response
     except Exception as exc:
+        if isinstance(exc, sqlite3.Error):
+            reason = f"search_sqlite_error:{exc.__class__.__name__}"
+            close_persistent_search_read_connection(reason)
+            metrics["db_connection_invalidated"] = True
+            metrics["db_connection_invalidate_reason"] = reason
         _log_search_request_done(
             started=request_started,
             request_id=request_id,
@@ -594,5 +611,5 @@ def search_documents(req: SearchRequest) -> SearchResponse:
         )
         raise
     finally:
-        if search_conn_cm is not None:
+        if search_conn_entered and search_conn_cm is not None:
             search_conn_cm.__exit__(None, None, None)
