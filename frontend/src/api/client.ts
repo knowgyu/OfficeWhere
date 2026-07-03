@@ -1,4 +1,4 @@
-import axios, { type AxiosRequestConfig } from 'axios'
+import { del, get, post, put, type RequestConfig } from './http'
 import { libraryApi } from './library'
 import { apiPath, getOfficeWhereBridge } from './transport'
 import type {
@@ -472,14 +472,14 @@ async function pickFileWithBestAvailableDialog() {
       return { data: { cancelled: true, file: null } }
     }
 
-    const inspected = await axios.post<FileInspectResponse>(
+    const inspected = await post<FileInspectResponse>(
       await apiPath('/api/files/inspect'),
       { path: picked.path }
     )
     return { data: { cancelled: false, file: inspected.data } }
   }
 
-  return axios.post<FilePickResponse>(await apiPath('/api/files/pick'))
+  return post<FilePickResponse>(await apiPath('/api/files/pick'))
 }
 
 async function pickFolderWithBestAvailableDialog() {
@@ -490,7 +490,7 @@ async function pickFolderWithBestAvailableDialog() {
     return { data }
   }
 
-  return axios.post<FolderPickResponse>(await apiPath('/api/files/pick-folder'))
+  return post<FolderPickResponse>(await apiPath('/api/files/pick-folder'))
 }
 
 async function getFilePage(params: FileListParams = {}) {
@@ -504,7 +504,7 @@ async function getFilePage(params: FileListParams = {}) {
 
   const url = await apiPath('/api/files/page')
   const suffix = searchParams.toString()
-  return axios.get<FileListResponse>(suffix ? `${url}?${suffix}` : url)
+  return get<FileListResponse>(suffix ? `${url}?${suffix}` : url)
 }
 
 async function getDuplicateFiles(params: { limit?: number; offset?: number } = {}) {
@@ -514,7 +514,7 @@ async function getDuplicateFiles(params: { limit?: number; offset?: number } = {
 
   const url = await apiPath('/api/files/duplicates')
   const suffix = searchParams.toString()
-  return axios.get<DuplicateFilesResponse>(suffix ? `${url}?${suffix}` : url)
+  return get<DuplicateFilesResponse>(suffix ? `${url}?${suffix}` : url)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1156,23 +1156,23 @@ export function normalizeCheckResponse(payload: unknown): CheckResponse {
 
 export const api = {
   files: {
-    list: async () => axios.get<FileInfo[]>(await apiPath('/api/files')),
+    list: async () => get<FileInfo[]>(await apiPath('/api/files')),
     page: getFilePage,
     duplicates: getDuplicateFiles,
     inspect: (data: FileInspectRequest) =>
-      apiPath('/api/files/inspect').then((url) => axios.post<FileInspectResponse>(url, data)),
+      apiPath('/api/files/inspect').then((url) => post<FileInspectResponse>(url, data)),
     pick: pickFileWithBestAvailableDialog,
     register: (data: FileRegisterRequest) =>
-      apiPath('/api/files').then((url) => axios.post<FileRegisterResponse>(url, data)),
-    delete: async (id: number) => axios.delete(await apiPath(`/api/files/${id}`)),
-    deleteAll: async () => axios.delete<ClearRegisteredFilesResult>(await apiPath('/api/files')),
-    schema: async (id: number) => axios.get<SchemaResponse>(await apiPath(`/api/files/${id}/schema`)),
+      apiPath('/api/files').then((url) => post<FileRegisterResponse>(url, data)),
+    delete: async (id: number) => del(await apiPath(`/api/files/${id}`)),
+    deleteAll: async () => del<ClearRegisteredFilesResult>(await apiPath('/api/files')),
+    schema: async (id: number) => get<SchemaResponse>(await apiPath(`/api/files/${id}/schema`)),
     pickFolder: pickFolderWithBestAvailableDialog,
     scanFolder: (data: FolderScanRequest) =>
-      apiPath('/api/files/scan-folder').then((url) => axios.post<FolderScanResponse>(url, data)),
+      apiPath('/api/files/scan-folder').then((url) => post<FolderScanResponse>(url, data)),
     bulkRegister: (data: BulkRegisterRequest) =>
-      apiPath('/api/files/bulk-register').then((url) => axios.post<BulkRegisterResponse>(url, data)),
-    open: async (id: number) => axios.post(await apiPath(`/api/files/${id}/open`)),
+      apiPath('/api/files/bulk-register').then((url) => post<BulkRegisterResponse>(url, data)),
+    open: async (id: number) => post(await apiPath(`/api/files/${id}/open`)),
     showInFolder: async (id: number, filePath?: string) => {
       const bridge = getOfficeWhereBridge()
       if (filePath && bridge?.showItemInFolder) {
@@ -1184,22 +1184,22 @@ export const api = {
           // unexpected shell API failures.
         }
       }
-      return axios.post(await apiPath(`/api/files/${id}/show-in-folder`))
+      return post(await apiPath(`/api/files/${id}/show-in-folder`))
     },
   },
   check: {
     run: (data: CheckRequest) =>
-      apiPath('/api/check').then((url) => axios.post<unknown>(url, data)),
+      apiPath('/api/check').then((url) => post<unknown>(url, data)),
     excelGrid: (data: ExcelDiffGridRequest) =>
-      apiPath('/api/check/excel-grid').then((url) => axios.post<ExcelDiffGridResponse>(url, data)),
+      apiPath('/api/check/excel-grid').then((url) => post<ExcelDiffGridResponse>(url, data)),
   },
   search: {
-    query: (data: SearchRequest, config?: AxiosRequestConfig) =>
-      apiPath('/api/search').then((url) => axios.post<SearchResponse>(url, data, config)),
-    reindex: async () => axios.post<ReindexResponse>(await apiPath('/api/search/reindex')),
-    getSettings: async () => axios.get<SchedulerSettings>(await apiPath('/api/search/settings')),
+    query: (data: SearchRequest, config?: RequestConfig) =>
+      apiPath('/api/search').then((url) => post<SearchResponse>(url, data, config)),
+    reindex: async () => post<ReindexResponse>(await apiPath('/api/search/reindex')),
+    getSettings: async () => get<SchedulerSettings>(await apiPath('/api/search/settings')),
     updateSettings: (data: SchedulerSettings) =>
-      apiPath('/api/search/settings').then((url) => axios.put<SchedulerSettings>(url, data)),
+      apiPath('/api/search/settings').then((url) => put<SchedulerSettings>(url, data)),
   },
   app: {
     getDataPaths: async () => {
@@ -1324,7 +1324,7 @@ export const api = {
         const desktopResult = await electron.getExampleLibraryPath()
         if (desktopResult.available) return { data: desktopResult }
         try {
-          const backendResult = await axios.get<ExampleLibraryPathResponse>(
+          const backendResult = await get<ExampleLibraryPathResponse>(
             await apiPath('/api/app/example-library-path'),
           )
           if (backendResult.data.available) return backendResult
@@ -1334,7 +1334,7 @@ export const api = {
         return { data: desktopResult }
       }
       try {
-        return await axios.get<ExampleLibraryPathResponse>(await apiPath('/api/app/example-library-path'))
+        return await get<ExampleLibraryPathResponse>(await apiPath('/api/app/example-library-path'))
       } catch {
         // Fall through to explicit Vite configuration or a clear unavailable result.
       }
@@ -1350,14 +1350,14 @@ export const api = {
       }
     },
     createTutorialLibrary: async () =>
-      axios.post<ExampleLibraryPathResponse>(await apiPath('/api/app/tutorial-library')),
+      post<ExampleLibraryPathResponse>(await apiPath('/api/app/tutorial-library')),
     cleanupTutorialLibrary: async (path?: string) =>
-      axios.delete<TutorialLibraryCleanupResult>(await apiPath('/api/app/tutorial-library'), {
+      del<TutorialLibraryCleanupResult>(await apiPath('/api/app/tutorial-library'), {
         data: { path },
       }),
     consumeSchemaResetState: async () => {
       try {
-        return await axios.get<SchemaResetState>(await apiPath('/api/app/schema-reset-state'))
+        return await get<SchemaResetState>(await apiPath('/api/app/schema-reset-state'))
       } catch {
         return { data: { resetPending: false } as SchemaResetState }
       }

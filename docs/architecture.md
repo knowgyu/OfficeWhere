@@ -14,9 +14,29 @@ OfficeWhere는 로컬/공유 폴더에 흩어진 Office/PDF 문서를 찾아 색
 | Parsing/indexing | `backend/core/` | Office/PDF parser, rescan, search, comparison, Excel/PPT/Word diff |
 | Packaging | `scripts/prepare_python_runtime.py`, `python-runtime/`, `frontend/package.json` | backend source/runtime과 Electron bundle 생성 |
 
+## Packaged Python runtime
+
+패키징된 앱은 사용자의 시스템 Python에 의존하지 않습니다. Electron은 app bundle 안의 private Python runtime으로 `resources/backend-source/backend_server.py`를 실행합니다.
+
+- Windows: `npm run package:win`이 `scripts/prepare_python_runtime.py win-x64`를 먼저 실행해 공식 Python embeddable zip과 `requirements.txt` 패키지를 `python-runtime/win-x64/`에 준비합니다.
+- macOS arm64: `npm run package:mac`이 `scripts/prepare_python_runtime.py mac-arm64`를 먼저 실행해 standalone Python runtime과 같은 `requirements.txt` 패키지를 `python-runtime/mac-arm64/`에 준비합니다.
+- `python-runtime/*`의 생성된 바이너리와 `site-packages`는 git에 커밋하지 않습니다. 빌드/릴리스 runner에서 재생성하고 Electron Builder가 최종 앱에 포함합니다.
+- Windows runtime은 Windows runner에서 실제 설치합니다. Linux에서는 `--dry-run`으로 URL/경로 계약만 검증합니다.
+
 PDF 텍스트 추출은 PDFium 기반 `pypdfium2`로 수행합니다. `backend/core/pdf_analysis.py`는 PDFium 호출을
 전역 락으로 감싸 스레드 병렬 색인 중에도 한 번에 하나의 PDFium 작업만 수행하고, 원본 PDF는 열람 후 닫기만
 합니다. 일부 PDF는 엔진별 텍스트 추출 결과가 다를 수 있으므로 배포 전 실제 샘플로 확인합니다.
+
+PowerPoint 본문/표 추출은 `backend/core/ppt_analysis.py`의 OOXML zip parser가 담당합니다. runtime PPT 읽기를 위해 `python-pptx`를 호출하지 않습니다. `python-pptx`는 테스트/데모 문서 생성 같은 개발 도구 경로에서만 필요할 수 있습니다.
+
+## Frontend HTTP policy
+
+Renderer API 호출은 `frontend/src/api/http.ts`의 얇은 native `fetch` wrapper를 사용합니다. 외부 HTTP client dependency를 기본값으로 두지 않습니다.
+
+- wrapper는 기존 client 코드가 기대하는 `{ data }` 응답 모양을 유지합니다.
+- 오류도 기존 UI/tests가 다루던 `{ response: { status, data } }` 형태로 맞춰 던집니다.
+- 새 API client를 추가할 때는 `fetch`를 직접 흩뿌리기보다 이 wrapper를 재사용합니다.
+- Axios 같은 HTTP dependency는 native `fetch`로 처리할 수 없는 명확한 요구가 생길 때만 다시 검토합니다.
 
 ## 주요 데이터 흐름
 
@@ -59,6 +79,7 @@ PDF 텍스트 추출은 PDFium 기반 `pypdfium2`로 수행합니다. `backend/c
 ## 운영 원칙
 
 - 새 의존성보다 기존 seam과 테스트를 우선합니다.
+- 참조 없는 legacy helper나 대체 구현은 남겨두지 말고 테스트로 현재 동작을 고정한 뒤 삭제합니다.
 - 앱 데이터 초기화/정리는 DB, 캐시, 로그, 설정 등 app-owned 위치만 대상으로 합니다.
 - 패키징된 Electron backend 포트는 OS가 배정한 loopback 포트를 사용합니다. 고정 포트로 바꾸지 않습니다.
 - 사용자-facing 한국어 문구는 내부 용어보다 동작 중심으로 씁니다.

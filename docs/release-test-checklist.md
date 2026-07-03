@@ -10,11 +10,12 @@
 - [ ] `cd frontend && npm run build`
 - [ ] `cd frontend && npm run build:electron`
 - [ ] `cd frontend && npm run test:run`
-- [ ] `cd frontend && npm run package:win` (Linux/local smoke only when `python-runtime/win-x64` is present; official Windows asset is built on Windows/GitHub Actions)
+- [ ] `cd frontend && npm run package:win` (Windows/GitHub Actions에서 runtime을 준비해 패키징)
 - [ ] `cd frontend && npx tsc -p tsconfig.e2e.json`
 - [ ] `git diff --check`
 - [ ] GitHub `Frontend tests` workflow 통과
 - [ ] Windows/macOS 런타임에서 `pypdfium2`와 bundled PDFium(`pypdfium2_raw`) import가 성공하는지 확인한다.
+- [ ] Windows runner가 `python-runtime/win-x64`를 생성했고, runtime 산출물이 git tracked file로 남지 않았는지 확인한다.
 
 ## 문서 등록/검색
 
@@ -36,6 +37,7 @@
 - [ ] Word 비교는 페이지 라벨과 기존/변경 후 내용을 표시한다.
 - [ ] Excel 비교는 시트/셀 좌표와 표 보기 모달을 표시한다.
 - [ ] PowerPoint 비교는 슬라이드 번호/제목 기준 변경을 표시한다.
+- [ ] PowerPoint 본문/표 검색은 runtime에서 `python-pptx`가 아니라 OOXML zip parser 경로로 동작한다.
 - [ ] 중복 문서 화면은 같은 본문이지만 다른 파일명인 후보만 보여준다.
 
 ## 데이터 안전

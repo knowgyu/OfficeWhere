@@ -19,12 +19,6 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-if not exist "python-runtime\win-x64\python.exe" (
-    echo [오류] 번들 Python 런타임을 찾을 수 없습니다: python-runtime\win-x64\python.exe
-    pause
-    exit /b 1
-)
-
 cd frontend
 call npm ci
 if %errorlevel% neq 0 (

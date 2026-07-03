@@ -7,8 +7,8 @@ import { api } from './client'
 // Tests focus on the public API surface (api.files, api.search, api.check,
 // api.app). They verify that:
 // 1. Each call hits the expected backend route with the expected payload.
-// 2. Responses are returned to the caller as-is (axios .data shape).
-// 3. Errors propagate as Axios errors with the backend's detail intact.
+// 2. Responses keep the existing .data shape.
+// 3. Errors keep the existing response.status/data shape.
 //
 // IPC-backed app methods (app.getDataPaths, app.clearData, ...) need an
 // installed bridge. Methods that fall through to HTTP (app.getExampleLibraryPath
@@ -203,7 +203,7 @@ describe('api.check', () => {
     expect(captured?.file_ids).toEqual([1, 2, 3])
   })
 
-  it('check surfaces 4xx errors as axios errors with the detail intact', async () => {
+  it('check surfaces 4xx errors with the detail intact', async () => {
     server.use(
       http.post('*/api/check', () =>
         HttpResponse.json({ detail: 'at least two files are required' }, { status: 400 }),

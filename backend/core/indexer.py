@@ -177,12 +177,6 @@ def _inspect_and_chunk_excel(path: str) -> Tuple[Dict[str, Any], List[Dict[str, 
         log_parse_perf("excel_inspect_and_chunk_done", **metrics)
         raise
 
-
-def _excel_used_range_chunks(path: str) -> List[Dict[str, str]]:
-    _inspection, chunks = _excel_used_range_inspection_and_chunks(path)
-    return chunks
-
-
 def _inspect_and_chunk_word(path: str) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     started = time.perf_counter()
     metrics: Dict[str, Any] = {

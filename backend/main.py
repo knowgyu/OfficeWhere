@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
         close_persistent_search_read_connection("backend_shutdown")
 
 
-app = FastAPI(title="officewhere", version="0.15.2", lifespan=lifespan)
+app = FastAPI(title="officewhere", version="0.16.0", lifespan=lifespan)
 
 # CORS 설정 (개발 Vite, Electron file renderer, packaged backend static hosting 허용)
 app.add_middleware(

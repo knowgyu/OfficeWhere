@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import axios from 'axios'
 
 /**
  * Verify the safety net: when a test triggers an HTTP request that no handler
@@ -12,6 +11,6 @@ import axios from 'axios'
  */
 describe('MSW unhandled request safety net', () => {
   it('rejects requests to endpoints without a registered handler', async () => {
-    await expect(axios.get('/api/__nonexistent_endpoint__')).rejects.toBeDefined()
+    await expect(fetch('/api/__nonexistent_endpoint__')).rejects.toBeDefined()
   })
 })

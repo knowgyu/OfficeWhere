@@ -41,13 +41,26 @@ build.bat
 
 빌드 단계:
 
-1. bundled Python runtime 확인: `python-runtime/win-x64/python.exe`
-2. `frontend`: `npm ci`
-3. renderer build: `npm run build`
-4. Electron main/preload build: `npm run build:electron`
-5. Windows zip: `npm run package:win`
+1. `frontend`: `npm ci`
+2. renderer build: `npm run build`
+3. Electron main/preload build: `npm run build:electron`
+4. Windows runtime 준비 + zip: `npm run package:win`
 
 Packaged Windows app은 `resources/python-runtime/python.exe`로 `resources/backend-source/backend_server.py`를 실행한다. 사용자는 Python이나 pip를 별도로 설치하지 않는다.
+
+Windows runtime은 repo에 vendoring하지 않는다. `npm run package:win`이 Windows runner에서 공식 Python embeddable zip을 다운로드하고 `requirements.txt`를 `site-packages`에 설치한다. Linux/macOS에서 계약만 확인할 때는 다음 dry-run을 사용한다.
+
+```bash
+python ../scripts/prepare_python_runtime.py win-x64 --dry-run
+```
+
+실제 Windows zip에는 최소한 다음 파일들이 있어야 한다.
+
+```text
+resources/python-runtime/python.exe
+resources/python-runtime/site-packages/
+resources/backend-source/backend_server.py
+```
 
 ## macOS 빌드
 
@@ -56,7 +69,11 @@ cd frontend
 npm run package:mac
 ```
 
-`package:mac`은 `scripts/prepare_python_runtime.py mac-arm64`를 먼저 실행해 `python-runtime/mac-arm64/bin/python3` 런타임을 준비한 뒤 Electron Builder로 dmg/zip을 만든다. 생성된 macOS runtime 바이너리는 git에 커밋하지 않고 `.gitignore`로 제외한다. Release workflow는 macOS runner에서 이 runtime을 캐시하고 패키징한다.
+`package:win`/`package:mac`은 `scripts/prepare_python_runtime.py`를 먼저 실행해 platform runtime을 준비한 뒤 Electron Builder로 zip/dmg를 만든다. 생성된 runtime 바이너리는 git에 커밋하지 않고 `.gitignore`로 제외한다. Release workflow는 각 runner에서 runtime을 캐시하고 패키징한다.
+
+## Renderer HTTP client
+
+Renderer는 native `fetch` 기반 `frontend/src/api/http.ts`만 직접 사용한다. 이 wrapper는 기존 API client 계약을 위해 성공 응답을 `{ data }`로, HTTP 오류를 `{ response: { status, data } }`로 맞춘다. 새 API module은 이 wrapper를 재사용하고, Axios 같은 추가 HTTP dependency는 native `fetch`로 부족한 요구가 생길 때만 다시 도입한다.
 
 ## Backend 환경 변수
 

@@ -1,22 +1,32 @@
 # OfficeWhere bundled Python runtime (Windows x64)
 
-This directory vendors the official Python 3.13.13 Windows embeddable package
-and exact-pinned site-packages used by packaged OfficeWhere Windows releases.
+This directory is generated during Windows packaging.
 
-Source runtime: https://www.python.org/downloads/release/python-31313/
-Runtime file: `python-3.13.13-embed-amd64.zip`
+`npm run package:win` runs:
 
-OfficeWhere launches this private `python.exe` directly so packaged releases can
-run the backend without requiring users to install Python or run pip.
+```bat
+python ..\scripts\prepare_python_runtime.py win-x64
+```
 
-Vendored packages are the exact pins in the repository root `requirements.txt`.
-Package test directories, console-script shims, `__pycache__`, and `.pyc` files
-are intentionally omitted from this committed runtime because the packaged app
-imports the libraries directly and does not run package test suites.
+That command downloads the official Python 3.13.13 Windows embeddable package,
+installs the exact pins from the repository root `requirements.txt` into
+`site-packages`, and writes `python313._pth` so the packaged app can import both
+vendored packages and `resources/backend-source`.
 
-`python313._pth` intentionally exposes:
+The generated files are intentionally ignored by git. Electron Builder still
+copies this directory into the Windows zip at `resources/python-runtime`, so end
+users can run OfficeWhere without installing Python or pip.
 
-- `python313.zip` and `.` for the embeddable standard library/runtime DLLs
-- `site-packages` for vendored Python dependencies
-- `..\backend-source` for the backend source copied into Electron resources
-- `import site` for normal package initialization
+Run the real preparation on Windows or in GitHub Actions Windows runners. From
+Linux/macOS, use `python ../scripts/prepare_python_runtime.py win-x64 --dry-run`
+only to validate the URL and output paths; dependency installation is skipped
+there because Windows wheels must be installed into the Windows embeddable
+runtime.
+
+After packaging, verify the zip contains:
+
+```text
+resources/python-runtime/python.exe
+resources/python-runtime/site-packages/
+resources/backend-source/backend_server.py
+```

@@ -33,14 +33,17 @@ def test_electron_startup_uses_lightweight_health_probe():
     assert "backend stop requested" in main_ts
 
 
-def test_pdf_runtime_dependency_is_declared_and_vendored_for_windows():
+def test_pdf_runtime_dependency_is_declared_and_prepared_for_windows():
     requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
-    win_runtime = REPO_ROOT / "python-runtime" / "win-x64" / "site-packages"
+    prepare_script = (REPO_ROOT / "scripts" / "prepare_python_runtime.py").read_text(encoding="utf-8")
+    win_readme = (REPO_ROOT / "python-runtime" / "win-x64" / "README.md").read_text(encoding="utf-8")
 
     assert "pypdfium2==5.8.0" in requirements
-    assert (win_runtime / "pypdfium2" / "__init__.py").exists()
-    assert (win_runtime / "pypdfium2_raw" / "pdfium.dll").exists()
-    assert (win_runtime / "pypdfium2-5.8.0.dist-info" / "METADATA").exists()
+    assert "WINDOWS_EMBED_ASSET" in prepare_script
+    assert "--target" in prepare_script
+    assert "site-packages" in prepare_script
+    assert "python313._pth" in prepare_script
+    assert "resources/python-runtime" in win_readme
 
 
 def test_backend_and_frontend_release_versions_match():
@@ -59,7 +62,9 @@ def test_electron_builder_runtime_resources_are_platform_scoped():
     scripts = package["scripts"]
     build = package["build"]
 
-    assert scripts["package:win"] == "electron-builder --win zip --publish never"
+    assert scripts["prepare:python-runtime:win"] == "python ../scripts/prepare_python_runtime.py win-x64"
+    assert scripts["package:win"].startswith("npm run prepare:python-runtime:win && ")
+    assert scripts["package:win"].endswith("electron-builder --win zip --publish never")
     assert scripts["prepare:python-runtime:mac"] == "python3 ../scripts/prepare_python_runtime.py mac-arm64"
     assert scripts["package:mac"].startswith("npm run prepare:python-runtime:mac && ")
     assert scripts["package:mac"].endswith("electron-builder --mac --publish never")
@@ -119,6 +124,7 @@ def test_release_workflow_caches_downloads_and_reusable_install_outputs():
     assert workflow.count("Cache npm downloads") == 2
     assert workflow.count("Cache frontend node_modules") == 2
     assert workflow.count("Cache Electron package downloads") == 2
+    assert "python-runtime/win-x64" in windows_job
     assert "Cache macOS backend runtime" in workflow
     assert workflow.count("scripts/ci_frontend_cache_key.py") == 2
     assert workflow.count("npm ci --no-audit --fund=false") == 2

@@ -194,16 +194,11 @@ jobs:
           path: |
             .cache/electron
             .cache/electron-builder
-          key: ${{ runner.os }}-electron-${{ steps.frontend-cache-key.outputs.hash }}
+            .cache/python-runtime
+            python-runtime/win-x64
+          key: ${{ runner.os }}-electron-${{ steps.frontend-cache-key.outputs.hash }}-runtime-${{ hashFiles('requirements.txt', 'scripts/prepare_python_runtime.py') }}
           restore-keys: |
             ${{ runner.os }}-electron-
-
-      - name: Verify bundled Python runtime exists
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "python-runtime/win-x64/python.exe")) {
-            throw "Bundled Python runtime is missing: python-runtime/win-x64/python.exe"
-          }
 
       - name: Install frontend dependencies
         if: steps.frontend-node-modules-cache.outputs.cache-hit != 'true'

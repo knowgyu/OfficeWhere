@@ -50,6 +50,8 @@ git diff --check
 - Electron E2E는 로컬 OS 라이브러리 영향을 많이 받습니다. Linux에서 `libasound`, GTK/GBM, Xvfb가 없어서 실행이 막히면 제품 회귀가 아니라 환경 미비로 기록합니다.
 - IPC handler를 바꾸면 preload bridge와 renderer caller를 함께 확인합니다.
 - 패키징 계약은 `tests/test_runtime_packaging.py`가 workflow, runtime 경로, 캐시 키, release asset 이름을 정적으로 고정합니다.
+- Windows runtime은 repo에 vendoring하지 않고 Windows packaging 단계에서 생성합니다. Linux에서는 `scripts/prepare_python_runtime.py win-x64 --dry-run`으로 URL/경로 계약만 검증합니다.
+- Frontend API client는 native `fetch` wrapper(`frontend/src/api/http.ts`)의 `{ data }` 성공 응답과 `{ response: { status, data } }` 오류 모양을 테스트로 고정합니다.
 
 ## 누락 원본 파일 관련 회귀 포인트
 

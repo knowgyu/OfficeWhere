@@ -52,8 +52,12 @@ logs/
 # Python runtime download cache (prepare_python_runtime.py)
 .cache/
 
-# macOS Python runtime is prepared locally during packaging; keep generated
-# runtime files out of git while preserving the documented staging layout.
+# Python runtimes are prepared locally during packaging; keep generated runtime
+# files out of git while preserving the documented staging layout.
+python-runtime/win-x64/**
+!python-runtime/win-x64/
+!python-runtime/win-x64/README.md
+!python-runtime/win-x64/.gitkeep
 python-runtime/mac-arm64/**
 !python-runtime/mac-arm64/
 !python-runtime/mac-arm64/README.md

@@ -940,11 +940,6 @@ def _replace_excel_index(
             ],
         )
 
-
-def _artifact_payload_bytes(payload: Dict[str, Any]) -> Tuple[bytes, bytes]:
-    return artifact_storage.artifact_payload_bytes(payload)
-
-
 def _replace_comparison_artifacts(
     cursor: sqlite3.Cursor,
     file_id: int,
@@ -1465,37 +1460,6 @@ def _create_schema(cursor: sqlite3.Cursor, *, create_search_triggers: bool = Tru
 def _file_chunk_count_with_cursor(cursor: sqlite3.Cursor) -> int:
     cursor.execute("SELECT COUNT(*) FROM file_chunks")
     return int(cursor.fetchone()[0])
-
-
-def _excel_file_count_with_cursor(cursor: sqlite3.Cursor) -> int:
-    cursor.execute("SELECT COUNT(*) FROM registered_files WHERE file_type = 'Excel'")
-    return int(cursor.fetchone()[0])
-
-
-def _ensure_search_index_version(cursor: sqlite3.Cursor) -> None:
-    status = _search_index_status_with_cursor(cursor)
-    if status["version"] == SEARCH_INDEX_VERSION and status["state"] == "ready":
-        return
-
-    if _file_chunk_count_with_cursor(cursor) <= 0:
-        _set_search_index_state_with_cursor(cursor, "ready", set_current_version=True)
-        return
-
-    error = (
-        "incomplete_search_index_refresh_recovered_on_startup"
-        if status["state"] == "refreshing"
-        else f"search_index_version_changed:{status['version'] or 'missing'}->{SEARCH_INDEX_VERSION}"
-    )
-    _set_search_index_state_with_cursor(cursor, "repair_needed", error=error)
-    log_index_perf(
-        "search_index_repair_deferred",
-        previous_version=status["version"],
-        next_version=SEARCH_INDEX_VERSION,
-        previous_state=status["state"],
-        file_chunk_count=_file_chunk_count_with_cursor(cursor),
-    )
-
-
 def repair_search_indexes(reason: str = "background") -> Dict[str, Any]:
     """Rebuild search-text and FTS indexes outside the backend startup path."""
 
@@ -1567,32 +1531,9 @@ def repair_search_indexes(reason: str = "background") -> Dict[str, Any]:
         return metrics
 
 
-def _ensure_excel_index_version(cursor: sqlite3.Cursor) -> None:
-    current = _get_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, "")
-    status = _excel_index_status_with_cursor(cursor)
-    if current == EXCEL_INDEX_VERSION and status["state"] == "ready":
-        return
-
-    excel_file_count = _excel_file_count_with_cursor(cursor)
-    if excel_file_count <= 0:
-        _set_setting_with_cursor(cursor, EXCEL_INDEX_VERSION_KEY, EXCEL_INDEX_VERSION)
-        _set_excel_index_state_with_cursor(cursor, "ready", set_current_version=True)
-        return
-
-    error = (
-        "incomplete_excel_index_refresh_recovered_on_startup"
-        if status["state"] == "refreshing"
-        else f"excel_index_version_changed:{current or 'missing'}->{EXCEL_INDEX_VERSION}"
-    )
-    _set_excel_index_state_with_cursor(cursor, "repair_needed", error=error)
-    log_index_perf(
-        "db_excel_index_repair_deferred",
-        previous_version=current,
-        next_version=EXCEL_INDEX_VERSION,
-        previous_state=status["state"],
-        excel_file_count=excel_file_count,
-    )
-
+def _excel_file_count_with_cursor(cursor: sqlite3.Cursor) -> int:
+    cursor.execute("SELECT COUNT(*) FROM registered_files WHERE file_type = 'Excel'")
+    return int(cursor.fetchone()[0])
 
 def repair_excel_index_version(reason: str = "background") -> Dict[str, Any]:
     """Reset stale Excel-derived rows outside the backend startup path."""

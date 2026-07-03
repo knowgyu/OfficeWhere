@@ -281,11 +281,6 @@ def _cancelled_result(path: str) -> LibraryRescanResult:
         error="사용자가 문서 새로고침을 정지했습니다.",
     )
 
-
-def _is_excel_path(path: str) -> bool:
-    return Path(path).suffix.lower() == ".xlsx"
-
-
 def classify_index_error(exc: Exception, path: str = "") -> Dict[str, str]:
     message = str(exc)
     lower = message.lower()
@@ -1742,11 +1737,6 @@ def _build_file_group_details_from_rows(rows: Sequence[Dict[str, Any]]) -> List[
     )
     return groups
 
-
-def _build_all_file_group_details() -> List[LibraryGroupDetail]:
-    return _build_file_group_details_from_rows(get_all_files(include_missing=False))
-
-
 def clear_group_cache() -> None:
     clear_library_group_index(state="repair_needed", error="manual cache clear")
 
@@ -2090,29 +2080,6 @@ def _schedule_group_refresh_after_rescan(response: LibraryRescanResponse, *, rea
             logger.debug("library group index refresh not scheduled before app schema is ready", exc_info=True)
             return
         raise
-
-
-def _group_summary(group: LibraryGroupDetail) -> LibraryGroupSummary:
-    return LibraryGroupSummary(
-        id=group.id,
-        group_kind=group.group_kind,
-        file_type=group.file_type,
-        base_name=group.base_name,
-        canonical_name=group.canonical_name,
-        title=group.title,
-        file_count=group.file_count,
-        confidence=group.confidence,
-        reason=group.reason,
-        latest_file=group.latest_file,
-        previous_file=group.previous_file,
-        manual_latest_file_id=group.manual_latest_file_id,
-        tokens_summary=group.tokens_summary,
-        content_status=group.content_status,
-        fingerprint_coverage=group.fingerprint_coverage,
-        fingerprint_unique_count=group.fingerprint_unique_count,
-        content_evidence=group.content_evidence,
-    )
-
 
 def _file_info_from_group_summary_row(value: Any, *, allow_state_write: bool = True) -> Optional[FileInfo]:
     if not isinstance(value, dict):

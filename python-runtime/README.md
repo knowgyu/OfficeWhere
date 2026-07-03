@@ -10,13 +10,29 @@ Runtime layout by platform:
 - macOS arm64 source: `python-runtime/mac-arm64/`
   - Packaged path: `Contents/Resources/python-runtime/bin/python3`
 
-The macOS folder is a staging location for a relocatable Python 3.13 runtime.
-`npm run package:mac` runs `scripts/prepare_python_runtime.py mac-arm64` before
-Electron Builder. That preparation step downloads a Python 3.13 macOS arm64
-standalone build, unpacks it to `python-runtime/mac-arm64`, and installs the
-root `requirements.txt` packages into that app-local runtime.
+The platform folders are staging locations for generated runtimes. Packaging
+commands run `scripts/prepare_python_runtime.py` first, then Electron Builder
+copies the prepared runtime into the app bundle.
 
-The committed README/placeholders document the required layout without
-vendoring a large macOS binary into the repository. Release builders should run
-the packaging command on macOS arm64 so pip can install native packages into the
-bundled runtime before the `.app`/`.dmg` is produced.
+- `npm run package:win` downloads the official Python Windows embeddable zip
+  and installs the root `requirements.txt` packages into `win-x64/site-packages`.
+- `npm run package:mac` downloads a macOS arm64 standalone Python build and
+  installs the same requirements into that runtime.
+
+Only README/placeholders are committed. Generated Python binaries and packages
+stay out of git, but packaged releases still include the runtime so users can
+run OfficeWhere without installing Python.
+
+Operational rules:
+
+- Treat `requirements.txt` as the packaged backend dependency contract. If a
+  runtime dependency changes, update that file and let the platform packaging
+  script regenerate the runtime.
+- Build Windows runtimes on Windows. `win-x64 --dry-run` is useful on Linux for
+  checking the download/packaging plan, but wheel installation into the
+  embeddable Python runtime is a Windows packaging step.
+- Do not commit generated `python.exe`, `bin/python3`, `site-packages`, `.pyd`,
+  `.dll`, `.so`, or cache files. Commit only these README/placeholders.
+- Do not replace this with PyInstaller unless there is a clear regression:
+  Electron intentionally starts a private Python interpreter plus
+  `resources/backend-source/backend_server.py`.

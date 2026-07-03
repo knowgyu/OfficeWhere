@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Prepare bundled Python runtimes for Electron packaging.
 
-The macOS app uses a private CPython runtime instead of PyInstaller so the
-downloaded `.app` can start the FastAPI backend without requiring users to
-install Python. The script intentionally uses only the standard library.
+Packaged apps use a private CPython runtime so users do not need to install
+Python. The script intentionally uses only the standard library.
 """
 
 from __future__ import annotations
@@ -32,11 +31,14 @@ PYTHON_STANDALONE_RELEASES_PAGE = "https://github.com/astral-sh/python-build-sta
 PYTHON_STANDALONE_EXPANDED_ASSETS = (
     "https://github.com/astral-sh/python-build-standalone/releases/expanded_assets"
 )
+WINDOWS_EMBED_VERSION = "3.13.13"
+WINDOWS_EMBED_ASSET = f"python-{WINDOWS_EMBED_VERSION}-embed-amd64.zip"
+WINDOWS_EMBED_URL = f"https://www.python.org/ftp/python/{WINDOWS_EMBED_VERSION}/{WINDOWS_EMBED_ASSET}"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prepare OfficeWhere bundled Python runtime")
-    parser.add_argument("target", choices=["mac-arm64"], help="Runtime target to prepare")
+    parser.add_argument("target", choices=["mac-arm64", "win-x64"], help="Runtime target to prepare")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -210,6 +212,13 @@ def find_extracted_runtime(root: Path) -> Path:
     return matches[0].parents[1]
 
 
+def find_extracted_windows_runtime(root: Path) -> Path:
+    matches = [path for path in root.rglob("python.exe") if path.is_file()]
+    if not matches:
+        raise RuntimeError("archive did not contain python.exe")
+    return matches[0].parent
+
+
 def copy_runtime(source: Path, destination: Path, force: bool) -> None:
     if destination.exists():
         if not force and (destination / "bin" / "python3").exists():
@@ -219,7 +228,8 @@ def copy_runtime(source: Path, destination: Path, force: bool) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, destination)
     python_bin = destination / "bin" / "python3"
-    python_bin.chmod(python_bin.stat().st_mode | 0o755)
+    if python_bin.exists():
+        python_bin.chmod(python_bin.stat().st_mode | 0o755)
 
 
 def install_requirements(runtime_dir: Path, skip: bool) -> None:
@@ -236,6 +246,54 @@ def install_requirements(runtime_dir: Path, skip: bool) -> None:
     subprocess.run([str(python_bin), "-m", "ensurepip", "--upgrade"], check=True)
     subprocess.run([str(python_bin), "-m", "pip", "install", "--upgrade", "pip"], check=True)
     subprocess.run([str(python_bin), "-m", "pip", "install", "-r", str(requirements)], check=True)
+
+
+def install_windows_requirements(runtime_dir: Path, skip: bool) -> None:
+    if skip:
+        return
+    if platform.system() != "Windows":
+        raise RuntimeError(
+            "Installing Windows runtime packages requires running this script on Windows. "
+            "Use --skip-pip-install only for archive/layout inspection."
+        )
+
+    site_packages = runtime_dir / "site-packages"
+    if site_packages.exists():
+        shutil.rmtree(site_packages)
+    site_packages.mkdir(parents=True)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--target",
+            str(site_packages),
+            "-r",
+            str(REPO_ROOT / "requirements.txt"),
+        ],
+        check=True,
+    )
+
+    for path in site_packages.rglob("*"):
+        if path.name == "__pycache__" and path.is_dir():
+            shutil.rmtree(path)
+        elif path.suffix == ".pyc" and path.is_file():
+            path.unlink()
+
+
+def write_windows_pth(runtime_dir: Path) -> None:
+    pth = runtime_dir / "python313._pth"
+    pth.write_text(
+        "python313.zip\n"
+        ".\n"
+        "site-packages\n"
+        "..\\backend-source\n"
+        "\n"
+        "# Run site.main() so vendored packages initialize normally.\n"
+        "import site\n",
+        encoding="utf-8",
+    )
 
 
 def prepare_mac_arm64(args: argparse.Namespace) -> None:
@@ -270,11 +328,41 @@ def prepare_mac_arm64(args: argparse.Namespace) -> None:
     print(f"Prepared runtime: {python_bin}")
 
 
+def prepare_win_x64(args: argparse.Namespace) -> None:
+    runtime_dir = REPO_ROOT / "python-runtime" / "win-x64"
+    python_exe = runtime_dir / "python.exe"
+    if python_exe.exists() and not args.force:
+        print(f"Runtime already prepared: {python_exe}")
+        return
+
+    print(f"Selected runtime asset: {WINDOWS_EMBED_ASSET}")
+    print(WINDOWS_EMBED_URL)
+    if args.dry_run:
+        return
+
+    cache_dir = REPO_ROOT / ".cache" / "python-runtime"
+    archive = cache_dir / WINDOWS_EMBED_ASSET
+    if not archive.exists():
+        print(f"Downloading {WINDOWS_EMBED_ASSET}...")
+        download(WINDOWS_EMBED_URL, archive)
+
+    with tempfile.TemporaryDirectory(prefix="officewhere-python-runtime-") as temp_dir:
+        extract_root = Path(temp_dir)
+        shutil.unpack_archive(str(archive), str(extract_root), "zip")
+        copy_runtime(find_extracted_windows_runtime(extract_root), runtime_dir, args.force)
+
+    write_windows_pth(runtime_dir)
+    install_windows_requirements(runtime_dir, args.skip_pip_install)
+    print(f"Prepared runtime: {python_exe}")
+
+
 def main() -> int:
     args = parse_args()
     try:
         if args.target == "mac-arm64":
             prepare_mac_arm64(args)
+        elif args.target == "win-x64":
+            prepare_win_x64(args)
         return 0
     except Exception as exc:  # noqa: BLE001 - CLI needs concise error output
         print(f"error: {exc}", file=sys.stderr)

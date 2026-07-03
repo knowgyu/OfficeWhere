@@ -1,4 +1,4 @@
-import axios from 'axios'
+import { del, get, post, put } from './http'
 import { apiPath } from './transport'
 import type { FileInfo } from './shared'
 
@@ -144,28 +144,28 @@ export async function getLibraryGroups(params: LibraryGroupsParams = {}) {
 
   const url = await apiPath('/api/library/groups')
   const suffix = searchParams.toString()
-  return axios.get<LibraryGroupsResponse>(suffix ? `${url}?${suffix}` : url)
+  return get<LibraryGroupsResponse>(suffix ? `${url}?${suffix}` : url)
 }
 
 export const libraryApi = {
-  getSettings: async () => axios.get<LibrarySettings>(await apiPath('/api/library/settings')),
+  getSettings: async () => get<LibrarySettings>(await apiPath('/api/library/settings')),
   updateSettings: (data: LibrarySettings) =>
-    apiPath('/api/library/settings').then((url) => axios.put<LibrarySettings>(url, data)),
+    apiPath('/api/library/settings').then((url) => put<LibrarySettings>(url, data)),
   rescan: async (mode: LibraryRescanMode = 'normal') =>
-    axios.post<LibraryRescanResponse>(await apiPath('/api/library/rescan'), { mode }),
+    post<LibraryRescanResponse>(await apiPath('/api/library/rescan'), { mode }),
   startRescan: async (mode: LibraryRescanMode = 'normal') =>
-    axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start'), { mode }),
-  rescanStatus: async () => axios.get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
-  cancelRescan: async () => axios.post<LibraryRescanStatus>(await apiPath('/api/library/rescan/cancel')),
+    post<LibraryRescanStatus>(await apiPath('/api/library/rescan/start'), { mode }),
+  rescanStatus: async () => get<LibraryRescanStatus>(await apiPath('/api/library/rescan/status')),
+  cancelRescan: async () => post<LibraryRescanStatus>(await apiPath('/api/library/rescan/cancel')),
   groups: getLibraryGroups,
   groupDetail: async (id: string) =>
-    axios.get<LibraryGroupDetail>(await apiPath(`/api/library/groups/${encodeURIComponent(id)}`)),
+    get<LibraryGroupDetail>(await apiPath(`/api/library/groups/${encodeURIComponent(id)}`)),
   setGroupLatestFile: (id: string, fileId: number) =>
     apiPath(`/api/library/groups/${encodeURIComponent(id)}/latest-file`).then((url) =>
-      axios.put<LibraryGroupDetail>(url, { file_id: fileId })
+      put<LibraryGroupDetail>(url, { file_id: fileId })
     ),
   clearGroupLatestFile: (id: string) =>
     apiPath(`/api/library/groups/${encodeURIComponent(id)}/latest-file`).then((url) =>
-      axios.delete<LibraryGroupDetail>(url)
+      del<LibraryGroupDetail>(url)
     ),
 }
