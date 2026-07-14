@@ -1206,6 +1206,48 @@ def test_rescan_recovers_missing_source_without_reindex_when_mtime_matches(tmp_p
     assert row["missing_since"] is None
 
 
+def test_rescan_reuses_registration_when_document_moves(tmp_path, monkeypatch):
+    from backend.core import library
+    from backend.database import get_file_by_id, save_file_chunks
+
+    monkeypatch.setattr("backend.database.DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr("backend.database.DB_DIR", tmp_path)
+    init_db()
+
+    old_path = tmp_path / "old" / "report.docx"
+    new_path = tmp_path / "new" / "report-renamed.docx"
+    old_path.parent.mkdir()
+    new_path.parent.mkdir()
+    old_path.write_text("same indexed document", encoding="utf-8")
+    new_path.write_text("same indexed document", encoding="utf-8")
+    file_id = register_file(str(old_path), old_path.name, "Word", 0)
+    chunks = [{"location": "문단", "content": "이동된 문서 내용"}]
+    save_file_chunks(file_id, chunks)
+    old_path.unlink()
+    save_library_settings(LibrarySettings(watched_folders=[{"path": str(tmp_path), "recursive": True}]))
+
+    monkeypatch.setattr(
+        library,
+        "_collect_supported_paths_with_stats",
+        lambda _path, _recursive, _excluded_folder_names=None: library._ScanCollection(paths=[str(new_path)]),
+    )
+    monkeypatch.setattr(
+        library,
+        "inspect_and_chunk",
+        lambda _path: ({"name": new_path.name, "file_type": "Word", "columns": [], "comparison_artifacts": []}, chunks),
+    )
+
+    response = library.rescan_library(mode="fast")
+
+    assert response.failed == 0
+    assert any(result.action == "relocated" and result.file_id == file_id for result in response.results)
+    row = get_file_by_id(file_id)
+    assert row is not None
+    assert row["path"] == str(new_path)
+    assert row["availability_status"] == "available"
+    assert len(get_all_files()) == 1
+
+
 
 def test_rescan_uses_trusted_discovery_mtime_to_skip_without_rescan_stat(tmp_path, monkeypatch):
     from backend.core import library

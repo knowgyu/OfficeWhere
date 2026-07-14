@@ -126,7 +126,7 @@ export default function RegisteredFilesSection({
             </Button>
             <IconButton
               icon="refresh"
-              label="새로고침"
+              label="목록 새로고침"
               variant="tonal"
               onClick={onRefresh}
               disabled={loading || deletingFiles}

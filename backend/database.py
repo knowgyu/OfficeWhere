@@ -2489,6 +2489,45 @@ def mark_registered_file_available(file_id: int, *, seen_at: Optional[str] = Non
     return dict(row)
 
 
+def relocate_registered_file(file_id: int, new_path: str) -> bool:
+    """Move an app-owned registration to a newly discovered source path.
+
+    This only changes the database record. The source document is never moved
+    or modified. The caller must establish that the new path is the same
+    document (the rescan uses an exact content fingerprint for that check).
+    """
+    normalized_path = os.path.normpath(str(new_path or "").strip())
+    if not normalized_path:
+        return False
+
+    with _write_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM registered_files WHERE id=?", (int(file_id),))
+        if cursor.fetchone() is None:
+            return False
+        cursor.execute("SELECT id FROM registered_files WHERE path=? AND id<>?", (normalized_path, int(file_id)))
+        if cursor.fetchone() is not None:
+            return False
+        cursor.execute(
+            """
+            UPDATE registered_files
+            SET path=?,
+                availability_status='available',
+                last_seen_at=?,
+                missing_since=NULL,
+                missing_last_checked_at=NULL,
+                missing_reason=NULL
+            WHERE id=?
+            """,
+            (normalized_path, datetime.now().isoformat(), int(file_id)),
+        )
+        _set_library_group_index_state_with_cursor(cursor, "repair_needed", error="relocate_registered_file")
+        conn.commit()
+    _invalidate_search_cache("relocate_registered_file")
+    return True
+
+
 def mark_registered_files_missing(
     paths: Sequence[str],
     *,

@@ -235,6 +235,7 @@ if (!hasSingleInstanceLock) {
 
 async function startApp() {
   app.setAppLogsPath(path.join(app.getPath('userData'), 'logs'))
+  installPermissionGuards()
   registerIpcHandlers()
   installQuickSearchFocusDismissal()
   createSplashWindow()
@@ -254,6 +255,16 @@ async function startApp() {
   scheduleQuickSearchPrewarm(300)
   await backendReadyPromise
   scheduleQuickSearchPrewarm(1_500)
+}
+
+function installPermissionGuards() {
+  // OfficeWhere has no location feature. Deny both new permission requests and
+  // permission checks so a renderer or embedded Chromium code cannot obtain
+  // geolocation access accidentally in a future change.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission !== 'geolocation')
+  })
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission !== 'geolocation')
 }
 
 function registerIpcHandlers() {

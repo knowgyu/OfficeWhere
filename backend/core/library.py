@@ -41,6 +41,7 @@ from ..database import (
     list_library_group_index_files_for_key,
     mark_registered_file_available,
     mark_registered_files_missing,
+    relocate_registered_file,
     mark_library_group_keys_dirty,
     prepare_indexed_file,
     purge_expired_missing_files,
@@ -627,6 +628,24 @@ def _rescan_library_impl(
 
     existing_by_path = {os.path.normpath(row["path"]): row for row in get_all_files()}
     found_normalized_paths = {os.path.normpath(path) for path in found_paths}
+    # A moved document appears as a new path during discovery. Keep the old
+    # registration (and its file id, search history, and comparison links) when
+    # an exact fingerprint identifies one unambiguous old registration.
+    relocation_candidates: Dict[Tuple[str, int, int], List[Dict[str, Any]]] = {}
+    existing_fingerprints = get_file_fingerprints([int(row["id"]) for row in existing_by_path.values()])
+    for row in existing_by_path.values():
+        normalized_path = os.path.normpath(row["path"])
+        if normalized_path in found_normalized_paths:
+            continue
+        fingerprint = existing_fingerprints.get(int(row["id"]), {})
+        fingerprint_key = (
+            str(fingerprint.get("normalized_hash") or ""),
+            int(fingerprint.get("content_chars") or 0),
+            int(fingerprint.get("chunk_count") or 0),
+        )
+        if fingerprint_key[0] and fingerprint_key[1] > 0 and fingerprint_key[2] > 0:
+            relocation_candidates.setdefault(fingerprint_key, []).append(row)
+    relocated_ids: set[int] = set()
     now_iso = _now_iso()
     missing_paths = [
         path
@@ -758,8 +777,27 @@ def _rescan_library_impl(
                     comparison_artifacts=info.get("comparison_artifacts"),
                 ),
             )
+            fingerprint = payload.fingerprint
+            relocation_key = (
+                str(fingerprint.get("normalized_hash") or ""),
+                int(fingerprint.get("content_chars") or 0),
+                int(fingerprint.get("chunk_count") or 0),
+            )
+            relocation_matches = [
+                candidate
+                for candidate in relocation_candidates.get(relocation_key, [])
+                if int(candidate["id"]) not in relocated_ids
+                and candidate.get("file_type") == info["file_type"]
+            ]
+            relocation_candidate = relocation_matches[0] if len(relocation_matches) == 1 else None
+            action = "updated" if existing else "registered"
+            if relocation_candidate and relocate_registered_file(int(relocation_candidate["id"]), path):
+                relocated_ids.add(int(relocation_candidate["id"]))
+                existing = relocation_candidate
+                action = "relocated"
+                metrics["relocated_from"] = relocation_candidate["path"]
             metrics.update(
-                action="recovered" if was_missing else ("updated" if existing else "registered"),
+                action="recovered" if was_missing else action,
                 file_type=info["file_type"],
                 chunk_count=len(chunks),
                 column_count=len(info["columns"]),
@@ -767,7 +805,7 @@ def _rescan_library_impl(
             return _PreparedLibraryWrite(
                 path=path,
                 name=info["name"],
-                action="recovered" if was_missing else ("updated" if existing else "registered"),
+                action="recovered" if was_missing else action,
                 payload=payload,
                 metrics=metrics,
                 file_started=file_started,
