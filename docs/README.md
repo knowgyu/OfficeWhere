@@ -18,11 +18,11 @@
 | 전체 구조와 주요 데이터 흐름 | [`architecture.md`](architecture.md) |
 | 테스트를 어디에 추가할지 | [`test-guidelines.md`](test-guidelines.md) |
 | 릴리스 전 자동/수동 확인 | [`release-test-checklist.md`](release-test-checklist.md) |
-| 최근 릴리스 노트 | [`releases/v0.14.3.md`](releases/v0.14.3.md) |
+| 최근 릴리스 노트 | [`releases/v0.16.1.md`](releases/v0.16.1.md) |
 | Electron 패키징/업데이트/bridge | [`electron-migration.md`](electron-migration.md) |
 
 ## 문서 관리 원칙
 
 - 사람이 직접 읽을 문서는 한국어로 짧게 유지합니다.
-- AI 작업 과정, 장기 의사결정, 과거 릴리스 요약은 `.omx/wiki`에 압축해 보관합니다.
+- 추적할 장기 의사결정은 `omx_wiki/`에 보관합니다. `.omx/`는 로컬 실행 상태와 인계 자료이므로 제품 문서의 source of truth로 쓰지 않습니다.
 - 새 기능을 추가해 API/DB/UI 계약이 바뀌면 `architecture.md`, `test-guidelines.md`, `release-test-checklist.md` 중 실제로 영향을 받는 문서만 갱신합니다.

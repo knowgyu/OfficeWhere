@@ -1,6 +1,6 @@
 # OfficeWhere Provider Contract
 
-OfficeWhere can be used by local automation such as a future `where-desk` Codex skill as a **document exploration provider**. The provider boundary is HTTP/API based. External tools must not read or write OfficeWhere's SQLite database directly.
+OfficeWhere is a **document exploration provider** for contextWhere and other local automation. The provider boundary is HTTP/API based. External tools must not read or write OfficeWhere's SQLite database directly.
 
 ## Contract summary
 
@@ -11,9 +11,9 @@ OfficeWhere can be used by local automation such as a future `where-desk` Codex 
 | Provider base path | `/api/provider/v1` |
 | Source document policy | Read-only |
 | SQLite access policy | Forbidden for external clients |
-| Primary client | Local desktop app, future `where-desk`/Codex CLI orchestration |
+| Primary client | Local desktop app, contextWhere, local agent integrations |
 
-The provider API is intentionally separate from business-agent orchestration. OfficeWhere answers document questions; external orchestration decides which questions to ask and how to combine OfficeWhere with MailWhere or other tools.
+The provider API is intentionally separate from business-agent orchestration. OfficeWhere answers document questions; contextWhere or another local orchestrator decides which questions to ask and how to combine OfficeWhere with MailWhere or other tools.
 
 ## Discovery
 
@@ -33,7 +33,7 @@ The document is local metadata only. It carries no API key or source document co
 {
   "provider": "OfficeWhere",
   "contract_version": "v1",
-  "app_version": "0.12.0",
+  "app_version": "<app-version>",
   "api_base_path": "/api/provider/v1",
   "base_url": "http://127.0.0.1:<dynamic-port>",
   "health_url": "http://127.0.0.1:<dynamic-port>/api/provider/v1/health",
@@ -102,14 +102,14 @@ These existing endpoints are useful for the desktop UI, but a business agent mus
 | `POST /api/files`, `DELETE /api/files/*` | Mutates registered file state |
 | `POST /api/files/{id}/open` | Launches external OS/application behavior |
 
-## Client rules for where-desk/Codex CLI
+## Client rules for contextWhere and local agents
 
 1. Use `/api/provider/v1/manifest` first when a base URL is available.
 2. Never read OfficeWhere SQLite directly.
 3. Treat returned source paths as local-only sensitive data; show/open them only when the user asks.
 4. Prefer read-only provider endpoints for autonomous exploration.
 5. Require explicit user intent before triggering rescan, reindex, settings changes, file registration/deletion, or OS-level open/show operations.
-6. Preserve OfficeWhere's role as provider. Keep multi-step business workflow logic in `where-desk` or another external orchestrator.
+6. Preserve OfficeWhere's role as provider. Keep cross-provider evidence, wiki, and context-pack logic in contextWhere or another external orchestrator.
 
 ## Performance note
 
